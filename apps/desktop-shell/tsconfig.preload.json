@@ -1,0 +1,18 @@
+{
+  // The preload runs in Electron's sandboxed context, which loads it as
+  // CommonJS. The rest of the shell is ESM (type: module), so we compile the
+  // preload separately to a .cjs file with CommonJS output.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "types": ["node"],
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src/preload.ts"]
+}

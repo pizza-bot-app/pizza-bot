@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>🍕 Pizza Bot</title>
+    <!-- Apply the stored theme BEFORE first paint to avoid a flash of the wrong
+         theme. Mirrors use-theme.ts (key "pizza-theme"); <html> defaults to
+         `.dark`, so we only rewrite the class when the user picked light/system. -->
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem("pizza-theme") || "dark";
+          var resolved =
+            pref === "system"
+              ? window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark"
+              : pref;
+          var el = document.documentElement;
+          el.classList.toggle("dark", resolved === "dark");
+          el.classList.toggle("light", resolved === "light");
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="/pizza-config.js"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

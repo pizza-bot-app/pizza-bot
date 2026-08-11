@@ -1,59 +1,117 @@
-# Contributing Guidelines
+# Contributing
 
-Thank you for your interest in contributing to our project. Whether it's a bug report, new feature, correction, or additional
-documentation, we greatly value feedback and contributions from our community.
+Thanks for your interest in improving Pizza Bot. This is a TypeScript monorepo
+(npm workspaces + Turborepo) for a stateful DeepAgents/LangGraph inbox. Start
+with the [README](README.md) for layout and how to run, and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the seams and design decisions.
 
-Please read through this document before submitting any issues or pull requests to ensure we have all the necessary
-information to effectively respond to your bug report or contribution.
+## Getting started
 
+```bash
+node -v            # need >= 24
+npm install        # installs workspaces + builds the better-sqlite3 native addon
+npm run build      # required before running an app from a fresh clone
+npm run typecheck  # tsc across the whole project-reference graph
+npm test           # turbo run test --concurrency=2
+npm run lint       # eslint flat config
+cp .env.example .env   # then fill in credentials for a model provider (see below)
+```
 
-## Reporting Bugs/Feature Requests
+The `@pizza-bot/*` workspace packages resolve to built `dist/` output. Run
+`npm run build` once after a fresh clone or clean before starting an app directly
+from source. Every workspace build replaces its own `dist/` directory before
+emitting, so files for deleted or renamed sources cannot survive a pull or branch
+switch.
 
-We welcome you to use the GitHub issue tracker to report bugs or suggest features.
+`npm run clean` cascades through the workspaces and removes generated outputs
+without removing installed dependencies or the root Turbo cache. Use
+`npm run clean:all` only when dependencies or cached build artifacts must also be
+discarded; run `npm install` afterward.
 
-When filing an issue, please check existing open, or recently closed, issues to make sure somebody else hasn't already
-reported the issue. Please try to include as much information as you can. Details like these are incredibly useful:
+A running api-server needs access to at least one model provider; the CLI and a
+desktop app connected to a remote backend do not. Amazon Bedrock, Anthropic,
+Google Gemini, OpenAI, OpenRouter, and Ollama are supported as peer adapters.
+See [`.env.example`](.env.example). Without credentials for a selected provider,
+the code builds and tests pass, but live runs fail at the first model call.
 
-* A reproducible test case or series of steps
-* The version of our code being used
-* Any modifications you've made relevant to the bug
-* Anything unusual about your environment or deployment
+## CI checks
 
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs for pushes to
+`main` and for pull requests. Reproduce it locally before opening a PR:
 
-## Contributing via Pull Requests
-Contributions via pull requests are much appreciated. Before sending us a pull request, please ensure that:
+1. **`npm run build`** — validates production bundles and package compilation.
+2. **`npm run typecheck`** — `tsc` over the project references (the deep gate).
+3. **`npm run lint`** — `typescript-eslint` (fast, non-type-checked) plus a
+   layering guard (below).
+4. **`npm test`** — the full suite.
+5. **`npm run backend:bundle && npm run backend:smoke`** — builds and exercises
+   the standalone artifact.
+6. **`docker build --file deploy/linux/Dockerfile --tag pizza-bot-backend:ci .`**
+   — validates the Linux container.
+7. **`npm audit --omit=dev --audit-level=high`** — blocks high-severity
+   production dependency advisories.
 
-1. You are working against the latest source on the *main* branch.
-2. You check existing open, and recently merged, pull requests to make sure someone else hasn't addressed the problem already.
-3. You open an issue to discuss any significant work - we would hate for your time to be wasted.
+CI also repeats install, build, typecheck, and tests on Windows.
 
-To send us a pull request, please:
+For a tight loop while iterating, run one workspace:
 
-1. Fork the repository.
-2. Modify the source; please focus on the specific change you are contributing. If you also reformat all the code, it will be hard for us to focus on your change.
-3. Ensure local tests pass.
-4. Commit to your fork using clear commit messages.
-5. Send us a pull request, answering any default questions in the pull request interface.
-6. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
+```bash
+npx vitest run --dir packages/<pkg>        # or --dir apps/web
+npx tsc --noEmit -p packages/<pkg>/tsconfig.json
+```
 
-GitHub provides additional document on [forking a repository](https://help.github.com/articles/fork-a-repo/) and
-[creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
+> **Why `npm test` caps concurrency at 2:** uncapped, the parallel vitest+esbuild
+> workers can exhaust file descriptors/memory and fail en masse — that's a
+> resource limit, not real failures. The cap is baked into the root script.
 
+## Layering discipline (enforced)
 
-## Finding contributions to work on
-Looking at the existing issues is a great way to find something to contribute on. As our projects, by default, use the default GitHub issue labels (enhancement/bug/duplicate/help wanted/invalid/question/wontfix), looking at any 'help wanted' issues is a great place to start.
+The value of this codebase is one clean seam: the runtime emits native
+`@langchain/protocol` frames, and every frontend consumes them through the
+`@langchain/langgraph-sdk` `StreamController`/`ThreadStream` over HTTP/SSE — no
+normalized union and no React coupling in the seam. Please keep it
+intact:
 
+- **`packages/core`** is nearly pure but may reference
+  `@langchain/core` model/agent **types** (`BaseChatModel`) — the app is coupled to
+  LangGraph by design, so the model seam is typed rather than laundered through
+  `unknown`; core also owns the pure protocol/wire types. ESLint enforces the split
+  via `no-restricted-imports`; a violating import fails `npm run lint`.
+- **`packages/runtime-langgraph` is the only production package that may import
+  `deepagents`.** The `tests/langgraph-compat` workspace is the test-only
+  exception because it pins DeepAgents' public exports. Storage may use
+  LangGraph checkpoint/store primitives, and the api-server may import protocol
+  event types; runtime graph construction stays in one package.
+- The frontend (`apps/web`) never imports a runtime or a model
+  binding. It MAY import the transport SDK (`@langchain/langgraph-sdk`) — but not
+  the runtime graph engine. Its pure projection helpers live in
+  `apps/web/src/projection`.
 
-## Code of Conduct
-This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct).
-For more information see the [Code of Conduct FAQ](https://aws.github.io/code-of-conduct-faq) or contact
-opensource-codeofconduct@amazon.com with any additional questions or comments.
+See AGENTS.md → "Layering discipline" and ARCHITECTURE §2/§11 for the rationale.
 
+## Commits & PRs
 
-## Security issue notifications
-If you discover a potential security issue in this project we ask that you notify AWS/Amazon Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). Please do **not** create a public github issue.
+- Work on a branch off `main`; keep each commit a coherent, self-contained step
+  with a clear message.
+- Keep the tree green — run the CI checks (or at least the affected workspaces'
+  `vitest` + `tsc`) before pushing.
+- For changes at a seam (the runtime↔event mapping, the protocol types, the UI
+  folding), keep comments focused on current, non-obvious constraints. Put
+  system-level design decisions in ARCHITECTURE.md instead of source-file essays.
+- Verify UI/runtime-seam changes in the browser, not just via tests: the tests
+  inject fakes and have missed real cross-environment bugs. See AGENTS.md →
+  "Verify in the browser".
 
+## Working in a git worktree
 
-## Licensing
+If you develop in a `git worktree`, run `npm install` **inside the worktree**
+first. A fresh worktree starts with an empty `node_modules`, and without a local
+install the `@pizza-bot/*` workspace symlinks resolve against the main checkout — so
+your cross-package edits appear to have no effect and tests can pass against stale
+code. After installing, `npx tsc -b <pkg>` builds a package's project-reference
+dependencies before typechecking it.
 
-See the [LICENSE](LICENSE) file for our project's licensing. We will ask you to confirm the licensing of your contribution.
+## License
+
+By contributing, you agree that your contributions are licensed under the
+project's [Apache-2.0](LICENSE) license.

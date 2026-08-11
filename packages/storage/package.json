@@ -1,0 +1,26 @@
+{
+  "name": "@pizza-bot/storage",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node-bound on-disk layout, checkpoint/store adapters, and application data stores.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@pizza-bot/core": "*",
+    "@langchain/langgraph": "^1.4.9",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.3",
+    "better-sqlite3": "^13.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
+  }
+}

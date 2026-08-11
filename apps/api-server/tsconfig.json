@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": ["node"]
+  },
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/logging" },
+    { "path": "../../packages/runtime-langgraph" },
+    { "path": "../../packages/inference-providers" },
+    { "path": "../../packages/storage" },
+    { "path": "../../packages/plugin-sdk" }
+  ],
+  "include": ["src"]
+}

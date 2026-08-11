@@ -1,0 +1,27 @@
+node_modules/
+dist/
+.turbo/
+coverage/
+*.log
+.DS_Store
+.env
+.env.local
+out/
+.vite/
+# Local platform data dir used in dev
+.pizza-bot-dev/
+
+# Private, separately-distributed plugins — never part of this repository.
+# The host loads them like any other plugin (SKILL.md + .mcp.json contributions);
+# keeping them out of version control keeps vendor-specific code out of the tree.
+plugins-private/
+
+# TS incremental build info
+*.tsbuildinfo
+.playwright-mcp/
+.worktrees/
+# Claude Code worktrees (default location for `claude --worktree`)
+.claude/worktrees/
+dist-server/
+dist-plugins/
+apps/web/dist/

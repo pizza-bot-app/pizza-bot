@@ -1,0 +1,43 @@
+{
+  "name": "@pizza-bot/api-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hono server for the Pizza Bot thread protocol and checkpoint-shaped state API.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent-host": "./src/agent-host.ts",
+    "./trigger-service": "./src/trigger-service.ts",
+    "./protocol-run-manager": "./src/protocol-run-manager.ts",
+    "./plugins-dir": "./src/plugins-dir.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b",
+    "bundle": "node scripts/bundle.mjs dist-bundle",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist dist-bundle .turbo tsconfig.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/yauzl": "^3.4.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.11"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.0",
+    "@langchain/core": "^1.2.1",
+    "@langchain/langgraph-sdk": "~1.9.28",
+    "@pizza-bot/core": "*",
+    "@pizza-bot/logging": "*",
+    "@pizza-bot/plugin-sdk": "*",
+    "@pizza-bot/inference-providers": "*",
+    "@pizza-bot/runtime-langgraph": "*",
+    "@pizza-bot/storage": "*",
+    "cron": "^4.4.0",
+    "hono": "^4.13.1",
+    "yauzl": "^3.4.0",
+    "zod": "^4.0.0"
+  }
+}

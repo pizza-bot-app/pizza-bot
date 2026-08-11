@@ -1,0 +1,9 @@
+{
+  "name": "mcp-status",
+  "version": "1.0.0",
+  "displayName": "MCP Status",
+  "description": "Reference plugin bundling a skill and an MCP server.",
+  "author": { "name": "Pizza Bot OSS" },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

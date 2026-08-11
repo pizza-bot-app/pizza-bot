@@ -1,0 +1,96 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most Pizza Bot bugs depend on which entrypoint you ran, which model
+        provider answered, and what the agent was doing at the time. Please fill
+        in the environment fields even if they feel redundant.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the server with ...
+        2. Send "..."
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: entrypoint
+    attributes:
+      label: Entrypoint
+      options:
+        - Desktop app (Electron)
+        - Web app in a browser (npm run dev / standalone backend)
+        - Terminal CLI (npm run shell)
+        - api-server only (HTTP client of my own)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Model provider
+      options:
+        - Amazon Bedrock
+        - Anthropic
+        - Google Gemini
+        - OpenAI
+        - OpenRouter
+        - Ollama
+        - Not reached / not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model ID
+      placeholder: e.g. anthropic:claude-sonnet-5
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      description: Output of `git rev-parse --short HEAD`, or the installed app version.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and Node version
+      placeholder: e.g. macOS 15.3 (arm64), Node 24.x
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log excerpt
+      description: |
+        From `<PIZZA_DATA_ROOT>/logs` (default `~/.pizza-bot-oss/logs`) or the
+        in-app Logs view. Logs are redacted, but please re-check before pasting.
+        Never include API keys or bearer tokens.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I ran `npm run build` before running the app (required after a fresh clone or pull)
+        - label: I checked whether this reproduces with a different model provider

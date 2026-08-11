@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest a capability or an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task or workflow, not the implementation you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Inbox / background agents / notifications
+        - Skills and MCP servers
+        - Model providers
+        - Desktop app / packaging
+        - Web UI
+        - CLI
+        - api-server / protocol
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Could a skill or MCP server already do this?
+      description: |
+        Pizza Bot is extended by dropping a SKILL.md or an MCP server under the
+        data root, so many capabilities need no change to this repo. Say what you
+        tried, if anything.

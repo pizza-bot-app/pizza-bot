@@ -1,0 +1,10 @@
+{
+  "name": "@pizza-bot/plugin-example-mcp-status",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reference plugin bundling an MCP stdio server and a skill.",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  }
+}

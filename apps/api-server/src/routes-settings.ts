@@ -1,0 +1,35 @@
+import { Hono } from "hono";
+import { isPromptAddendum, isThemePreference, type AppSettingsPatch } from "@pizza-bot/core";
+import type { AgentHost } from "./agent-host.js";
+
+export function settingsRoutes(host: AgentHost): Hono {
+  const app = new Hono();
+
+  app.get("/settings", (c) => c.json(host.settings.get()));
+
+  app.put("/settings", async (c) => {
+    const raw = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const patch: AppSettingsPatch = {};
+    if (isThemePreference(raw.theme)) patch.theme = raw.theme;
+    if (isPromptAddendum(raw.customPromptAddendum)) patch.customPromptAddendum = raw.customPromptAddendum;
+    if (typeof raw.enableMemories === "boolean") patch.enableMemories = raw.enableMemories;
+    if (typeof raw.enableAutomations === "boolean") patch.enableAutomations = raw.enableAutomations;
+
+    const before = host.settings.get();
+    const settings = host.settings.patch(patch);
+    // Await prompt-affecting rebuilds so the next turn cannot use stale settings.
+    // The backend's live gate separately revokes memory I/O from active graphs.
+    if (
+      settings.customPromptAddendum !== before.customPromptAddendum ||
+      settings.enableMemories !== before.enableMemories
+    ) {
+      await host.reloadSettings();
+    }
+    if (settings.enableAutomations !== before.enableAutomations) {
+      host.triggerService.reload();
+    }
+    return c.json(settings);
+  });
+
+  return app;
+}

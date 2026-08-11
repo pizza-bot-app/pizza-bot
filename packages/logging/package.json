@@ -1,0 +1,25 @@
+{
+  "name": "@pizza-bot/logging",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Structured, redacted, rotating local logs for Pizza Bot processes.",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "source": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3"
+  }
+}

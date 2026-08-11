@@ -1,0 +1,22 @@
+{
+  "name": "@pizza-bot/langgraph-compat",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Conformance suite for native LangGraph protocol events and DeepAgents assumptions (§12).",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rimraf .turbo"
+  },
+  "dependencies": {
+    "@pizza-bot/core": "*",
+    "@pizza-bot/runtime-langgraph": "*"
+  },
+  "devDependencies": {
+    "@langchain/core": "^1.2.1",
+    "@langchain/langgraph": "^1.4.9",
+    "deepagents": "^1.12.2",
+    "vitest": "^4.1.10"
+  }
+}

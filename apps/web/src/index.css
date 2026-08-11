@@ -1,0 +1,144 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Streamdown ships its own utility classes (e.g. pointer-events-auto on
+   renderer toolbars); Tailwind v4 skips node_modules, so register its dist as a
+   source or those classes never generate and the copy/download/fullscreen
+   buttons inherit pointer-events:none and go click-dead. */
+@source "../../../node_modules/streamdown/dist";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.17 0.012 260);
+  --foreground: oklch(0.96 0.006 260);
+  --card: oklch(0.205 0.014 260);
+  --card-foreground: oklch(0.96 0.006 260);
+  --popover: oklch(0.22 0.014 260);
+  --popover-foreground: oklch(0.96 0.006 260);
+  --primary: oklch(0.73 0.13 185);
+  --primary-foreground: oklch(0.16 0.018 260);
+  --secondary: oklch(0.25 0.014 260);
+  --secondary-foreground: oklch(0.96 0.006 260);
+  --muted: oklch(0.25 0.014 260);
+  --muted-foreground: oklch(0.67 0.018 260);
+  --accent: oklch(0.275 0.016 260);
+  --accent-foreground: oklch(0.96 0.006 260);
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.98 0.004 260);
+  --border: oklch(0.32 0.016 260);
+  --input: oklch(0.245 0.014 260);
+  --ring: oklch(0.73 0.13 185);
+
+  --navigation: oklch(0.145 0.012 260);
+  --primary-hover: oklch(0.78 0.13 185);
+  --code: oklch(0.13 0.012 260);
+  --success: oklch(0.72 0.15 155);
+  --warning: oklch(0.8 0.15 80);
+  --info: oklch(0.7 0.13 245);
+  --tool: oklch(0.72 0.13 305);
+}
+
+.light {
+  --background: oklch(0.975 0.004 250);
+  --foreground: oklch(0.2 0.01 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.01 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.01 260);
+  --primary: oklch(0.46 0.105 185);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.93 0.007 250);
+  --secondary-foreground: oklch(0.2 0.01 260);
+  --muted: oklch(0.93 0.007 250);
+  --muted-foreground: oklch(0.47 0.018 260);
+  --accent: oklch(0.925 0.01 250);
+  --accent-foreground: oklch(0.2 0.01 260);
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.87 0.009 250);
+  --input: oklch(0.89 0.009 250);
+  --ring: oklch(0.46 0.105 185);
+
+  --navigation: oklch(0.95 0.008 250);
+  --primary-hover: oklch(0.41 0.105 185);
+  --code: oklch(0.94 0.006 250);
+  --success: oklch(0.49 0.14 155);
+  --warning: oklch(0.55 0.14 70);
+  --info: oklch(0.52 0.15 250);
+  --tool: oklch(0.52 0.14 305);
+}
+
+:root {
+  --bg: var(--background);
+  --sidebar-bg: var(--navigation);
+  --panel: var(--card);
+  --panel-2: var(--secondary);
+  --text: var(--foreground);
+  --dim: var(--muted-foreground);
+  --brand: var(--primary);
+  --brand-hover: var(--primary-hover);
+  --brand-fg: var(--primary-foreground);
+  --user: color-mix(in oklch, var(--primary) 14%, var(--card));
+  --assistant: var(--card);
+  --lifecycle: var(--muted-foreground);
+  --message: var(--info);
+  --interrupt: var(--warning);
+  --error: var(--destructive);
+  --danger: var(--destructive);
+  --ok: var(--success);
+  --warn: var(--warning);
+  --bad: var(--destructive);
+  --code-bg: var(--code);
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  --control-sm: 2rem;
+  --control-md: 2.25rem;
+  --control-lg: 2.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-tool: var(--tool);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+* {
+  border-color: var(--border);
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+}

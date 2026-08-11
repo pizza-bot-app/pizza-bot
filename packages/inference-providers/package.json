@@ -1,0 +1,30 @@
+{
+  "name": "@pizza-bot/inference-providers",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Built-in model providers and api-server registration for Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter, and Ollama.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock": "^3.1106.0",
+    "@aws-sdk/credential-providers": "^3.1106.0",
+    "@langchain/anthropic": "^1.5.4",
+    "@langchain/aws": "^1.4.3",
+    "@langchain/core": "^1.2.1",
+    "@langchain/google": "^0.2.1",
+    "@langchain/ollama": "^1.3.0",
+    "@langchain/openai": "^1.5.5",
+    "@langchain/openrouter": "^0.4.6",
+    "@pizza-bot/core": "*",
+    "@pizza-bot/plugin-sdk": "*",
+    "@smithy/core": "^3.31.1"
+  }
+}

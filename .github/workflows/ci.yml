@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # better-sqlite3 includes a linux-x64 prebuild, so no compiler setup is
+      # needed for the native dependency.
+      - name: Install
+        run: npm ci
+
+      # Exercise production workspace bundles before the longer test suite.
+      - name: Build
+        run: npm run build
+
+      # tsc across the whole project-reference graph (the deep type gate).
+      - name: Typecheck
+        run: npm run typecheck
+
+      # eslint flat config, including the core/protocol/ui purity guard.
+      - name: Lint
+        run: npm run lint
+
+      # turbo run test --concurrency=2 — the cap keeps the parallel vitest
+      # workers from exhausting CI resources (see package.json).
+      - name: Test
+        run: npm test
+
+      - name: Bundle standalone backend
+        run: npm run backend:bundle
+
+      - name: Smoke standalone backend
+        run: npm run backend:smoke
+
+      # A clean image build catches build-stage dependencies the artifact smoke cannot.
+      - name: Build backend container
+        run: docker build --file deploy/linux/Dockerfile --tag pizza-bot-backend:ci .
+
+      # Keep the network-dependent registry check last so it cannot hide
+      # deterministic code, test, or build failures.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test

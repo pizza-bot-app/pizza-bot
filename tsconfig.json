@@ -1,0 +1,12 @@
+{
+  "//": "Root solution file — references all buildable (composite) packages so `tsc -b` builds them in dependency order. Apps that don't emit declarations (web/desktop-shell) typecheck via their own `tsc --noEmit`.",
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/logging" },
+    { "path": "packages/plugin-sdk" },
+    { "path": "packages/storage" },
+    { "path": "packages/inference-providers" },
+    { "path": "packages/runtime-langgraph" }
+  ]
+}

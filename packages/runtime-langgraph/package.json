@@ -1,0 +1,26 @@
+{
+  "name": "@pizza-bot/runtime-langgraph",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The stateful DeepAgents/LangGraph runtime and its native protocol stream.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.2.1",
+    "@langchain/langgraph": "^1.4.9",
+    "@pizza-bot/core": "*",
+    "deepagents": "^1.12.2",
+    "langchain": "^1.5.5"
+  },
+  "optionalDependencies": {
+    "@langchain/quickjs": "0.6.1"
+  }
+}

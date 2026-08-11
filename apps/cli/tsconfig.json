@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": ["node"],
+    "composite": false,
+    "noEmit": true
+  },
+  "references": [{ "path": "../../packages/logging" }],
+  "include": ["src"]
+}

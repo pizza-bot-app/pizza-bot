@@ -1,0 +1,54 @@
+{
+  "name": "pizza-bot-oss",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An inbox for asynchronous AI work, built on DeepAgents and LangGraph",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "npm@11.19.0",
+  "allowScripts": {
+    "electron-winstaller@5.4.4": true,
+    "esbuild@0.28.2": true,
+    "fs-xattr@0.3.1": true,
+    "macos-alias@0.2.12": true
+  },
+  "overrides": {
+    "better-sqlite3": "^13.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "plugins/*",
+    "tests/*"
+  ],
+  "scripts": {
+    "build": "cross-env TURBO_TELEMETRY_DISABLED=1 turbo run build",
+    "backend:bundle": "node scripts/build-backend.mjs",
+    "backend:smoke": "node scripts/smoke-remote-backend.mjs",
+    "dev": "node scripts/dev.mjs",
+    "shell": "npm start -w @pizza-bot/cli --",
+    "desktop:package": "node scripts/desktop-forge.mjs package",
+    "desktop:make": "node scripts/desktop-forge.mjs make",
+    "test": "cross-env TURBO_TELEMETRY_DISABLED=1 turbo run test --concurrency=2",
+    "test:compat": "cross-env TURBO_TELEMETRY_DISABLED=1 turbo run test --filter=@pizza-bot/langgraph-compat",
+    "lint": "eslint .",
+    "typecheck": "cross-env TURBO_TELEMETRY_DISABLED=1 turbo run typecheck",
+    "clean": "cross-env TURBO_TELEMETRY_DISABLED=1 turbo run clean",
+    "clean:all": "npm run clean && rimraf .turbo node_modules"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "cross-env": "^10.1.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^15.15.0",
+    "rimraf": "^6.1.3",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.63.0",
+    "vitest": "^4.1.10"
+  }
+}

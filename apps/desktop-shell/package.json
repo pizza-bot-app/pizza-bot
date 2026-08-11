@@ -1,0 +1,41 @@
+{
+  "name": "@pizza-bot/desktop-shell",
+  "productName": "Pizza Bot OSS",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "description": "Electron main process: sidecar supervisor (port negotiation, health checks, restart, graceful shutdown) + window. Talks to the sidecar over HTTP/SSE only.",
+  "scripts": {
+    "build": "rimraf dist && node scripts/bundle-main.mjs && tsc -p tsconfig.preload.json && node -e \"require('fs').renameSync('dist/preload.js','dist/preload.cjs')\"",
+    "dev": "npm run build && electron .",
+    "start": "npm run build && electron-forge start",
+    "bundle:main": "node scripts/bundle-main.mjs",
+    "bundle:server": "node scripts/bundle-server.mjs",
+    "stage:plugins": "node scripts/stage-plugins.mjs",
+    "package": "npm run build && electron-forge package",
+    "make": "npm run clean && npm run build && electron-forge make",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist dist-server dist-plugins out .turbo"
+  },
+  "dependencies": {
+    "@pizza-bot/api-server": "*",
+    "@pizza-bot/core": "*",
+    "@pizza-bot/logging": "*",
+    "@pizza-bot/plugin-sdk": "*",
+    "eventsource-parser": "^3.1.0",
+    "tsx": "^4.23.11"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^8.0.0-alpha.10",
+    "@electron-forge/maker-deb": "^8.0.0-alpha.10",
+    "@electron-forge/maker-dmg": "^8.0.0-alpha.10",
+    "@electron-forge/maker-rpm": "^8.0.0-alpha.10",
+    "@electron-forge/maker-squirrel": "^8.0.0-alpha.10",
+    "@electron-forge/maker-zip": "^8.0.0-alpha.10",
+    "@electron-forge/plugin-auto-unpack-natives": "^8.0.0-alpha.10",
+    "electron": "^43.3.0",
+    "esbuild": "^0.28.2"
+  }
+}

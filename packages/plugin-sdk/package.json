@@ -1,0 +1,28 @@
+{
+  "name": "@pizza-bot/plugin-sdk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Declarative plugin schema, loader, and contribution registries.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime-resolver": "./src/runtime-resolver.ts"
+  },
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.2.1",
+    "@langchain/mcp-adapters": "^1.1.3",
+    "@pizza-bot/core": "*",
+    "@pizza-bot/logging": "*",
+    "yaml": "^2.9.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3"
+  }
+}

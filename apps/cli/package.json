@@ -1,0 +1,33 @@
+{
+  "name": "@pizza-bot/cli",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Interactive terminal shell — a thin client that streams agent turns from a running Pizza Bot server.",
+  "bin": {
+    "pizza": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && node scripts/set-bin-mode.mjs",
+    "prepack": "npm run build",
+    "test": "npm run build && node scripts/smoke-bin.mjs",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@langchain/langgraph-sdk": "~1.9.28",
+    "@langchain/protocol": "^0.0.18",
+    "@pizza-bot/core": "*",
+    "@pizza-bot/logging": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.11"
+  }
+}

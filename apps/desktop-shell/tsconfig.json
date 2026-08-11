@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": ["node"],
+    "composite": false
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/preload.ts"]
+}

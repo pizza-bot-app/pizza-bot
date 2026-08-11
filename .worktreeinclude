@@ -1,0 +1,5 @@
+# Gitignored files copied into each new worktree (`.gitignore` syntax).
+# Only files that match AND are gitignored are copied — tracked files (e.g.
+# .env.example) already come along with the checkout.
+.env
+.env.local
