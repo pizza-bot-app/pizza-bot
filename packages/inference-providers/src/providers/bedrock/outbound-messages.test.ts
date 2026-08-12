@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
-import { stripReasoningForBedrock } from "./reasoning-fix.js";
+import { stripReasoningForBedrock } from "./outbound-messages.js";
 
 describe("stripReasoningForBedrock", () => {
   it("removes a v1 `reasoning` block (the shape the createAgent path emits)", () => {

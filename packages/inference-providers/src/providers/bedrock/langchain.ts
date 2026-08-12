@@ -16,7 +16,7 @@ import {
   translateBedrockError,
   type BedrockProviderOptions,
 } from "./models.js";
-import { stripReasoningForBedrock } from "./reasoning-fix.js";
+import { stripReasoningForBedrock } from "./outbound-messages.js";
 import { repairEmptyToolCallEvent, repairEmptyToolCalls } from "./tool-call-fix.js";
 import {
   enrichModelDescriptors,

@@ -1,16 +1,16 @@
-/** Repairs Bedrock replay messages whose reasoning signatures cannot be preserved. */
+/** Message rewrites applied to every Bedrock Converse request. */
 import type { BaseMessage } from "@langchain/core/messages";
-
-function isReasoningBlock(block: unknown): boolean {
-  if (typeof block !== "object" || block === null) return false;
-  const t = (block as { type?: unknown }).type;
-  return t === "reasoning_content" || t === "reasoning";
-}
 
 function withContent(msg: BaseMessage, content: unknown): BaseMessage {
   const clone = Object.assign(Object.create(Object.getPrototypeOf(msg)) as BaseMessage, msg);
   (clone as { content: unknown }).content = content;
   return clone;
+}
+
+function isReasoningBlock(block: unknown): boolean {
+  if (typeof block !== "object" || block === null) return false;
+  const t = (block as { type?: unknown }).type;
+  return t === "reasoning_content" || t === "reasoning";
 }
 
 function toolCallsOf(msg: BaseMessage): Array<{
