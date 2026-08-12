@@ -42,30 +42,41 @@ import { streamProtocolEvents, toLangGraphInput, type ProtocolCapableGraph } fro
 registerHarnessProfile("openai", { excludedMiddleware: ["todoListMiddleware"] });
 
 export const AGENT_RUN_LIMITS = {
-  modelCalls: 20,
-  toolCalls: 40,
+  orchestrator: {
+    modelCalls: 20,
+    toolCalls: 40,
+  },
+  subagent: {
+    modelCalls: 20,
+    toolCalls: 80,
+  },
 } as const;
 
-interface RunLimitOptions {
+interface RunLimits {
+  modelCalls: number;
+  toolCalls: number;
+}
+
+interface RunLimitMiddlewareOptions {
   runLimit: number;
   exitBehavior: "end" | "error";
 }
 
-function runLimitMiddleware(): unknown[] {
+function runLimitMiddleware(limits: RunLimits): unknown[] {
   // LangChain's Zod interop type collapses these options under TypeScript 5.
   const createModelCallLimit = modelCallLimitMiddleware as unknown as (
-    options: RunLimitOptions,
+    options: RunLimitMiddlewareOptions,
   ) => unknown;
   const createToolCallLimit = toolCallLimitMiddleware as unknown as (
-    options: RunLimitOptions,
+    options: RunLimitMiddlewareOptions,
   ) => unknown;
   return [
     createModelCallLimit({
-      runLimit: AGENT_RUN_LIMITS.modelCalls,
+      runLimit: limits.modelCalls,
       exitBehavior: "end",
     }),
     createToolCallLimit({
-      runLimit: AGENT_RUN_LIMITS.toolCalls,
+      runLimit: limits.toolCalls,
       exitBehavior: "error",
     }),
   ];
@@ -204,7 +215,7 @@ export async function resolveSkillSubagents(
   const resolved = await Promise.all(entries.map(async (entry) => {
     try {
       const middleware: unknown[] = [
-        ...runLimitMiddleware(),
+        ...runLimitMiddleware(AGENT_RUN_LIMITS.subagent),
         toolErrorRecoveryMiddleware(),
         outputTruncationMiddleware(),
         currentDateTimeMiddleware(),
@@ -296,7 +307,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   });
 
   const middleware: unknown[] = [
-    ...runLimitMiddleware(),
+    ...runLimitMiddleware(AGENT_RUN_LIMITS.orchestrator),
     toolErrorRecoveryMiddleware(),
     currentDateTimeMiddleware(),
   ];

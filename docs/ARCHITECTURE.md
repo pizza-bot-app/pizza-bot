@@ -175,6 +175,11 @@ in `core/src/protocol-types.ts`:
   `interruptOn` is set — `HumanInTheLoopMiddleware`. The clock context is also
   attached to skill workers and is never checkpointed. Task planning middleware
   is intentionally excluded, including from model-specific harness profiles.
+- **Runaway-call limits** are per agent invocation, with no combined parent/child
+  budget. The orchestrator allows 20 model calls and 40 tool calls; each
+  `task`-invoked skill worker independently allows 20 model calls and 80 tool
+  calls. A delegation counts as one orchestrator tool call, while the worker's
+  calls count only against that worker. Parallel calls are counted individually.
 - **Checkpointer** and **store** are passed *into* `createDeepAgent` (never set
   post-hoc). Checkpointer = short-term, thread-scoped; store = long-term,
   cross-thread.
