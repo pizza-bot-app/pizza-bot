@@ -79,6 +79,19 @@ const DOCUMENT_NAME_DISALLOWED = /[^A-Za-z0-9_\s()[\]-]/g;
 const WHITESPACE_RUN = /\s+/g;
 
 /**
+ * Bedrock's Anthropic translation rejects a cachePoint that directly follows a
+ * text-format document block ("content.N.type: Field required"), and
+ * `@langchain/aws` always appends the cache point to the last message's
+ * content. Callers use this to drop `cache_control` for such turns.
+ */
+export function endsWithDocumentBlock(messages: BaseMessage[]): boolean {
+  const last = messages[messages.length - 1];
+  if (!last || !Array.isArray(last.content)) return false;
+  const block = last.content[last.content.length - 1] as { type?: unknown } | undefined;
+  return typeof block === "object" && block !== null && block.type === "file";
+}
+
+/**
  * Bedrock Converse's DocumentBlock.name allows `[A-Za-z0-9_\s()[\]-]`, rejects
  * consecutive whitespace and blank names, and caps at 200 chars. The original
  * filename is preserved in storage, checkpoint state, and download headers;

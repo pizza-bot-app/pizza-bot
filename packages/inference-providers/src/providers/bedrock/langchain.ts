@@ -16,7 +16,11 @@ import {
   translateBedrockError,
   type BedrockProviderOptions,
 } from "./models.js";
-import { sanitizeDocumentNamesForBedrock, stripReasoningForBedrock } from "./outbound-messages.js";
+import {
+  endsWithDocumentBlock,
+  sanitizeDocumentNamesForBedrock,
+  stripReasoningForBedrock,
+} from "./outbound-messages.js";
 import { repairEmptyToolCallEvent, repairEmptyToolCalls } from "./tool-call-fix.js";
 import {
   enrichModelDescriptors,
@@ -246,11 +250,19 @@ export class BedrockLangChainModelProvider implements ModelProvider {
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      private outbound(messages: BaseMessage[], options: any): [BaseMessage[], any] {
+        const rewritten = sanitizeDocumentNamesForBedrock(stripReasoningForBedrock(messages));
+        if (options?.cache_control && endsWithDocumentBlock(rewritten)) {
+          const { cache_control: _dropped, ...rest } = options;
+          return [rewritten, rest];
+        }
+        return [rewritten, options];
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       override async _generate(messages: BaseMessage[], ...rest: [options: any, runManager?: any]) {
-        const result = await super._generate(
-          sanitizeDocumentNamesForBedrock(stripReasoningForBedrock(messages)),
-          ...rest,
-        );
+        const [outMessages, outOptions] = this.outbound(messages, rest[0]);
+        const result = await super._generate(outMessages, outOptions, rest[1]);
         let changed = false;
         const generations = result.generations.map((generation) => {
           const message = repairEmptyToolCalls(generation.message);
@@ -266,10 +278,8 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...rest: [options: any, runManager?: any]
       ) {
-        return super._streamResponseChunks(
-          sanitizeDocumentNamesForBedrock(stripReasoningForBedrock(messages)),
-          ...rest,
-        );
+        const [outMessages, outOptions] = this.outbound(messages, rest[0]);
+        return super._streamResponseChunks(outMessages, outOptions, rest[1]);
       }
 
       override async *_streamChatModelEvents(
@@ -277,10 +287,8 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...rest: [options: any, runManager?: any]
       ) {
-        for await (const event of super._streamChatModelEvents(
-          sanitizeDocumentNamesForBedrock(stripReasoningForBedrock(messages)),
-          ...rest,
-        )) {
+        const [outMessages, outOptions] = this.outbound(messages, rest[0]);
+        for await (const event of super._streamChatModelEvents(outMessages, outOptions, rest[1])) {
           yield repairEmptyToolCallEvent(event);
         }
       }

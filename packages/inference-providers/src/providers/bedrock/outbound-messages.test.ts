@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import {
+  endsWithDocumentBlock,
   sanitizeBedrockDocumentName,
   sanitizeDocumentNamesForBedrock,
   stripReasoningForBedrock,
@@ -204,5 +205,34 @@ describe("sanitizeDocumentNamesForBedrock", () => {
     });
     const [out] = sanitizeDocumentNamesForBedrock([msg]);
     expect(out).toBe(msg);
+  });
+});
+
+describe("endsWithDocumentBlock", () => {
+  const file = { type: "file", source_type: "base64", mime_type: "text/markdown", data: "IyBoaQ==" };
+
+  it("is true when the last message's last block is a file", () => {
+    const msg = new HumanMessage({ content: [{ type: "text", text: "read this" }, file] as unknown as string });
+    expect(endsWithDocumentBlock([msg])).toBe(true);
+  });
+
+  it("is false when a text block follows the file", () => {
+    const msg = new HumanMessage({ content: [file, { type: "text", text: "read this" }] as unknown as string });
+    expect(endsWithDocumentBlock([msg])).toBe(false);
+  });
+
+  it("is false for string content, empty input, and non-file endings", () => {
+    expect(endsWithDocumentBlock([])).toBe(false);
+    expect(endsWithDocumentBlock([new HumanMessage("plain")])).toBe(false);
+    expect(
+      endsWithDocumentBlock([new AIMessage({ content: [{ type: "text", text: "hi" }] as unknown as string })]),
+    ).toBe(false);
+  });
+
+  it("only inspects the last message", () => {
+    const withFile = new HumanMessage({ content: [file] as unknown as string });
+    const plain = new AIMessage("noted");
+    expect(endsWithDocumentBlock([withFile, plain])).toBe(false);
+    expect(endsWithDocumentBlock([plain, withFile])).toBe(true);
   });
 });
