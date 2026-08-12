@@ -29,6 +29,7 @@ import {
 } from "@pizza-bot/core";
 import type { ThreadStateValues } from "@pizza-bot/core";
 import type { ProtocolEvent, StateSnapshot } from "@langchain/langgraph";
+import { RunnableLambda } from "@langchain/core/runnables";
 import { modelCallLimitMiddleware, toolCallLimitMiddleware } from "langchain";
 import { buildBackend } from "./backend.js";
 import { toolErrorRecoveryMiddleware } from "./tool-error-middleware.js";
@@ -41,33 +42,66 @@ import { streamProtocolEvents, toLangGraphInput, type ProtocolCapableGraph } fro
 registerHarnessProfile("openai", { excludedMiddleware: ["todoListMiddleware"] });
 
 export const AGENT_RUN_LIMITS = {
-  modelCalls: 20,
-  toolCalls: 40,
+  orchestrator: {
+    modelCalls: 20,
+    toolCalls: 40,
+  },
+  subagent: {
+    modelCalls: 20,
+    toolCalls: 80,
+  },
 } as const;
 
-interface RunLimitOptions {
+interface RunLimits {
+  modelCalls: number;
+  toolCalls: number;
+}
+
+interface RunLimitMiddlewareOptions {
   runLimit: number;
   exitBehavior: "end" | "error";
 }
 
-function runLimitMiddleware(): unknown[] {
+function runLimitMiddleware(limits: RunLimits): unknown[] {
   // LangChain's Zod interop type collapses these options under TypeScript 5.
   const createModelCallLimit = modelCallLimitMiddleware as unknown as (
-    options: RunLimitOptions,
+    options: RunLimitMiddlewareOptions,
   ) => unknown;
   const createToolCallLimit = toolCallLimitMiddleware as unknown as (
-    options: RunLimitOptions,
+    options: RunLimitMiddlewareOptions,
   ) => unknown;
   return [
     createModelCallLimit({
-      runLimit: AGENT_RUN_LIMITS.modelCalls,
+      runLimit: limits.modelCalls,
       exitBehavior: "end",
     }),
     createToolCallLimit({
-      runLimit: AGENT_RUN_LIMITS.toolCalls,
+      runLimit: limits.toolCalls,
       exitBehavior: "error",
     }),
   ];
+}
+
+// DeepAgents returns arbitrary child state to the parent; limiter counters are invocation-local.
+const SUBAGENT_STATE_EXCLUSIONS = [
+  "threadModelCallCount",
+  "runModelCallCount",
+  "threadToolCallCount",
+  "runToolCallCount",
+] as const;
+
+function excludeSubagentLocalState(state: Record<string, unknown>): Record<string, unknown> {
+  const filtered = { ...state };
+  for (const key of SUBAGENT_STATE_EXCLUSIONS) delete filtered[key];
+  return filtered;
+}
+
+function isolateSubagentLocalState(runnable: ReturnType<typeof createSubAgent>) {
+  return RunnableLambda.from(async (state: Record<string, unknown>, config) => {
+    const input = excludeSubagentLocalState(state) as Parameters<typeof runnable.invoke>[0];
+    const result = await runnable.invoke(input, config);
+    return excludeSubagentLocalState(result as Record<string, unknown>);
+  });
 }
 
 /**
@@ -181,7 +215,7 @@ export async function resolveSkillSubagents(
   const resolved = await Promise.all(entries.map(async (entry) => {
     try {
       const middleware: unknown[] = [
-        ...runLimitMiddleware(),
+        ...runLimitMiddleware(AGENT_RUN_LIMITS.subagent),
         toolErrorRecoveryMiddleware(),
         outputTruncationMiddleware(),
         currentDateTimeMiddleware(),
@@ -273,7 +307,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   });
 
   const middleware: unknown[] = [
-    ...runLimitMiddleware(),
+    ...runLimitMiddleware(AGENT_RUN_LIMITS.orchestrator),
     toolErrorRecoveryMiddleware(),
     currentDateTimeMiddleware(),
   ];
@@ -294,11 +328,13 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
     return {
       name: subagent.name,
       description: subagent.description,
-      runnable: createSubAgent({
-        ...subagent,
-        model,
-        tools: subagent.tools ?? [],
-      }),
+      runnable: isolateSubagentLocalState(
+        createSubAgent({
+          ...subagent,
+          model,
+          tools: subagent.tools ?? [],
+        }),
+      ),
     };
   });
 

@@ -119,11 +119,19 @@ describe("Pizza Bot graph assembly", () => {
         },
       }),
     );
+    expect(mocks.modelCallLimitMiddleware.mock.calls).toEqual([
+      [{ runLimit: 20, exitBehavior: "end" }],
+      [{ runLimit: 20, exitBehavior: "end" }],
+    ]);
+    expect(mocks.toolCallLimitMiddleware.mock.calls).toEqual([
+      [{ runLimit: 40, exitBehavior: "error" }],
+      [{ runLimit: 80, exitBehavior: "error" }],
+    ]);
     const params = mocks.createDeepAgent.mock.calls[0]![0] as {
       subagents: Array<{ runnable: unknown }>;
       skills?: string[];
     };
-    expect(params.subagents[0]!.runnable).toEqual({ compiled: true });
+    expect(typeof (params.subagents[0]!.runnable as { invoke?: unknown }).invoke).toBe("function");
     expect(params.skills).toBeUndefined();
     expect(mocks.createCodeInterpreterMiddleware).toHaveBeenCalledWith(
       expect.objectContaining({ subagents: true }),
