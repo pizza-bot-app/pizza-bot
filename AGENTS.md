@@ -180,6 +180,9 @@ first line of documentation.
 
 Every agent-driven change MUST use a dedicated branch in an isolated worktree.
 Make all edits in that worktree; keep the main checkout available for review.
+Name branches `<type>/<kebab-case-description>` using an intent such as `fix`,
+`feat`, `refactor`, `docs`, `test`, or `chore`. Branch names MUST describe the
+change, not the implementation tool, agent, author, or worktree.
 
 A fresh worktree needs its own `npm install` before building or testing;
 otherwise workspace imports can resolve against stale output from another

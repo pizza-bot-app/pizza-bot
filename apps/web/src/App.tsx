@@ -42,6 +42,7 @@ import { AppNavigation } from "./components/AppNavigation.js";
 import { LogsModule } from "./components/logs/LogsModule.js";
 import { useDesktopConnection } from "./use-desktop-connection.js";
 import { useDesktopNotifications } from "./desktop-notifications.js";
+import { initialThreadId } from "./initial-thread-selection.js";
 
 function panesClass(showRail: boolean): string {
   return showRail ? "panes no-inspector" : "panes solo";
@@ -155,23 +156,16 @@ export function App() {
       }
       return changed ? next : prev;
     });
-    // On the first load, land on the most recent conversation (or a fresh draft
-    // when there are none) instead of a dead-end empty state. Never overrides a
-    // thread the user already opened.
+    // On the first load, land on the most recent persisted conversation without
+    // overriding a thread the user already opened.
     if (!didAutoOpenRef.current && activeThreadIdRef.current === null) {
       didAutoOpenRef.current = true;
-      const recency = (t: ThreadInfo) =>
-        t.lastActivityAt ? Date.parse(t.lastActivityAt) : 0;
-      const mostRecent = rows.reduce<ThreadInfo | null>(
-        (best, t) => (best === null || recency(t) > recency(best) ? t : best),
-        null,
-      );
-      if (mostRecent) {
-        setOpenedThreads((prev) => (prev.has(mostRecent.threadId) ? prev : new Set(prev).add(mostRecent.threadId)));
-        setActiveThreadId(mostRecent.threadId);
-      } else {
-        shouldFocusComposerRef.current = true;
-        setActiveThreadId(freshThreadId());
+      const threadId = initialThreadId(rows);
+      if (threadId) {
+        setOpenedThreads((prev) =>
+          prev.has(threadId) ? prev : new Set(prev).add(threadId),
+        );
+        setActiveThreadId(threadId);
       }
     }
   }, []);
