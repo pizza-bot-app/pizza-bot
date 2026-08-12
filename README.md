@@ -375,8 +375,8 @@ and Sous Chefs:
 
 <a href="https://github.com/flavioschuindt" title="Flávio Schuindt (@flavioschuindt)"><img src="https://github.com/flavioschuindt.png?size=64" width="64" height="64" alt="Flávio Schuindt (@flavioschuindt)" /></a>
 <a href="https://github.com/jwert-aws" title="Jacob Wert (@jwert-aws)"><img src="https://github.com/jwert-aws.png?size=64" width="64" height="64" alt="Jacob Wert (@jwert-aws)" /></a>
-
-Michael Karachewski
+<a href="https://github.com/michaelkarachewski" title="Michael Karachewski (@michaelkarachewski)"><img src="https://github.com/michaelkarachewski.png?size=64" width="64" height="64" alt="Michael Karachewski (@michaelkarachewski)" /></a>
+<a href="https://github.com/spideron" title="Itzik Paz (@spideron)"><img src="https://github.com/spideron.png?size=64" width="64" height="64" alt="Itzik Paz (@spideron)" /></a>
 
 Pizza Bot was also shaped by more than 2,000 users across Amazon who tested
 earlier versions and shared feedback from real-world use. Their bug reports,
