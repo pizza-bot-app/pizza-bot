@@ -29,6 +29,7 @@ import {
 } from "@pizza-bot/core";
 import type { ThreadStateValues } from "@pizza-bot/core";
 import type { ProtocolEvent, StateSnapshot } from "@langchain/langgraph";
+import { RunnableLambda } from "@langchain/core/runnables";
 import { modelCallLimitMiddleware, toolCallLimitMiddleware } from "langchain";
 import { buildBackend } from "./backend.js";
 import { toolErrorRecoveryMiddleware } from "./tool-error-middleware.js";
@@ -68,6 +69,28 @@ function runLimitMiddleware(): unknown[] {
       exitBehavior: "error",
     }),
   ];
+}
+
+// DeepAgents returns arbitrary child state to the parent; limiter counters are invocation-local.
+const SUBAGENT_STATE_EXCLUSIONS = [
+  "threadModelCallCount",
+  "runModelCallCount",
+  "threadToolCallCount",
+  "runToolCallCount",
+] as const;
+
+function excludeSubagentLocalState(state: Record<string, unknown>): Record<string, unknown> {
+  const filtered = { ...state };
+  for (const key of SUBAGENT_STATE_EXCLUSIONS) delete filtered[key];
+  return filtered;
+}
+
+function isolateSubagentLocalState(runnable: ReturnType<typeof createSubAgent>) {
+  return RunnableLambda.from(async (state: Record<string, unknown>, config) => {
+    const input = excludeSubagentLocalState(state) as Parameters<typeof runnable.invoke>[0];
+    const result = await runnable.invoke(input, config);
+    return excludeSubagentLocalState(result as Record<string, unknown>);
+  });
 }
 
 /**
@@ -294,11 +317,13 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
     return {
       name: subagent.name,
       description: subagent.description,
-      runnable: createSubAgent({
-        ...subagent,
-        model,
-        tools: subagent.tools ?? [],
-      }),
+      runnable: isolateSubagentLocalState(
+        createSubAgent({
+          ...subagent,
+          model,
+          tools: subagent.tools ?? [],
+        }),
+      ),
     };
   });
 
