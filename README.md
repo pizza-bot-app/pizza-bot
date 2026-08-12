@@ -108,18 +108,12 @@ prevents deleted or renamed sources from leaving stale runtime files behind.
 `node_modules` and the root Turbo cache. `npm run clean:all` removes those too
 and must be followed by `npm install`.
 
-> **Windows:** `npm install` needs the Visual Studio C++ build tools:
->
-> ```powershell
-> winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-> ```
->
-> npm runs `better-sqlite3`'s implicit `node-gyp rebuild`, and node-gyp fails at
-> *configure* if no MSVC toolchain is present — before it can evaluate the
-> `binding.gyp` guard that would have skipped the compile as unnecessary. The
-> compiled output is then unused: the loader prefers `prebuilds/win32-x64.node`.
-> To install without a toolchain, use `npm install --ignore-scripts` (Electron 43
-> has no `postinstall` — it downloads its binary lazily on first launch).
+> **Windows:** `npm install` does not need Visual Studio C++ build tools.
+> `better-sqlite3` ships prebuilt binaries for every platform (the loader
+> prefers `prebuilds/win32-x64.node`), so its implicit `node-gyp rebuild` is
+> unnecessary — the root `package.json#allowScripts` denies it explicitly
+> (`"better-sqlite3": false`) so npm skips the compile instead of letting
+> node-gyp fail at *configure* for want of an MSVC toolchain.
 
 > The `--concurrency=2` cap in `npm test` is intentional: uncapped, the parallel
 > vitest+esbuild workers can exhaust file descriptors/memory and fail en masse.

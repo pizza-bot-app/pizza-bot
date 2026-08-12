@@ -120,9 +120,11 @@ are written — keep them in mind when adding assertions or temp-dir cleanup:
   (see `apps/desktop-shell` `sidecar.test.ts`). This surfaces under full-suite
   load and usually *not* in an isolated run, so reproduce with `npm test`.
 
-`npm install` needs MSVC — see the README's Develop note for why the compile is
-both mandatory and unused. Electron 43 has no `postinstall`; `index.js` downloads
-the binary lazily on first launch, so `--ignore-scripts` does not break it.
+`npm install` does not need MSVC — see the README's Develop note for how
+`allowScripts` denies `better-sqlite3`'s implicit `node-gyp rebuild`, which
+would otherwise be both mandatory (node-gyp fails at *configure* without a
+toolchain) and unused (prebuilt binaries ship for every platform). Electron 43
+has no `postinstall`; `index.js` downloads the binary lazily on first launch.
 
 ## Verify in the browser, not just tests
 
