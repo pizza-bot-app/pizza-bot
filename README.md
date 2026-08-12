@@ -361,6 +361,28 @@ vulnerability.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, CI checks, and the
 layering discipline that keeps the runtime seam clean.
 
+## Contributors
+
+Pizza Bot was designed, built, and brought into the open by its Executive Chefs
+and Sous Chefs:
+
+### Executive Chefs
+
+<a href="https://github.com/JoeDo" title="Joseph Dolivo (@JoeDo)"><img src="https://github.com/JoeDo.png?size=64" width="64" height="64" alt="Joseph Dolivo (@JoeDo)" /></a>
+<a href="https://github.com/igorfil" title="Igor Fil (@igorfil)"><img src="https://github.com/igorfil.png?size=64" width="64" height="64" alt="Igor Fil (@igorfil)" /></a>
+
+### Sous Chefs
+
+<a href="https://github.com/flavioschuindt" title="Flávio Schuindt (@flavioschuindt)"><img src="https://github.com/flavioschuindt.png?size=64" width="64" height="64" alt="Flávio Schuindt (@flavioschuindt)" /></a>
+<a href="https://github.com/jwert-aws" title="Jacob Wert (@jwert-aws)"><img src="https://github.com/jwert-aws.png?size=64" width="64" height="64" alt="Jacob Wert (@jwert-aws)" /></a>
+
+Michael Karachewski
+
+Pizza Bot was also shaped by more than 2,000 users across Amazon who tested
+earlier versions and shared feedback from real-world use. Their bug reports,
+ideas, and candid input helped make Pizza Bot ready for a broader community.
+Thank you to everyone who contributed.
+
 ## License
 
 [Apache-2.0](LICENSE).
