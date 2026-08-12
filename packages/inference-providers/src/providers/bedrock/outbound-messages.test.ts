@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
-import { stripReasoningForBedrock } from "./outbound-messages.js";
+import {
+  sanitizeBedrockDocumentName,
+  sanitizeDocumentNamesForBedrock,
+  stripReasoningForBedrock,
+} from "./outbound-messages.js";
 
 describe("stripReasoningForBedrock", () => {
   it("removes a v1 `reasoning` block (the shape the createAgent path emits)", () => {
@@ -109,5 +113,96 @@ describe("stripReasoningForBedrock", () => {
     const [out] = output;
     expect(output).toBe(input);
     expect(out).toBe(human);
+  });
+});
+
+describe("sanitizeBedrockDocumentName", () => {
+  it("preserves the empirically allowed charset (letters, digits, underscore, whitespace, hyphen, parens, brackets)", () => {
+    expect(sanitizeBedrockDocumentName("Report (final) [v2] - draft_1")).toBe("Report (final) [v2] - draft_1");
+  });
+
+  it("replaces disallowed characters with spaces", () => {
+    expect(sanitizeBedrockDocumentName("report.pdf")).toBe("report pdf");
+    expect(sanitizeBedrockDocumentName("blogs/blog ideas")).toBe("blogs blog ideas");
+    expect(sanitizeBedrockDocumentName("a,b;c:d!e?f")).toBe("a b c d e f");
+  });
+
+  it("replaces non-ASCII characters (emoji, accents, CJK) with spaces", () => {
+    expect(sanitizeBedrockDocumentName("✍️ Blogs")).toBe("Blogs");
+    expect(sanitizeBedrockDocumentName("café")).toBe("caf");
+    expect(sanitizeBedrockDocumentName("文档 notes")).toBe("notes");
+  });
+
+  it("collapses runs of whitespace (including tabs/newlines) to one space", () => {
+    expect(sanitizeBedrockDocumentName("a  b")).toBe("a b");
+    expect(sanitizeBedrockDocumentName("a\tb")).toBe("a b");
+    expect(sanitizeBedrockDocumentName("a\nb")).toBe("a b");
+    expect(sanitizeBedrockDocumentName("a . b")).toBe("a b");
+  });
+
+  it("falls back to 'attachment' when nothing survives", () => {
+    expect(sanitizeBedrockDocumentName("")).toBe("attachment");
+    expect(sanitizeBedrockDocumentName("✍️")).toBe("attachment");
+    expect(sanitizeBedrockDocumentName("///")).toBe("attachment");
+    expect(sanitizeBedrockDocumentName("   ")).toBe("attachment");
+  });
+
+  it("caps length at 200 characters (Bedrock's observed max)", () => {
+    const long = "a".repeat(500);
+    const out = sanitizeBedrockDocumentName(long);
+    expect(out).toHaveLength(200);
+  });
+
+  it("is idempotent", () => {
+    const once = sanitizeBedrockDocumentName("✍️ Blogs/Blog ideas.md");
+    expect(sanitizeBedrockDocumentName(once)).toBe(once);
+  });
+});
+
+describe("sanitizeDocumentNamesForBedrock", () => {
+  it("rewrites `metadata.name` on file blocks in-message", () => {
+    const msg = new HumanMessage({
+      content: [
+        { type: "text", text: "explain" },
+        {
+          type: "file",
+          source_type: "base64",
+          mime_type: "text/markdown",
+          data: "IyBoaQ==",
+          metadata: { name: "✍️ Blogs/Blog ideas.md" },
+        },
+      ] as unknown as string,
+    });
+    const [out] = sanitizeDocumentNamesForBedrock([msg]);
+    expect(out).not.toBe(msg);
+    const content = out!.content as Array<Record<string, unknown>>;
+    expect((content[1]!.metadata as { name: string }).name).toBe("Blogs Blog ideas md");
+  });
+
+  it("preserves message reference when no file block needs rewriting", () => {
+    const msg = new HumanMessage({
+      content: [
+        { type: "text", text: "hello" },
+        { type: "file", metadata: { name: "report" } },
+      ] as unknown as string,
+    });
+    const [out] = sanitizeDocumentNamesForBedrock([msg]);
+    expect(out).toBe(msg);
+  });
+
+  it("passes through plain-text messages and messages without file blocks", () => {
+    const a = new HumanMessage("plain");
+    const b = new HumanMessage({ content: [{ type: "text", text: "still plain" }] as unknown as string });
+    const out = sanitizeDocumentNamesForBedrock([a, b]);
+    expect(out[0]).toBe(a);
+    expect(out[1]).toBe(b);
+  });
+
+  it("preserves file blocks without metadata.name (no sanitization needed)", () => {
+    const msg = new HumanMessage({
+      content: [{ type: "file", source_type: "base64", mime_type: "image/png", data: "QUJD" }] as unknown as string,
+    });
+    const [out] = sanitizeDocumentNamesForBedrock([msg]);
+    expect(out).toBe(msg);
   });
 });

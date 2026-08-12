@@ -73,3 +73,66 @@ export function stripReasoningForBedrock(messages: BaseMessage[]): BaseMessage[]
   }
   return rewritten ?? messages;
 }
+
+const DOCUMENT_NAME_MAX_LENGTH = 200;
+const DOCUMENT_NAME_DISALLOWED = /[^A-Za-z0-9_\s()[\]-]/g;
+const WHITESPACE_RUN = /\s+/g;
+
+/**
+ * Bedrock Converse's DocumentBlock.name allows `[A-Za-z0-9_\s()[\]-]`, rejects
+ * consecutive whitespace and blank names, and caps at 200 chars. The original
+ * filename is preserved in storage, checkpoint state, and download headers;
+ * this projection is only for the model-facing label.
+ */
+export function sanitizeBedrockDocumentName(name: string): string {
+  const replaced = name.replace(DOCUMENT_NAME_DISALLOWED, " ");
+  const collapsed = replaced.replace(WHITESPACE_RUN, " ").trim();
+  const bounded = collapsed.slice(0, DOCUMENT_NAME_MAX_LENGTH).trimEnd();
+  return bounded.length > 0 ? bounded : "attachment";
+}
+
+interface FileBlockMetadata {
+  name?: unknown;
+  [k: string]: unknown;
+}
+
+function isFileBlockWithName(
+  block: unknown,
+): block is { type: "file"; metadata: FileBlockMetadata; [k: string]: unknown } {
+  if (typeof block !== "object" || block === null) return false;
+  const b = block as { type?: unknown; metadata?: unknown };
+  if (b.type !== "file") return false;
+  if (typeof b.metadata !== "object" || b.metadata === null) return false;
+  return typeof (b.metadata as FileBlockMetadata).name === "string";
+}
+
+/**
+ * Rewrites `metadata.name` on file content blocks so Bedrock accepts the
+ * request. Non-file blocks and non-array contents pass through unchanged.
+ */
+export function sanitizeDocumentNamesForBedrock(messages: BaseMessage[]): BaseMessage[] {
+  let rewritten: BaseMessage[] | undefined;
+  for (let index = 0; index < messages.length; index += 1) {
+    const msg = messages[index]!;
+    if (!Array.isArray(msg.content) || !msg.content.some(isFileBlockWithName)) {
+      rewritten?.push(msg);
+      continue;
+    }
+    let changed = false;
+    const content = msg.content.map((block) => {
+      if (!isFileBlockWithName(block)) return block;
+      const original = (block.metadata as FileBlockMetadata).name as string;
+      const projected = sanitizeBedrockDocumentName(original);
+      if (projected === original) return block;
+      changed = true;
+      return { ...block, metadata: { ...block.metadata, name: projected } };
+    });
+    if (!changed) {
+      rewritten?.push(msg);
+      continue;
+    }
+    rewritten ??= messages.slice(0, index);
+    rewritten.push(withContent(msg, content));
+  }
+  return rewritten ?? messages;
+}
