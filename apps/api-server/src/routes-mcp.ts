@@ -105,6 +105,33 @@ export function mcpRoutes(host: AgentHost): Hono {
     }
   });
 
+  app.post("/mcp-servers/:id/reconnect", async (c) => {
+    const current = (await host.listMcpServers()).find(
+      (server) => server.id === c.req.param("id"),
+    );
+    if (!current) return c.json({ error: "not_found" }, 404);
+    if (!current.enabled) {
+      return c.json(
+        {
+          error: "mcp_disabled",
+          detail: "Enable this MCP server before reconnecting it.",
+        },
+        409,
+      );
+    }
+    if (current.status !== "error" && current.status !== "crashed") {
+      return c.json(
+        {
+          error: "mcp_not_reconnectable",
+          detail: "Only failed or crashed MCP servers can be reconnected.",
+        },
+        409,
+      );
+    }
+    const server = await host.reconnectMcpServer(current.id);
+    return server ? c.json(server) : c.json({ error: "not_found" }, 404);
+  });
+
   app.get("/mcp-servers/:id", async (c) => {
     const entry = await host.userMcpServer(c.req.param("id"));
     if (!entry) return c.json({ error: "not_found" }, 404);

@@ -97,6 +97,33 @@ describe("McpHealthMonitor", () => {
     expect(onCrash).toHaveBeenCalledExactlyOnceWith("outlook");
   });
 
+  it("re-arms one server without invalidating sibling crash handlers", async () => {
+    const mon = new McpHealthMonitor();
+    const oldOutlook = {} as FakeConn;
+    const calendar = {} as FakeConn;
+    const newOutlook = {} as FakeConn;
+    const onCrash = vi.fn();
+    await mon.arm(
+      fakeClient({ outlook: oldOutlook, calendar }),
+      catalogOf({ outlook: ["mail"], calendar: ["events"] }),
+      onCrash,
+    );
+
+    await mon.armServer(
+      fakeClient({ outlook: newOutlook }),
+      "outlook",
+      ["mail", "send"],
+      onCrash,
+    );
+    oldOutlook.onclose?.();
+    expect(onCrash).not.toHaveBeenCalled();
+
+    calendar.onclose?.();
+    expect(onCrash).toHaveBeenCalledExactlyOnceWith("calendar");
+    newOutlook.onclose?.();
+    expect(onCrash).toHaveBeenNthCalledWith(2, "outlook");
+  });
+
   it("only fires onCrash once for repeated closes of the same server", async () => {
     const mon = new McpHealthMonitor();
     const conns = { outlook: {} as FakeConn };

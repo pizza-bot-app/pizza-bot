@@ -31,59 +31,71 @@ export class McpHealthMonitor {
   readonly #health = new Map<string, McpServerHealth>();
   readonly #stderrTails = new Map<string, string[]>();
   readonly #lastError = new Map<string, string>();
-  #generation = 0;
+  readonly #tokens = new Map<string, object>();
 
   async arm(
     client: McpClientLike,
     catalog: Record<string, readonly string[]>,
     onCrash: (server: string) => void,
   ): Promise<void> {
-    // Generation checks ignore late events from reload and shutdown teardown.
-    const generation = ++this.#generation;
+    this.disarm();
     this.#health.clear();
     this.#stderrTails.clear();
     this.#lastError.clear();
 
     for (const [server, toolNames] of Object.entries(catalog)) {
-      this.#health.set(server, { status: "connected", toolCount: toolNames.length });
-      const conn = await client.getClient(server).catch(() => undefined);
-      if (!conn || generation !== this.#generation) continue;
-
-      const stderr = conn.transport?.stderr;
-      if (stderr) {
-        const tail: string[] = [];
-        this.#stderrTails.set(server, tail);
-        stderr.on("data", (chunk) => {
-          const text = chunk.toString();
-          for (const line of text.split(/\r?\n/)) {
-            if (line.length === 0) continue;
-            const sanitizedLine = redactDiagnosticText(line);
-            this.#log.info(sanitizedLine, {
-              event: "mcp.stderr",
-              mcpServer: server,
-              stream: "stderr",
-            });
-            tail.push(sanitizedLine);
-            if (tail.length > STDERR_TAIL_LINES) tail.shift();
-          }
-        });
-      }
-
-      conn.onerror = (error: Error) => {
-        if (generation !== this.#generation) return;
-        this.#lastError.set(server, redactDiagnosticText(error.message));
-        this.#log.error("MCP connection error", error, {
-          event: "mcp.connection_error",
-          mcpServer: server,
-        });
-      };
-      conn.onclose = () => this.#onClose(server, generation, onCrash);
+      await this.armServer(client, server, toolNames, onCrash);
     }
+  }
+
+  async armServer(
+    client: McpClientLike,
+    server: string,
+    toolNames: readonly string[],
+    onCrash: (server: string) => void,
+  ): Promise<void> {
+    const token = {};
+    this.#tokens.set(server, token);
+    this.#health.set(server, { status: "connected", toolCount: toolNames.length });
+    this.#stderrTails.delete(server);
+    this.#lastError.delete(server);
+    const conn = await client.getClient(server).catch(() => undefined);
+    if (!conn || this.#tokens.get(server) !== token) return;
+
+    const stderr = conn.transport?.stderr;
+    if (stderr) {
+      const tail: string[] = [];
+      this.#stderrTails.set(server, tail);
+      stderr.on("data", (chunk) => {
+        const text = chunk.toString();
+        for (const line of text.split(/\r?\n/)) {
+          if (line.length === 0) continue;
+          const sanitizedLine = redactDiagnosticText(line);
+          this.#log.info(sanitizedLine, {
+            event: "mcp.stderr",
+            mcpServer: server,
+            stream: "stderr",
+          });
+          tail.push(sanitizedLine);
+          if (tail.length > STDERR_TAIL_LINES) tail.shift();
+        }
+      });
+    }
+
+    conn.onerror = (error: Error) => {
+      if (this.#tokens.get(server) !== token) return;
+      this.#lastError.set(server, redactDiagnosticText(error.message));
+      this.#log.error("MCP connection error", error, {
+        event: "mcp.connection_error",
+        mcpServer: server,
+      });
+    };
+    conn.onclose = () => this.#onClose(server, token, onCrash);
   }
 
   disarm(): void {
     // client.close() invokes onclose, so invalidate handlers before intentional teardown.
-    this.#generation++;
+    this.#tokens.clear();
   }
 
   snapshot(): Record<string, McpServerHealth> {
@@ -94,8 +106,8 @@ export class McpHealthMonitor {
     return out;
   }
 
-  #onClose(server: string, generation: number, onCrash: (server: string) => void): void {
-    if (generation !== this.#generation) return;
+  #onClose(server: string, token: object, onCrash: (server: string) => void): void {
+    if (this.#tokens.get(server) !== token) return;
     const current = this.#health.get(server);
     if (!current || current.status === "crashed") return;
     this.#health.set(server, {

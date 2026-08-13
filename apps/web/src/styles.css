@@ -1261,6 +1261,18 @@ body {
 .mcp-transport-toggle .btn-secondary.active {
   border-color: var(--brand); color: var(--text);
 }
+.mcp-reconnect {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 0; border-bottom: 1px solid var(--border);
+}
+.mcp-reconnect-copy { min-width: 0; }
+.mcp-reconnect-title { font-size: 13.5px; font-weight: 700; color: var(--bad); }
+.mcp-reconnect-detail {
+  margin-top: 3px; font-size: 12px; line-height: 1.4; color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.mcp-reconnect-button { flex: 0 0 auto; }
+.mcp-reconnect-spinner { animation: statusbar-spin .9s linear infinite; }
 .mcp-arg-rows { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .mcp-arg-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
 .mcp-kv-rows { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -1299,6 +1311,11 @@ body {
 .resource-editor-actions-spacer { flex: 1; }
 .resource-editor-delete { color: var(--danger, #e5484d); }
 .resource-editor-delete:hover:not(:disabled) { border-color: var(--danger, #e5484d); }
+
+@media (max-width: 560px) {
+  .mcp-reconnect { align-items: stretch; flex-direction: column; }
+  .mcp-reconnect-button { align-self: flex-start; }
+}
 
 .resource-generate {
   display: flex; flex-direction: column; gap: 8px;

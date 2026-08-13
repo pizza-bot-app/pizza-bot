@@ -9,10 +9,17 @@ export interface McpServerCardProps {
   server: McpServerRow;
   onBack?: () => void;
   enablement?: ReactNode;
+  reconnectControl?: ReactNode;
   dependents?: ReactNode;
 }
 
-export function McpServerCard({ server, enablement, dependents, onBack }: McpServerCardProps) {
+export function McpServerCard({
+  server,
+  enablement,
+  reconnectControl,
+  dependents,
+  onBack,
+}: McpServerCardProps) {
   const isStdio = "command" in server.entry;
   const statusLabel =
     server.status === "connected"
@@ -59,6 +66,7 @@ export function McpServerCard({ server, enablement, dependents, onBack }: McpSer
       </header>
 
       {enablement}
+      {reconnectControl}
 
       <section className="resource-card-section">
         <h3 className="resource-card-section-title">

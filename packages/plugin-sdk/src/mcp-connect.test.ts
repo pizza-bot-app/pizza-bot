@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { chmodSync, mkdtempSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { connectMcpServers } from "./plugin-host.js";
+import { connectMcpServers, McpClientPool } from "./plugin-host.js";
 import {
   loadUserMcpServers,
   writeUserMcpServers,
@@ -204,6 +204,42 @@ describe("connectMcpServers", () => {
     );
     expect(r).toMatchObject({ tools: {}, catalog: {}, errors: {} });
     expect(events).toEqual([]);
+  });
+});
+
+describe("McpClientPool", () => {
+  it("transfers one replacement without disturbing sibling ownership", async () => {
+    const oldMail = {
+      getClient: vi.fn(async () => ({ id: "old-mail" })),
+      close: vi.fn(async () => {}),
+    };
+    const calendar = {
+      getClient: vi.fn(async () => ({ id: "calendar" })),
+      close: vi.fn(async () => {}),
+    };
+    const newMail = {
+      getClient: vi.fn(async () => ({ id: "new-mail" })),
+      close: vi.fn(async () => {}),
+    };
+    const pool = new McpClientPool(
+      new Map([
+        ["mail", oldMail as never],
+        ["calendar", calendar as never],
+      ]),
+    );
+    const replacement = new McpClientPool(
+      new Map([["mail", newMail as never]]),
+    );
+
+    const displaced = pool.replaceServer("mail", replacement);
+
+    expect(replacement.size).toBe(0);
+    await expect(pool.getClient("mail")).resolves.toEqual({ id: "new-mail" });
+    await expect(pool.getClient("calendar")).resolves.toEqual({ id: "calendar" });
+    await displaced?.close();
+    expect(oldMail.close).toHaveBeenCalledOnce();
+    expect(calendar.close).not.toHaveBeenCalled();
+    expect(newMail.close).not.toHaveBeenCalled();
   });
 });
 

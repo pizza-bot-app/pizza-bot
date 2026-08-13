@@ -14,12 +14,14 @@ import {
   type CapabilityVisualState,
 } from "../CapabilityControls.js";
 import { McpDependents } from "./McpDependents.js";
+import { McpReconnectControl } from "./McpReconnectControl.js";
 
 export interface McpServersModuleProps {
   servers: McpServerRow[];
   onCreate: (id: string, entry: McpServerEntryWire) => Promise<McpServerRow>;
   onUpdate: (id: string, entry: McpServerEntryWire) => Promise<McpServerRow>;
   onSetEnabled: (id: string, enabled: boolean) => Promise<McpServerRow>;
+  onReconnect: (id: string) => Promise<McpServerRow>;
   onDelete: (id: string) => Promise<boolean>;
   onGetDoc: (id: string) => Promise<McpServerDoc | undefined>;
 }
@@ -40,7 +42,15 @@ function mcpVisualState(server: McpServerRow): CapabilityVisualState {
   return "unavailable";
 }
 
-export function McpServersModule({ servers, onCreate, onUpdate, onSetEnabled, onDelete, onGetDoc }: McpServersModuleProps) {
+export function McpServersModule({
+  servers,
+  onCreate,
+  onUpdate,
+  onSetEnabled,
+  onReconnect,
+  onDelete,
+  onGetDoc,
+}: McpServersModuleProps) {
   return (
     <ResourceModule
       items={servers}
@@ -95,6 +105,7 @@ export function McpServersModule({ servers, onCreate, onUpdate, onSetEnabled, on
           onCreate={onCreate}
           onUpdate={onUpdate}
           onSetEnabled={onSetEnabled}
+          onReconnect={onReconnect}
           onDelete={onDelete}
           onGetDoc={onGetDoc}
         />
@@ -112,6 +123,7 @@ function McpServerDetail({
   onCreate,
   onUpdate,
   onSetEnabled,
+  onReconnect,
   onDelete,
   onGetDoc,
 }: {
@@ -120,7 +132,7 @@ function McpServerDetail({
   setSelection: (next: import("../ResourceModule.js").ResourceSelection) => void;
   backToList?: () => void;
   confirmAction: import("../ResourceModule.js").ResourceDetailArgs<McpServerRow>["confirmAction"];
-} & Pick<McpServersModuleProps, "onCreate" | "onUpdate" | "onSetEnabled" | "onDelete" | "onGetDoc">) {
+} & Pick<McpServersModuleProps, "onCreate" | "onUpdate" | "onSetEnabled" | "onReconnect" | "onDelete" | "onGetDoc">) {
   const isUser = selected?.source === "user";
   const doc = useKeyedDoc(
     selection?.mode === "view" && isUser && selected ? selected.id : null,
@@ -149,6 +161,9 @@ function McpServerDetail({
       onChange={(enabled) => onSetEnabled(selected.id, enabled)}
     />
   ) : undefined;
+  const reconnectControl = selected ? (
+    <McpReconnectControl server={selected} onReconnect={onReconnect} />
+  ) : undefined;
   const dependents = selected ? <McpDependents skills={selected.dependentSkills} /> : undefined;
 
   if (selection?.mode === "new") {
@@ -172,6 +187,7 @@ function McpServerDetail({
         key={doc.id}
         server={doc}
         enablement={enablement}
+        reconnectControl={reconnectControl}
         dependents={dependents}
         onSave={handleSave}
         onDelete={() =>
@@ -194,6 +210,7 @@ function McpServerDetail({
       <McpServerCard
         server={selected}
         enablement={enablement}
+        reconnectControl={reconnectControl}
         dependents={dependents}
         onBack={backToList}
       />

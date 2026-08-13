@@ -1124,6 +1124,15 @@ export class AgentHost {
     return (await this.listMcpServers()).find((candidate) => candidate.id === id);
   }
 
+  async reconnectMcpServer(id: string): Promise<McpServerListEntry | undefined> {
+    const reconnect = this.mcpReloads.then(() => this.reconnectMcpServerOnce(id));
+    this.mcpReloads = reconnect.then(
+      () => {},
+      () => {},
+    );
+    return reconnect;
+  }
+
   async mcpServerDisableBlockers(
     id: string,
   ): Promise<Array<{ id: string; name: string }>> {
@@ -1208,7 +1217,7 @@ export class AgentHost {
     });
     console.error(
       `[mcp] server "${server}" crashed — invalidating ${deadToolNames.size} tool(s); ` +
-        `re-add it via the MCP settings to reconnect`,
+        "scheduling reconnect",
     );
     const nextCatalog: ToolCatalog = { ...this.mcpCatalog };
     delete nextCatalog[server];
@@ -1229,7 +1238,7 @@ export class AgentHost {
     const timer = setTimeout(() => {
       this.mcpRecoveryTimers.delete(server);
       if (this.closing) return;
-      void this.reloadMcpServers().catch((err) => {
+      void this.reconnectMcpServer(server).catch((err) => {
         console.error(`[mcp] automatic recovery after "${server}" crash failed:`, err);
       });
     }, 1_000);
@@ -1257,6 +1266,105 @@ export class AgentHost {
           ),
         )
       : {};
+  }
+
+  private async reconnectMcpServerOnce(
+    id: string,
+  ): Promise<McpServerListEntry | undefined> {
+    await this.warmup;
+    const userEntries = await this.loadUserMcpEntries();
+    const merged = this.effectiveMcpEntries(
+      this.pluginMcpServers ?? {},
+      userEntries,
+    );
+    const entry = merged[id];
+    if (!entry) return undefined;
+    if (entry.enabled === false) {
+      return (await this.listMcpServers()).find((server) => server.id === id);
+    }
+
+    const previousLifecycle = this.mcpLifecycle.get(id);
+    const previousTools = this.mcpTools;
+    const previousCatalog = this.mcpCatalog;
+    this.mcpLifecycle.set(id, { status: "loading", toolCount: 0 });
+
+    const result = await connectMcpServers(
+      { [id]: entry },
+      process.env.PIZZA_MCP_NODE_PATH ?? undefined,
+      (m) => console.log(`[mcp] ${m}`),
+      "pipe",
+      this.providerMcpEnv,
+      {
+        electronRunAsNode:
+          Boolean(process.versions.electron) &&
+          process.env.PIZZA_MCP_NODE_PATH === process.execPath,
+        connectionTimeoutMs: positiveInt(
+          process.env.PIZZA_MCP_CONNECTION_TIMEOUT_MS,
+          20_000,
+        ),
+        onStatus: (event) => this.recordMcpStatus(event),
+      },
+    );
+    const connectedTools = result.catalog[id];
+    if (!result.client || !connectedTools) {
+      return (await this.listMcpServers()).find((server) => server.id === id);
+    }
+
+    const nextTools = Object.fromEntries(
+      Object.entries(previousTools).filter(
+        ([name]) => !name.startsWith(`mcp:${id}:`),
+      ),
+    );
+    Object.assign(nextTools, result.tools);
+    const nextCatalog: ToolCatalog = {
+      ...previousCatalog,
+      [id]: connectedTools,
+    };
+    const plugins = this.pluginsImpl;
+    if (!plugins) {
+      await result.client.close().catch(() => {});
+      if (previousLifecycle) this.mcpLifecycle.set(id, previousLifecycle);
+      else this.mcpLifecycle.delete(id);
+      throw new Error("MCP client pool is unavailable");
+    }
+
+    const mutable = plugins as { client?: McpClientPool };
+    const existingPool = mutable.client;
+    let activePool: McpClientPool;
+    let displaced: McpClientPool | undefined;
+    if (existingPool) {
+      displaced = existingPool.replaceServer(id, result.client);
+      activePool = existingPool;
+    } else {
+      activePool = result.client;
+      mutable.client = activePool;
+    }
+
+    try {
+      await this.applyMcpCapabilities(nextTools, nextCatalog);
+      await this.mcpHealth.armServer(
+        activePool as McpClientLike,
+        id,
+        connectedTools,
+        (server) => this.handleMcpCrash(server),
+      );
+      this.retireMcpClient(displaced);
+    } catch (error) {
+      let failedReplacement: McpClientPool | undefined;
+      if (existingPool) {
+        failedReplacement = existingPool.replaceServer(id, displaced);
+      } else {
+        delete mutable.client;
+        failedReplacement = activePool;
+      }
+      await failedReplacement?.close().catch(() => {});
+      if (previousLifecycle) this.mcpLifecycle.set(id, previousLifecycle);
+      else this.mcpLifecycle.delete(id);
+      await this.applyMcpCapabilities(previousTools, previousCatalog).catch(() => {});
+      throw error;
+    }
+
+    return (await this.listMcpServers()).find((server) => server.id === id);
   }
 
   private effectiveMcpEntries(

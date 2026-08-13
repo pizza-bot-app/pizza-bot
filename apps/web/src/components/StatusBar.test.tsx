@@ -143,7 +143,7 @@ describe("StatusBar", () => {
     );
   });
 
-  it("reserves MCP failure styling for terminal failures", () => {
+  it("uses warning styling when at least one MCP server remains available", () => {
     const html = renderStatusBar(
       false,
       true,
@@ -154,6 +154,22 @@ describe("StatusBar", () => {
     );
 
     expect(html).toContain("MCP servers: 1/2 servers loaded · 1 failed");
+    expect(html).toContain(
+      'class="statusbar-icon text-warn" type="button" aria-label="MCP servers:',
+    );
+  });
+
+  it("reserves MCP failure styling for complete unavailability", () => {
+    const html = renderStatusBar(
+      false,
+      true,
+      statusWithMcp([
+        { name: "calendar", status: "error", toolCount: 0 },
+        { name: "mail", status: "crashed", toolCount: 0 },
+      ]),
+    );
+
+    expect(html).toContain("MCP servers: 0/2 servers loaded · 2 failed");
     expect(html).toContain(
       'class="statusbar-icon text-bad" type="button" aria-label="MCP servers:',
     );
