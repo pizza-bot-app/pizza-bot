@@ -59,7 +59,12 @@ if (handleSquirrelStartup()) {
 if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
-if (process.platform === "win32") {
+// Dev runs (`electron .`) share this process's win32 platform check but must not
+// register the production AUMID against node_modules/electron/dist/electron.exe —
+// Windows caches that pairing (Start Menu shortcut + jump-list store) keyed by the
+// AUMID string, and the generic Electron name/icon then bleeds into the real
+// packaged install on the same machine, surviving reinstalls.
+if (process.platform === "win32" && app.isPackaged) {
   app.setAppUserModelId(SQUIRREL_APP_ID);
 }
 
