@@ -165,10 +165,24 @@ export function useMcpServersAdmin(client: ApiClient, intervalMs = 5_000, enable
     (id: string, enabled: boolean) => client.setMcpServerEnabled(id, enabled),
     refresh,
   );
+  const reconnect = refreshAfter(
+    (id: string) => client.reconnectMcpServer(id),
+    refresh,
+  );
   const remove = refreshAfter((id: string) => client.deleteMcpServer(id), refresh);
   const getDoc = useCallback((id: string) => client.getMcpServer(id), [client]);
 
-  return { servers, loading, refresh, create, update, setEnabled, remove, getDoc };
+  return {
+    servers,
+    loading,
+    refresh,
+    create,
+    update,
+    setEnabled,
+    reconnect,
+    remove,
+    getDoc,
+  };
 }
 
 // onModelsStale re-fetches the model catalog: configuring or removing a provider,

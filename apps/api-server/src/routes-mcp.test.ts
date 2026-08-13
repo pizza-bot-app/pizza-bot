@@ -64,6 +64,100 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
     expect(status!.toolCount).toBeGreaterThan(0);
   }, 20_000);
 
+  it("reconnects one failed server without replacing healthy sibling tools", async () => {
+    writeFileSync(
+      configFile,
+      JSON.stringify({
+        mcpServers: {
+          recoverable: { command: "pizza-bot-command-that-does-not-exist" },
+        },
+      }),
+    );
+    await host.reloadMcpServers();
+    expect((await list()).find((server) => server.id === "recoverable")).toMatchObject({
+      status: "error",
+      toolCount: 0,
+    });
+    const beforeTools = (host as unknown as {
+      mcpTools: Record<string, unknown>;
+    }).mcpTools;
+    const healthyTool = beforeTools["mcp:mcp-status:get_mcp_status"];
+
+    const failedRetry = await app.request(
+      "/mcp-servers/recoverable/reconnect",
+      { method: "POST" },
+    );
+    expect(failedRetry.status).toBe(200);
+    expect(await failedRetry.json()).toMatchObject({
+      id: "recoverable",
+      status: "error",
+    });
+    expect(
+      (host as unknown as { mcpTools: Record<string, unknown> }).mcpTools[
+        "mcp:mcp-status:get_mcp_status"
+      ],
+    ).toBe(healthyTool);
+
+    writeFileSync(
+      configFile,
+      JSON.stringify({
+        mcpServers: {
+          recoverable: { command: "node", args: [STATUS_SERVER] },
+        },
+      }),
+    );
+    const response = await app.request("/mcp-servers/recoverable/reconnect", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      id: "recoverable",
+      status: "connected",
+      toolCount: 1,
+    });
+    const afterTools = (host as unknown as {
+      mcpTools: Record<string, unknown>;
+    }).mcpTools;
+    expect(afterTools["mcp:mcp-status:get_mcp_status"]).toBe(healthyTool);
+    expect(afterTools).toHaveProperty("mcp:recoverable:get_mcp_status");
+  }, 30_000);
+
+  it("rejects reconnecting connected, disabled, and unknown servers", async () => {
+    const connected = await app.request("/mcp-servers/mcp-status/reconnect", {
+      method: "POST",
+    });
+    expect(connected.status).toBe(409);
+    expect(await connected.json()).toMatchObject({
+      error: "mcp_not_reconnectable",
+    });
+
+    writeFileSync(
+      configFile,
+      JSON.stringify({
+        mcpServers: {
+          sleeping: {
+            command: "node",
+            args: [STATUS_SERVER],
+            enabled: false,
+          },
+        },
+      }),
+    );
+    await host.reloadMcpServers();
+
+    const disabled = await app.request("/mcp-servers/sleeping/reconnect", {
+      method: "POST",
+    });
+    expect(disabled.status).toBe(409);
+    expect(await disabled.json()).toMatchObject({ error: "mcp_disabled" });
+
+    const missing = await app.request("/mcp-servers/missing/reconnect", {
+      method: "POST",
+    });
+    expect(missing.status).toBe(404);
+  }, 20_000);
+
   it("enforces skill and MCP enablement dependencies for plugin contributions", async () => {
     const initial = (await (await app.request("/mcp-servers")).json()) as {
       servers: Array<{

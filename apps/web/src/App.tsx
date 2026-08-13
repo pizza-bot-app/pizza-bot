@@ -426,6 +426,7 @@ export function App() {
                 onCreate={mcpAdmin.create}
                 onUpdate={mcpAdmin.update}
                 onSetEnabled={mcpAdmin.setEnabled}
+                onReconnect={mcpAdmin.reconnect}
                 onDelete={mcpAdmin.remove}
                 onGetDoc={mcpAdmin.getDoc}
               />

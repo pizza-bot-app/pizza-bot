@@ -268,6 +268,14 @@ export class ApiClient {
     });
   }
 
+  async reconnectMcpServer(id: string): Promise<McpServerRow> {
+    return this.json(
+      "reconnect MCP server",
+      `/mcp-servers/${encodeURIComponent(id)}/reconnect`,
+      { method: "POST" },
+    );
+  }
+
   async deleteMcpServer(id: string): Promise<boolean> {
     return deletedFlag(
       await this.json("delete mcp server", `/mcp-servers/${encodeURIComponent(id)}`, { method: "DELETE" }),

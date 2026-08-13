@@ -10,6 +10,7 @@ export interface McpServerEditorProps {
   onSave: (id: string, entry: McpServerEntryWire) => Promise<void>;
   onDelete?: () => Promise<void>;
   enablement?: ReactNode;
+  reconnectControl?: ReactNode;
   dependents?: ReactNode;
   onCancel: () => void;
 }
@@ -34,7 +35,15 @@ function fromRows(rows: KV[]): Record<string, string> | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-export function McpServerEditor({ server, onSave, onDelete, enablement, dependents, onCancel }: McpServerEditorProps) {
+export function McpServerEditor({
+  server,
+  onSave,
+  onDelete,
+  enablement,
+  reconnectControl,
+  dependents,
+  onCancel,
+}: McpServerEditorProps) {
   const notify = useAppToast();
   const isNew = server === null;
   const entry = server?.entry;
@@ -106,6 +115,7 @@ export function McpServerEditor({ server, onSave, onDelete, enablement, dependen
 
       <div className="resource-editor-body">
         {enablement}
+        {reconnectControl}
 
         <label className="field">
           <span className="field-label">Name</span>

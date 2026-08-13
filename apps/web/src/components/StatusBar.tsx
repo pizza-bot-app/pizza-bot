@@ -209,7 +209,9 @@ export function StatusBar({
     : status.mcp.total === 0
       ? "warn"
       : mcpFailed > 0
-        ? "bad"
+        ? status.mcp.loaded > 0 || mcpLoading > 0
+          ? "warn"
+          : "bad"
         : mcpLoading > 0
           ? "info"
           : status.mcp.available

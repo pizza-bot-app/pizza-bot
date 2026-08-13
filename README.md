@@ -149,6 +149,8 @@ String fields in `.mcp.json` expand environment references at connect time. Set
 Startup runs at most three connections at a time and gives each attempt 20
 seconds by default; override those limits with `PIZZA_MCP_STARTUP_CONCURRENCY`
 and `PIZZA_MCP_CONNECTION_TIMEOUT_MS`.
+An enabled server that exhausts its connection attempts can be retried from its
+MCP Servers detail screen without reconnecting healthy servers.
 
 ### Shipped MCP Status example
 

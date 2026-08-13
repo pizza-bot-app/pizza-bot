@@ -86,10 +86,10 @@ interface ToolListingClient {
  * successful connections independent from failed or restarting siblings.
  */
 export class McpClientPool {
-  readonly #clients: ReadonlyMap<string, MultiServerMCPClient>;
+  readonly #clients: Map<string, MultiServerMCPClient>;
 
   constructor(clients: ReadonlyMap<string, MultiServerMCPClient>) {
-    this.#clients = clients;
+    this.#clients = new Map(clients);
   }
 
   get size(): number {
@@ -98,6 +98,29 @@ export class McpClientPool {
 
   async getClient(serverName: string): Promise<ServerClient> {
     return this.#clients.get(serverName)?.getClient(serverName);
+  }
+
+  /**
+   * Transfers one connection from `replacement` and returns the displaced
+   * connection as a separately owned pool.
+   */
+  replaceServer(
+    serverName: string,
+    replacement: McpClientPool | undefined,
+  ): McpClientPool | undefined {
+    const previous = this.#clients.get(serverName);
+    const next = replacement
+      ? replacement.#clients.get(serverName)
+      : undefined;
+    if (next && replacement) {
+      this.#clients.set(serverName, next);
+      replacement.#clients.delete(serverName);
+    } else {
+      this.#clients.delete(serverName);
+    }
+    return previous
+      ? new McpClientPool(new Map([[serverName, previous]]))
+      : undefined;
   }
 
   async close(): Promise<void> {
