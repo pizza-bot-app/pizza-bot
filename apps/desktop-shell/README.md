@@ -85,8 +85,9 @@ cross-package hazard. Type-checking is still done by `tsc --noEmit` (the
 - **No compiler toolchain required to package.** `better-sqlite3` (v13+) runs on
   N-API and bundles prebuilt binaries for every packaged platform, so packaging does
   not compile natives — it just stages the module into `dist-server/node_modules`.
-  `npm install` on Windows is the exception: npm's implicit `node-gyp rebuild`
-  needs MSVC even though the result goes unused (see the README's Develop note).
+  `npm install` on Windows also needs no compiler: the root `allowScripts`
+  policy disables npm's unused implicit `node-gyp rebuild` (see
+  [Contributing](../../CONTRIBUTING.md#getting-started)).
 
 Packaging is supported on macOS, Windows, and Linux; each `npm run make` host
 produces installers for its own platform (see the makers in `forge.config.ts`).

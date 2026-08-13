@@ -146,11 +146,24 @@ Open `http://localhost:5173`. Vite proxies `/api` to the standalone backend.
 This local example does not set a bearer token; the API remains bound to
 `127.0.0.1`.
 
-The Vite proxy does not inject authentication. For an authenticated static
-browser deployment, build the web workspace and set `apiBase` and `apiToken` in
-the deployed `dist/pizza-config.js` as described in the root
-[README](../README.md). Restrict access to that application
-because its users can read the shared browser token.
+The Vite proxy does not inject authentication.
+
+### Static browser deployment
+
+Build the web workspace and replace `dist/pizza-config.js` at deploy time:
+
+```js
+window.__PIZZA_CONFIG__ = {
+  apiBase: "https://api.pizza.example",
+  apiToken: "the-same-value-as-PIZZA_API_TOKEN",
+};
+```
+
+Set `PIZZA_ALLOWED_ORIGINS` on the API server to the browser application's exact
+origin. Serve both endpoints over TLS and configure `pizza-config.js` with
+`Cache-Control: no-store`. The shared bearer token is visible to anyone who can
+load the application, so access to the static app must be restricted.
+Credentials are never accepted through URL query parameters.
 
 ## Configure the backend
 
