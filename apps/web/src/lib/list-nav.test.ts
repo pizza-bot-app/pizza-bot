@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { nextNavIndex, scrollListItemIntoView, selectionAfterDelete } from "./list-nav.js";
+import {
+  activeSelectionAfterDelete,
+  nextNavIndex,
+  scrollListItemIntoView,
+  selectionAfterDelete,
+} from "./list-nav.js";
 
 describe("nextNavIndex (conversation-list arrow nav)", () => {
   it("moves down and up within range", () => {
@@ -46,6 +51,16 @@ describe("selectionAfterDelete", () => {
   it("returns undefined when no visible rows remain", () => {
     expect(selectionAfterDelete(["only"], 0)).toBeUndefined();
     expect(selectionAfterDelete([], -1)).toBeUndefined();
+  });
+});
+
+describe("activeSelectionAfterDelete", () => {
+  it("clears the deleted active row even when no replacement exists", () => {
+    expect(activeSelectionAfterDelete("new-thread", "new-thread")).toBeNull();
+  });
+
+  it("preserves a different active row", () => {
+    expect(activeSelectionAfterDelete("remaining", "deleted")).toBe("remaining");
   });
 });
 

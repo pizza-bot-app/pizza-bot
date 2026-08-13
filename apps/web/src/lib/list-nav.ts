@@ -12,6 +12,13 @@ export function selectionAfterDelete<T>(
   return visibleItems[deletedIndex + 1] ?? visibleItems[deletedIndex - 1];
 }
 
+export function activeSelectionAfterDelete(
+  activeId: string | null,
+  deletedId: string,
+): string | null {
+  return activeId === deletedId ? null : activeId;
+}
+
 export function scrollListItemIntoView(
   itemId: string,
   firstItemId: string | undefined,
