@@ -25,6 +25,7 @@ import { findMcpNode } from "@pizza-bot/plugin-sdk/runtime-resolver";
 import { PROTOCOL_VERSION } from "@pizza-bot/core";
 import { isAllowedRendererNavigation } from "./navigation-policy.js";
 import { handleSquirrelStartup, SQUIRREL_APP_ID } from "./squirrel-startup.js";
+import { resolveWindowIconPath } from "./window-icon.js";
 import {
   BoundedRetention,
   NATIVE_NOTIFICATION_CHANNELS,
@@ -585,11 +586,18 @@ async function restartSidecar(): Promise<void> {
 function createWindow(connection: ActiveConnection): void {
   rendererApiToken = connection.apiToken;
   const rendererEntry = resolveRendererEntry();
+  const windowIcon = resolveWindowIconPath({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+  });
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     center: true,
     title: "Pizza Bot OSS",
+    ...(windowIcon ? { icon: windowIcon } : {}),
     webPreferences: {
       // Sandboxed Electron preloads load as CommonJS.
       preload: path.join(__dirname, "preload.cjs"),
