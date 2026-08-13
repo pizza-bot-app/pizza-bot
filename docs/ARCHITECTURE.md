@@ -94,10 +94,9 @@ The load-bearing seam is the **protocol + SDK projection** boundary: every clien
 drives the agent through the `@langchain/langgraph-sdk`
 `Client`/`ThreadStream`/`StreamController` over HTTP/SSE. The SDK decodes the
 runtime's native `@langchain/protocol` frames into its own projections; clients
-render those projections. There is **no normalized union, no `RuntimeClient`
-interface, and no React coupling in the seam** — the app drives a headless
-`StreamController`. There is also **no `RuntimeProvider` producer abstraction** —
-the app is coupled to LangGraph by design (§11 "Coupled to LangGraph").
+render those projections through a headless `StreamController`, keeping React
+code outside the transport boundary. The api-server assembles the concrete
+LangGraph runtime through `createPizzaBotAgent`.
 
 The production transport is **HTTP** (the SDK's `HttpAgentServerAdapter`), which
 talks to `api-server`'s Agent-Protocol routes (§6). Every client — web, desktop,
@@ -112,16 +111,14 @@ supported artifact sizes.
 `InProcessTransport` exists only under `apps/api-server/src/test-utils` as a
 protocol assembly test harness; it is not a deployment mode.
 
-**The concrete runtime is reached through a factory, not an interface.**
+**Runtime assembly.**
 `runtime-langgraph` exports `createPizzaBotAgent(systemPrompt, deps):
 Promise<LangGraphAgent>`; the returned agent structurally satisfies core's minimal
 `AgentHandle` (`core/src/agent-run.ts`) — the state read/write methods (`getState`
 / `getStateHistory` / `updateState`). The streaming method `streamProtocol` is
-deliberately NOT on that interface (its `ProtocolEvent`s can't be named without a
-`@langchain/langgraph` import), so it lives only on the concrete `LangGraphAgent`.
-This keeps pure `core` free of a `deepagents` import without a producer matrix. The
-one runtime precondition that varied (HITL needs a checkpointer) is a plain `if`
-inside the factory, not a capability gate.
+on the concrete `LangGraphAgent` because its `ProtocolEvent`s require a
+`@langchain/langgraph` type. This keeps pure `core` free of a `deepagents`
+import. The factory also enforces HITL's checkpointer requirement.
 
 Background runs outlive the request that started them via the host's
 `ProtocolRunManager`: a consumer starts a run, may drop the SSE connection, and
@@ -134,10 +131,10 @@ reconnects with `since` to replay the gap then live-tail — see §6 and §9.
 The runtime streams via LangGraph's `streamEvents(v3)` and yields raw
 `@langchain/protocol` `ProtocolEvent` frames — the wire the
 `@langchain/langgraph-sdk` transport + `StreamController` were built to decode.
-There is no normalized union in between: `runtime-langgraph`'s
-`streamProtocolEvents` (`stream-protocol.ts`) is a linear pump, and all run-scoped
-correlation (tool-call ↔ result and subagent namespacing) is either native to the
-v3 stream or reassembled client-side by the SDK.
+`runtime-langgraph`'s `streamProtocolEvents` (`stream-protocol.ts`) is a linear
+pump, and all run-scoped correlation (tool-call ↔ result and subagent
+namespacing) is either native to the v3 stream or reassembled client-side by the
+SDK.
 
 The projection helpers map the SDK's decoded message projections **out** to AI
 Elements `UIMessage.parts` (`messagesToUI` / `overlayInterrupt` in
@@ -449,9 +446,8 @@ subscriptions recover after sleep or a half-open remote connection.
 
 - **api-server** — the Hono remote harness (§6). `AgentHost` composes durable
   persistence + model + agent def into a `LangGraphAgent` via
-  `createPizzaBotAgent` (LangGraph is always checkpointer-backed, so there's no
-  runtime to select and no checkpointing capability to assert). It holds
-  no business logic: the durable run-end side effects (FTS reindex, sidebar
+  `createPizzaBotAgent`; every graph is checkpointer-backed. It holds no
+  business logic: the durable run-end side effects (FTS reindex, sidebar
   refresh, LLM title generation, per-message agent attribution) live in
   `@pizza-bot/storage`'s `RunMaintenance` next to the stores they mutate, behind an
   injected-deps seam (so storage imports no model provider / runtime SDK); the
@@ -475,28 +471,24 @@ subscriptions recover after sleep or a half-open remote connection.
 
 ## 11. Design decisions
 
-### Coupled to LangGraph; the native protocol stream is the seam
+### Runtime and protocol boundary
 
 Every agent is **stateful**: checkpointer-backed, resumable, time-travelable. The
-runtime is DeepAgents/LangGraph, and the app is **coupled to it by design** —
-reached through the `createPizzaBotAgent` factory, not a `RuntimeProvider` /
-capability-matrix abstraction. A producer abstraction over a single,
-already-LangChain-coupled implementation buys nothing and costs type-safety (the
-model handle would have to launder through `unknown` and be cast back at every
-consumer). Instead:
+runtime is DeepAgents/LangGraph, assembled by the api-server through the
+`createPizzaBotAgent` factory:
 
 - The concrete `LangGraphAgent` structurally satisfies core's minimal
   `AgentHandle` (state read/write). Pure `core` imports no `deepagents` /
   `@langchain/langgraph`; it *may* reference `@langchain/core` model/agent TYPES
-  (`BaseChatModel`), so the model seam is typed, not cast.
-- The one precondition that actually varies (HITL needs a checkpointer) is a
-  plain `if` in the factory, not a `RuntimeCapabilities` gate.
+  (`BaseChatModel`), so the model seam remains typed.
+- `LangGraphAgent.streamProtocol()` emits native `@langchain/protocol` frames,
+  and the SDK owns tool-call correlation, subagent namespacing, message-part
+  merging, and reconnect replay.
+- The factory validates that skills requiring HITL receive a checkpointer.
 
-**What we give up:** the "swap in a second runtime" story (real but unused). A
-future runtime would have to emit `@langchain/protocol` frames (or be adapted to);
-a thin producer interface can be re-introduced then — cheaply, with a concrete
-second implementation in hand to shape it. See
-[`packages/RUNTIMES.md`](../packages/RUNTIMES.md).
+The externally shared seam is the **transport + SDK projection** boundary:
+frontends import neither the runtime graph engine nor model bindings and render
+decoded SDK projections rather than raw LangGraph internals.
 
 ### Why the protocol is not the LangGraph Agent Server API
 
@@ -517,21 +509,6 @@ a desktop app. Our api-server / `ProtocolRunManager` / trigger-service are the
 deliberately-lightweight alternative. We reuse native LangGraph
 `ProtocolEvent` frames and checkpoint-shaped state values, but do not claim
 Agent Server route or standard-client compatibility.
-
-### Why the native protocol stream, not a hand-rolled normalized union
-
-Normalizing the LangGraph stream into a single hand-owned event union that every
-frontend consumes through a bespoke client interface + folding layer is a tempting
-shape, but it means owning and maintaining ~1.5k LOC of seam to reproduce
-projections the `@langchain/langgraph-sdk` already computes from the runtime's
-native `streamEvents(v3)` output: tool-call ↔ result correlation, subagent
-namespacing, message-part merging, reconnect/replay. Instead the runtime emits v3
-`@langchain/protocol` frames straight onto the SDK transport, which a headless
-`StreamController` consumes from the Hono Agent-Protocol wire.
-
-The seam is still real, just located at the **transport + SDK projection**
-boundary: the frontend imports no runtime graph engine and no model binding, and
-renders off decoded projections rather than raw LangGraph internals.
 
 ### External plugin contributions are declarative
 

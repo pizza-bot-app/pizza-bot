@@ -9,13 +9,17 @@ with the [README](README.md) for layout and how to run, and
 
 ```bash
 node -v            # need >= 24
-npm install        # installs workspaces + builds the better-sqlite3 native addon
+npm install        # installs workspaces; better-sqlite3 uses a shipped prebuild
 npm run build      # required before running an app from a fresh clone
 npm run typecheck  # tsc across the whole project-reference graph
 npm test           # turbo run test --concurrency=2
 npm run lint       # eslint flat config
 cp .env.example .env   # then fill in credentials for a model provider (see below)
 ```
+
+On Windows, `npm install` does not require Visual Studio C++ build tools.
+`better-sqlite3` ships a prebuilt binary, and the root `allowScripts` policy
+disables its unused implicit `node-gyp rebuild`.
 
 The `@pizza-bot/*` workspace packages resolve to built `dist/` output. Run
 `npm run build` once after a fresh clone or clean before starting an app directly
@@ -68,9 +72,8 @@ npx tsc --noEmit -p packages/<pkg>/tsconfig.json
 
 The value of this codebase is one clean seam: the runtime emits native
 `@langchain/protocol` frames, and every frontend consumes them through the
-`@langchain/langgraph-sdk` `StreamController`/`ThreadStream` over HTTP/SSE — no
-normalized union and no React coupling in the seam. Please keep it
-intact:
+`@langchain/langgraph-sdk` `StreamController`/`ThreadStream` over HTTP/SSE.
+React code stays outside that transport boundary. Please keep it intact:
 
 - **`packages/core`** is nearly pure but may reference
   `@langchain/core` model/agent **types** (`BaseChatModel`) — the app is coupled to

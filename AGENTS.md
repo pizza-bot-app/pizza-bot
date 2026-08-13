@@ -11,8 +11,7 @@ emits native
 `@langchain/protocol` `ProtocolEvent` frames via `streamEvents(v3)`; every
 frontend consumes them through the `@langchain/langgraph-sdk`
 `Client`/`ThreadStream`/`StreamController` over HTTP/SSE. The seam is that
-**protocol + SDK projection** boundary — there is no normalized union and no
-React coupling in it. Respect it.
+**protocol + SDK projection** boundary; keep React coupling outside it.
 
 ## Layering discipline (don't break these)
 
@@ -39,14 +38,13 @@ React coupling in it. Respect it.
 - The frontend (`apps/web`) never imports a runtime or a model
   binding. It MAY import the transport SDK (`@langchain/langgraph-sdk`) — that's
   the wire — but never the runtime graph engine.
-- The concrete runtime is reached via the `createPizzaBotAgent` factory
-  (`packages/runtime-langgraph`), not a `RuntimeProvider` abstraction. Core
-  knows only the minimal structural `AgentHandle` (`core/src/agent-run.ts`) the
-  concrete agent satisfies (state read/write; the streaming method
-  `streamProtocol` lives on the concrete `LangGraphAgent`, since its
-  `ProtocolEvent`s can't be named without a `@langchain/langgraph` import). Only
-  stateful, checkpointer-backed runtimes are supported (see
-  [packages/RUNTIMES.md](packages/RUNTIMES.md)).
+- The api-server assembles the concrete runtime through
+  `createPizzaBotAgent` (`packages/runtime-langgraph`). Core knows only the
+  minimal structural `AgentHandle` (`core/src/agent-run.ts`) the concrete agent
+  satisfies (state read/write; the streaming method `streamProtocol` lives on
+  the concrete `LangGraphAgent`, since its `ProtocolEvent`s can't be named
+  without a `@langchain/langgraph` import). The runtime is stateful and
+  checkpointer-backed.
 
 ## Where things live (for the common asks)
 
@@ -120,7 +118,7 @@ are written — keep them in mind when adding assertions or temp-dir cleanup:
   (see `apps/desktop-shell` `sidecar.test.ts`). This surfaces under full-suite
   load and usually *not* in an isolated run, so reproduce with `npm test`.
 
-`npm install` does not need MSVC — see the README's Develop note for how
+`npm install` does not need MSVC — see CONTRIBUTING's setup note for how
 `allowScripts` denies `better-sqlite3`'s implicit `node-gyp rebuild`, which
 would otherwise be both mandatory (node-gyp fails at *configure* without a
 toolchain) and unused (prebuilt binaries ship for every platform). Electron 43
@@ -134,7 +132,7 @@ Actually run it. Fastest loop for a runtime-side change: a small `tsx` script th
 drives `createPizzaBotAgent(systemPrompt, deps).then(a => a.streamProtocol(input, opts))`
 against live Bedrock and inspects the emitted `ProtocolEvent` frames (needs
 `AWS_REGION` + Bedrock creds). For UI work,
-launch the app per README §Running and drive it. Delete throwaway probe scripts
+launch the app per `docs/RUNNING.md` and drive it. Delete throwaway probe scripts
 when done.
 
 When driving the protocol endpoints by hand, two contracts fail *silently* rather
