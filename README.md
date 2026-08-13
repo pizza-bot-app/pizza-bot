@@ -27,6 +27,9 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 - **Keep control of consequential actions.** Human-in-the-loop approvals,
   long-term memory, file attachments, and desktop notifications are built into
   the workflow.
+- **Grant local access explicitly.** Add individual folders under **Settings >
+  Files** without exposing your home directory by default. Grants start
+  read-only and can explicitly allow writes.
 
 ## Quick start
 

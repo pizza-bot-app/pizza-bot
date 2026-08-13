@@ -461,7 +461,10 @@ subscriptions recover after sleep or a half-open remote connection.
   the embedded host; an unhealthy child is restarted, while a healthy child
   reconnects MCP before recovering schedules. Keychain secret changes reach the
   existing sidecar over private parent/child IPC, so provider edits do not
-  restart the host or unrelated MCP servers.
+  restart the host or unrelated MCP servers. The shell also owns the native
+  directory picker and exposes it only while the embedded backend is active;
+  remote folder paths belong to the backend host. The shared web UI falls back
+  to the backend's restricted directory browser when one is configured.
 - **cli** — a thin REPL driving the SDK `Client`/`ThreadStream` over HTTP against
   a running server (`PIZZA_REMOTE_URL`, default `http://localhost:8080`;
   `PIZZA_API_TOKEN` for bearer auth). It boots no runtime of its own — the same

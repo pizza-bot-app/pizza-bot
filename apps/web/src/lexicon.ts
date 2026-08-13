@@ -11,6 +11,7 @@ export const L = {
   settingsCategoriesLabel: "Settings categories",
   settingsGeneralCategory: "General",
   settingsProvidersCategory: "Providers",
+  settingsFilesCategory: "Files",
   settingsConnectionCategory: "Connection",
   providerNavigationLabel: "Provider settings",
   providerOverview: "Overview",

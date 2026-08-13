@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
+import path from "node:path";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -25,6 +26,7 @@ import { toolsRoutes } from "./routes-tools.js";
 import { protocolRoutes } from "./routes-protocol.js";
 import { attachmentRoutes } from "./routes-attachments.js";
 import { logRoutes } from "./routes-logs.js";
+import { localFolderRoutes } from "./routes-local-folders.js";
 import { limitJsonBody, MAX_JSON_BODY_BYTES } from "./request-limits.js";
 import {
   configureLogging,
@@ -47,6 +49,8 @@ const MIN_REMOTE_TOKEN_LENGTH = 32;
 export interface ApiSecurityOptions {
   allowedOrigins?: string[];
   apiToken?: string;
+  allowLocalFolderConfiguration?: boolean;
+  localFolderBrowseRoots?: string[];
 }
 
 export interface ApiLoggingOptions {
@@ -57,11 +61,29 @@ export interface ServerNetworkConfig extends ApiSecurityOptions {
   hostname: string;
 }
 
+export function parseLocalFolderBrowseRoots(
+  value: string | undefined,
+  delimiter = path.delimiter,
+): string[] {
+  if (!value?.trim()) return [];
+  const roots = value
+    .split(delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (roots.length > 32) {
+    throw new Error("PIZZA_LOCAL_FOLDER_BROWSE_ROOTS accepts at most 32 paths");
+  }
+  return [...new Set(roots)];
+}
+
 export function resolveServerNetworkConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): ServerNetworkConfig {
   const hostname = env.PIZZA_HOST?.trim() || "127.0.0.1";
   const configuredOrigins = parseOrigins(env.PIZZA_ALLOWED_ORIGINS);
+  const localFolderBrowseRoots = parseLocalFolderBrowseRoots(
+    env.PIZZA_LOCAL_FOLDER_BROWSE_ROOTS,
+  );
   const apiToken = env.PIZZA_API_TOKEN?.trim() || undefined;
   if (!isLoopbackHost(hostname)) {
     if (!apiToken) {
@@ -80,6 +102,10 @@ export function resolveServerNetworkConfig(
     hostname,
     allowedOrigins: configuredOrigins.length > 0 ? configuredOrigins : LOCAL_ORIGINS,
     ...(apiToken ? { apiToken } : {}),
+    ...(env.PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION === "1"
+      ? { allowLocalFolderConfiguration: true }
+      : {}),
+    ...(localFolderBrowseRoots.length > 0 ? { localFolderBrowseRoots } : {}),
   };
 }
 
@@ -187,6 +213,15 @@ export function buildApp(
   app.route("/", mcpRoutes(host));
   app.route("/", memoryRoutes(host));
   app.route("/", settingsRoutes(host));
+  app.route(
+    "/",
+    localFolderRoutes(host, {
+      configurable: security.allowLocalFolderConfiguration === true,
+      ...(security.localFolderBrowseRoots
+        ? { browseRoots: security.localFolderBrowseRoots }
+        : {}),
+    }),
+  );
   app.route("/", lifecycleRoutes(host));
   app.route("/", providerRoutes(host));
   app.route("/", attachmentRoutes(host));

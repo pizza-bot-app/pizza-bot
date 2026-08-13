@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   KeyRound,
+  FolderOpen,
   LayoutGrid,
   Monitor,
   Moon,
@@ -17,8 +18,11 @@ import { providerLabel } from "../../model-options.js";
 import type { ThemePreference } from "../../theme-storage.js";
 import type { DesktopConnection } from "../../use-desktop-connection.js";
 import { ConnectionSettings } from "./ConnectionSettings.js";
+import { LocalFoldersSettings } from "./LocalFoldersSettings.js";
+import type { ApiClient } from "@/api-client";
 
 export interface SettingsModuleProps {
+  client: ApiClient;
   theme: ThemePreference;
   onThemeChange: (next: ThemePreference) => void;
   persona: string;
@@ -60,7 +64,7 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }
   { value: "system", label: L.themeSystem, icon: Monitor },
 ];
 
-export type SettingsCategory = "general" | "providers" | "connection";
+export type SettingsCategory = "general" | "providers" | "files" | "connection";
 
 const SETTINGS_CATEGORIES: {
   id: SettingsCategory;
@@ -69,9 +73,11 @@ const SETTINGS_CATEGORIES: {
 }[] = [
   { id: "general", label: L.settingsGeneralCategory, icon: Settings },
   { id: "providers", label: L.settingsProvidersCategory, icon: KeyRound },
+  { id: "files", label: L.settingsFilesCategory, icon: FolderOpen },
 ];
 
 export function SettingsModule({
+  client,
   theme,
   onThemeChange,
   persona,
@@ -305,6 +311,11 @@ export function SettingsModule({
               onSetDefault={onSetDefaultModel}
               selectedProviderId={selectedProviderId}
               onSelectProvider={setProviderId}
+            />
+          ) : category === "files" ? (
+            <LocalFoldersSettings
+              client={client}
+              canPickDirectory={connection?.state?.mode === "local"}
             />
           ) : connection ? (
             <ConnectionSettings connection={connection} runningCount={runningCount} />

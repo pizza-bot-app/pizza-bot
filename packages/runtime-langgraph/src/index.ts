@@ -304,6 +304,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   const backend = buildBackend({
     ...(deps.memoriesDir ? { memoriesDir: deps.memoriesDir } : {}),
     ...(deps.memoryEnabled ? { memoryEnabled: deps.memoryEnabled } : {}),
+    ...(deps.localFolders ? { localFolders: deps.localFolders } : {}),
   });
 
   const middleware: unknown[] = [

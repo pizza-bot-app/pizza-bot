@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
+import { delimiter as pathDelimiter } from "node:path";
 import { ToolMessage } from "@langchain/core/messages";
 import { PROTOCOL_VERSION } from "@pizza-bot/core";
-import { buildApp, resolveServerNetworkConfig } from "./index.js";
+import {
+  buildApp,
+  parseLocalFolderBrowseRoots,
+  resolveServerNetworkConfig,
+} from "./index.js";
 import type { AgentHost } from "./agent-host.js";
 
 function fakeHost(
@@ -17,6 +22,7 @@ function fakeHost(
   }>,
 ): AgentHost {
   const host = {
+    dataRoot: ":memory:",
     modelId: "fake:model",
     readiness,
     whenReady: async () => {},
@@ -245,6 +251,37 @@ describe("api-server: network safety", () => {
       hostname: "0.0.0.0",
       apiToken,
       allowedOrigins: ["https://pizza.example", "https://admin.example"],
+    });
+  });
+
+  it("enables local-folder configuration only when explicitly requested", () => {
+    expect(
+      resolveServerNetworkConfig({
+        PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION: "1",
+      }),
+    ).toMatchObject({ allowLocalFolderConfiguration: true });
+    expect(
+      resolveServerNetworkConfig({
+        PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION: "true",
+      }),
+    ).not.toHaveProperty("allowLocalFolderConfiguration");
+  });
+
+  it("parses backend browse roots with the host path delimiter", () => {
+    expect(parseLocalFolderBrowseRoots("/srv/projects:/mnt/shared", ":")).toEqual([
+      "/srv/projects",
+      "/mnt/shared",
+    ]);
+    expect(
+      parseLocalFolderBrowseRoots("C:\\Users\\builder;D:\\Shared", ";"),
+    ).toEqual(["C:\\Users\\builder", "D:\\Shared"]);
+    expect(
+      resolveServerNetworkConfig({
+        PIZZA_LOCAL_FOLDER_BROWSE_ROOTS:
+          ["/srv/projects", "/mnt/shared"].join(pathDelimiter),
+      }),
+    ).toMatchObject({
+      localFolderBrowseRoots: ["/srv/projects", "/mnt/shared"],
     });
   });
 

@@ -185,6 +185,9 @@ desktop settings do not appear automatically.
   starting the server or put it in `<PIZZA_DATA_ROOT>/.env.local`.
 - MCP servers are configured in `<PIZZA_DATA_ROOT>/.mcp.json`. Environment
   references in that file expand from the backend process environment.
+- Local-folder grants are paths on the backend host, not the connected desktop.
+  The agent sees each grant read-only at `/local/<folder-id>/`; no folder,
+  including the backend user's home directory, is granted by default.
 - User plugins, skills, attachments, conversations, and logs belong to the
   selected server data root. Bundled **Plugin** packages and **Built-in** skills
   are included in the artifact.
@@ -192,6 +195,33 @@ desktop settings do not appear automatically.
 Electron's provider secret store belongs to the client machine and is passed
 only to its embedded backend. When Electron connects to a remote backend,
 configure provider secrets on that backend.
+
+Folder configuration over HTTP is disabled by default. To administer grants
+from **Settings > Files**, start the backend with
+`PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION=1`, add or remove the required
+backend-host directories, then restart without the flag. The remote UI always
+accepts an absolute Linux or Windows path. To also provide a server-side picker,
+set `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS` to the directories the UI may browse.
+Separate multiple roots with `:` on Linux/macOS or `;` on Windows:
+
+```bash
+PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION=1 \
+PIZZA_LOCAL_FOLDER_BROWSE_ROOTS="/srv/projects:/mnt/shared" \
+node dist/backend/start.mjs
+```
+
+```powershell
+$env:PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION = '1'
+$env:PIZZA_LOCAL_FOLDER_BROWSE_ROOTS = 'C:\Users\builder\Projects;D:\Shared'
+node dist/backend/start.mjs
+```
+
+The picker lists directories only, does not follow symlinks or junctions, and
+cannot leave those canonical roots. Display labels and virtual path ids are
+derived from the selected directory name. While configuration is enabled,
+anyone with the backend bearer token can enumerate directory names beneath the
+browse roots and grant read access to any directory readable by the backend
+process, except the Pizza Bot data root and its ancestors or descendants.
 
 For example, this stores an Anthropic environment reference without sending the
 secret over the API:
@@ -384,6 +414,8 @@ private network, or use an SSH tunnel. See [SECURITY.md](../SECURITY.md).
   process. Keep a data backup before upgrades.
 - Provider credentials and MCP environment variables must be supplied to the
   server process. They are not forwarded from remote Electron clients.
+- Local-folder grants refer to backend-host paths. Restore or deploy those paths
+  separately from `PIZZA_DATA_ROOT`; unavailable roots remain inaccessible.
 - Preserve proxy streaming. Response buffering makes runs and thread updates
   appear stalled even when ordinary API requests work.
 

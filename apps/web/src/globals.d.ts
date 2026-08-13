@@ -19,6 +19,9 @@ interface Window {
     }): Promise<PizzaConnectionState>;
     useLocal(): Promise<PizzaConnectionState>;
   };
+  __PIZZA_LOCAL_FOLDERS__?: {
+    pickDirectory(): Promise<string | undefined>;
+  };
   __PIZZA_LOGS__?: {
     local: boolean;
     write(record: unknown): void;

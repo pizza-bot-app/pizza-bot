@@ -10,6 +10,10 @@ import type {
   ModelCatalogStatus,
   ProviderAuthMethod,
   SkillInterruptOn,
+  CreateLocalFolderInput,
+  LocalFolder,
+  LocalFolderBrowseResult,
+  LocalFolderList,
 } from "@pizza-bot/core";
 import type { ThreadStateValues } from "@pizza-bot/core";
 import {
@@ -448,6 +452,35 @@ export class ApiClient {
 
   async updateSettings(patch: AppSettingsPatch): Promise<AppSettings> {
     return this.json("update settings", "/settings", { method: "PUT", body: patch, keepalive: true });
+  }
+
+  async listLocalFolders(): Promise<LocalFolderList> {
+    return this.json("list local folders", "/local-folders");
+  }
+
+  async browseLocalFolders(path?: string): Promise<LocalFolderBrowseResult> {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    return this.json(
+      "browse backend folders",
+      `/local-folders/browse${query}`,
+    );
+  }
+
+  async createLocalFolder(input: CreateLocalFolderInput): Promise<LocalFolder> {
+    return this.json("add local folder", "/local-folders", {
+      method: "POST",
+      body: input,
+    });
+  }
+
+  async deleteLocalFolder(id: string): Promise<boolean> {
+    return deletedFlag(
+      await this.json(
+        "remove local folder",
+        `/local-folders/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      ),
+    );
   }
 
   /** Secret values are redacted. */

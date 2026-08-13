@@ -10,6 +10,7 @@ import type { SkillCatalog } from "./skill.js";
 import type { SkillAvailability } from "./skill-readiness.js";
 import type { ToolCatalog } from "./wildcard.js";
 import type { AttachmentResolver } from "./attachment.js";
+import type { LocalFolder } from "./local-folder.js";
 
 export interface Logger {
   info(msg: string, ...args: unknown[]): void;
@@ -40,6 +41,11 @@ export interface RuntimeDeps {
    * access off for already-compiled graphs after the setting changes.
    */
   memoryEnabled?: () => boolean;
+  /**
+   * Live backend-host folder grants. Every filesystem operation re-reads this
+   * list so removing a grant also revokes already-compiled graphs.
+   */
+  localFolders?: () => readonly LocalFolder[];
   /**
    * Resolves attachment references only at the model boundary so checkpoint
    * state never contains file bytes. Absence disables inlining.

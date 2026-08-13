@@ -94,6 +94,37 @@ The SQLite data root supports one backend process on local storage. Do not mount
 one data root into multiple containers, replicas, or hosts. Stop the process or
 use a SQLite-aware snapshot when backing up live databases.
 
+## Local folder grants
+
+- **No implicit filesystem grant.** Pizza Bot does not receive access to the
+  user's home directory by default. A user or backend operator must add each
+  directory explicitly under **Settings > Files**.
+- **Read-only virtual mounts.** Grants appear to Pizza Bot and delegated workers
+  beneath `/local/<folder-id>/`. Mutating backend operations are denied.
+  DeepAgents virtual mode provides lexical confinement, and Pizza Bot also
+  validates canonical paths for every operation to reject traversal and
+  symlink or junction escapes. The Pizza Bot data root and its ancestors and
+  descendants cannot be granted.
+- **Folder contents can leave the machine.** The agent may read any accessible
+  file below a granted root and include it in prompts or tool calls sent to the
+  configured model and MCP providers. Review a folder's complete contents
+  before granting it.
+- **Grants belong to the backend host.** The embedded desktop backend uses a
+  native directory picker. A standalone backend accepts only absolute paths on
+  its own Linux or Windows host; a remote desktop path has no meaning there. An
+  operator may expose a server-side picker with
+  `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS`; it lists directories only beneath those
+  canonical roots and rejects symlinks and junctions.
+- **Standalone configuration is opt-in.** The add/remove API is disabled unless
+  `PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION=1`. Enabling it allows any holder of
+  the shared backend bearer token to grant readable backend directories and,
+  when browse roots are configured, enumerate directory names beneath them.
+  Use it only for an administrative session. The embedded sidecar enables it
+  for its local Settings UI.
+- **Revocation is prospective.** Removing a grant blocks subsequent operations,
+  including operations from already-compiled agent graphs. It cannot retract
+  content already placed in a conversation or sent to a provider.
+
 ## MCP servers and plugins are trusted code
 
 - **MCP commands are arbitrary executables.** A stdio MCP entry is launched as a

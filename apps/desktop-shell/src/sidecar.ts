@@ -200,6 +200,7 @@ async function spawnOnce(opts: SidecarOptions): Promise<{ child: ChildProcess; h
       PIZZA_ALLOWED_ORIGINS:
         opts.allowedOrigins ?? "null,http://localhost:5173,http://127.0.0.1:5173",
       PIZZA_DATA_ROOT: opts.dataRoot,
+      PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION: "1",
     },
     stdio: ["ignore", "inherit", "inherit", "ipc"],
     // POSIX process groups make MCP grandchildren killable as one tree.
