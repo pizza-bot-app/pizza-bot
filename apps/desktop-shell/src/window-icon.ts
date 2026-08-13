@@ -18,6 +18,6 @@ export function resolveWindowIconPath({
   const iconName = platform === "win32" ? "icon.ico" : "icon.png";
   const iconsDir = packaged
     ? resourcesPath
-    : path.resolve(appPath, "..", "..", "assets", "icons");
+    : path.join(appPath, "..", "..", "assets", "icons");
   return path.join(iconsDir, iconName);
 }
