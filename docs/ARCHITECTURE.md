@@ -463,7 +463,9 @@ subscriptions recover after sleep or a half-open remote connection.
   notification preferences, and keeps the notification activity stream alive
   without a renderer window. `powerMonitor` coordinates suspend/resume with
   the embedded host; an unhealthy child is restarted, while a healthy child
-  reconnects MCP before recovering schedules.
+  reconnects MCP before recovering schedules. Keychain secret changes reach the
+  existing sidecar over private parent/child IPC, so provider edits do not
+  restart the host or unrelated MCP servers.
 - **cli** — a thin REPL driving the SDK `Client`/`ThreadStream` over HTTP against
   a running server (`PIZZA_REMOTE_URL`, default `http://localhost:8080`;
   `PIZZA_API_TOKEN` for bearer auth). It boots no runtime of its own — the same
@@ -580,7 +582,9 @@ not that path. Its limitations are explicit:
 A provider-configuration UI ships in Settings (`ProvidersSettings.tsx`): a
 declarative auth-field schema per provider renders a generic config form, and
 secrets go to the OS keychain via the desktop shell's `safeStorage` bridge —
-**never** plaintext on disk and never sent to the browser.
+**never** plaintext on disk or HTTP and never sent back to the browser. The
+desktop main process updates the embedded sidecar's environment over its private
+child-process IPC channel.
 
 ---
 

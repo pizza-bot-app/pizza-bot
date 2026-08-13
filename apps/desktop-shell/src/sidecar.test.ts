@@ -96,6 +96,35 @@ describe("startSidecar (real api-server)", () => {
         })
       ).status,
     ).toBe(200);
+    const originalEndpoint = sidecar.baseUrl;
+    const originalPid = sidecar.handshake.pid;
+    await sidecar.updateSecrets({
+      PIZZA_SECRET_TEST_APIKEY: "updated-without-restart",
+    });
+    const authHeaders = {
+      authorization: "Bearer sidecar-secret",
+      "content-type": "application/json",
+    };
+    const providerSave = await fetch(`${sidecar.baseUrl}/providers/openai`, {
+      method: "PUT",
+      headers: authHeaders,
+      body: JSON.stringify({
+        method: "api-key",
+        values: { apiKey: "${PIZZA_SECRET_TEST_APIKEY}" },
+      }),
+    });
+    expect(providerSave.status).toBe(200);
+    const preferenceSave = await fetch(
+      `${sidecar.baseUrl}/providers/openai/models`,
+      {
+        method: "PUT",
+        headers: authHeaders,
+        body: JSON.stringify({ mode: "all", selected: [] }),
+      },
+    );
+    expect(preferenceSave.status).toBe(200);
+    expect(sidecar.baseUrl).toBe(originalEndpoint);
+    expect(sidecar.handshake.pid).toBe(originalPid);
     await expect(sidecar.suspend()).resolves.toBe(true);
     await expect(sidecar.resume()).resolves.toBe(true);
 

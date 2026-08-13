@@ -3,6 +3,11 @@ import { fork, execFileSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import {
+  isDesktopSecretName,
+  isSidecarSecretUpdateResult,
+  type SidecarSecretUpdate,
+} from "@pizza-bot/api-server/sidecar-ipc";
 import { findSystemNode } from "@pizza-bot/plugin-sdk/runtime-resolver";
 
 /**
@@ -80,6 +85,7 @@ export interface SidecarOptions {
 export interface Sidecar {
   readonly baseUrl: string;
   readonly handshake: SidecarHandshake;
+  updateSecrets(values: Record<string, string | null>): Promise<void>;
   suspend(): Promise<boolean>;
   resume(): Promise<boolean>;
   stop(): Promise<void>;
@@ -259,6 +265,7 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
   let healthTimer: NodeJS.Timeout | undefined;
   let consecutiveFailures = 0;
   let restartInFlight: Promise<void> | undefined;
+  let secretRequestId = 0;
 
   const boot = await spawnOnce(opts);
   child = boot.child;
@@ -379,6 +386,64 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
   }
   attach();
 
+  async function updateSecrets(values: Record<string, string | null>): Promise<void> {
+    if (!Object.keys(values).every(isDesktopSecretName)) {
+      throw new Error("sidecar secret update contains an invalid name");
+    }
+    if (stopped || !child.connected) {
+      throw new Error("sidecar IPC channel is unavailable");
+    }
+    const target = child;
+    const requestId = ++secretRequestId;
+    const message: SidecarSecretUpdate = {
+      type: "secrets.update",
+      requestId,
+      values,
+    };
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => finish(new Error("sidecar secret update timed out")),
+        healthTimeoutMs,
+      );
+      timeout.unref?.();
+
+      const onMessage = (response: unknown): void => {
+        if (
+          !isSidecarSecretUpdateResult(response) ||
+          response.requestId !== requestId
+        ) {
+          return;
+        }
+        finish(response.ok ? undefined : new Error("sidecar rejected secret update"));
+      };
+      const onExit = (): void => {
+        finish(new Error("sidecar exited during secret update"));
+      };
+      const finish = (error?: Error): void => {
+        clearTimeout(timeout);
+        target.off("message", onMessage);
+        target.off("exit", onExit);
+        if (error) reject(error);
+        else resolve();
+      };
+
+      target.on("message", onMessage);
+      target.once("exit", onExit);
+      try {
+        target.send(message, (error) => {
+          if (error) finish(new Error(`sidecar secret update failed: ${error.message}`));
+        });
+      } catch (error) {
+        finish(
+          error instanceof Error
+            ? error
+            : new Error("sidecar secret update failed"),
+        );
+      }
+    });
+  }
+
   // Self-scheduling prevents overlapping health requests.
   const scheduleHealth = (): void => {
     healthTimer = setTimeout(async () => {
@@ -418,6 +483,7 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
     get handshake() {
       return handshake;
     },
+    updateSecrets,
     suspend: () => postLifecycle("suspend", healthTimeoutMs),
     resume: async () => {
       const healthy = await ping();

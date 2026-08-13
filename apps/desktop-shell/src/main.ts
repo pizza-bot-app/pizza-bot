@@ -118,12 +118,10 @@ let secretStore: SecretStore | undefined;
 let connectionStore: ConnectionStore | undefined;
 let notificationSettingsStore: NotificationSettingsStore | undefined;
 let notificationWatcher: ThreadActivityWatcher | undefined;
-let restartTimer: NodeJS.Timeout | undefined;
 let systemResumeTimer: NodeJS.Timeout | undefined;
 let shuttingDown = false;
 let rendererApiToken: string | undefined;
 let connectionChangeInFlight = false;
-let sidecarRestartInFlight = false;
 const activeNotifications = new BoundedRetention<Notification>(128);
 
 interface ActiveConnection {
@@ -391,16 +389,16 @@ function replaceWindowForConnection(connection: ActiveConnection): void {
   previous?.close();
 }
 
-/** Mutate encrypted secrets in main and restart the child to refresh its env. */
+/** Keep plaintext in main-to-sidecar IPC instead of the renderer's HTTP path. */
 function registerSecretIpc(): void {
   ipcMain.handle(SECRET_CHANNELS.list, () => secretStore?.list() ?? []);
-  ipcMain.handle(SECRET_CHANNELS.set, (_e, name: string, value: string) => {
+  ipcMain.handle(SECRET_CHANNELS.set, async (_e, name: string, value: string) => {
     secretStore?.set(name, value);
-    scheduleSidecarRestart();
+    await sidecar?.updateSecrets({ [name]: value });
   });
-  ipcMain.handle(SECRET_CHANNELS.delete, (_e, name: string) => {
+  ipcMain.handle(SECRET_CHANNELS.delete, async (_e, name: string) => {
     secretStore?.delete(name);
-    scheduleSidecarRestart();
+    await sidecar?.updateSecrets({ [name]: null });
   });
 }
 
@@ -414,10 +412,6 @@ function registerConnectionIpc(dataRoot: string): void {
     ) => {
       assertConnectionCanChange();
       connectionChangeInFlight = true;
-      if (restartTimer) {
-        clearTimeout(restartTimer);
-        restartTimer = undefined;
-      }
       try {
         const remoteUrl = normalizeRemoteUrl(input.remoteUrl);
         const savedToken = connectionStore?.remoteTokenFor(remoteUrl);
@@ -499,9 +493,6 @@ function assertConnectionCanChange(): void {
   if (connectionChangeInFlight) {
     throw new Error("A backend connection change is already in progress.");
   }
-  if (sidecarRestartInFlight) {
-    throw new Error("The embedded backend is restarting. Try again in a moment.");
-  }
 }
 
 function publicConnectionState(): {
@@ -539,53 +530,6 @@ async function activateRemoteConnection(next: ActiveConnection): Promise<void> {
   await oldSidecar
     ?.stop()
     .catch((err) => console.error("[shell] sidecar stop during remote switch failed:", err));
-}
-
-/** Coalesce secret changes because child env and the window API base are immutable. */
-function scheduleSidecarRestart(): void {
-  if (!sidecar) return;
-  if (restartTimer) clearTimeout(restartTimer);
-  restartTimer = setTimeout(() => {
-    restartTimer = undefined;
-    void restartSidecar();
-  }, 400);
-  restartTimer.unref?.();
-}
-
-async function restartSidecar(): Promise<void> {
-  if (
-    activeConnection?.mode !== "local" ||
-    sidecarRestartInFlight ||
-    connectionChangeInFlight
-  ) {
-    return;
-  }
-  sidecarRestartInFlight = true;
-  const dataRoot = resolveDataRoot();
-  const old = sidecar;
-  let nextSidecar: Sidecar | undefined;
-  try {
-    console.log("[shell] restarting sidecar to apply secret changes...");
-    sidecar = undefined;
-    await old?.stop();
-    const apiToken = localApiToken();
-    nextSidecar = await bootSidecar(dataRoot, apiToken);
-    sidecar = nextSidecar;
-    const next: ActiveConnection = {
-      mode: "local",
-      apiBase: nextSidecar.baseUrl,
-      apiToken,
-      managedByEnvironment: false,
-    };
-    setActiveConnection(next);
-    replaceWindowForConnection(next);
-  } catch (err) {
-    console.error("[shell] sidecar restart failed:", err);
-    await nextSidecar?.stop().catch(() => {});
-    sidecar = undefined;
-  } finally {
-    sidecarRestartInFlight = false;
-  }
 }
 
 function createWindow(connection: ActiveConnection): void {

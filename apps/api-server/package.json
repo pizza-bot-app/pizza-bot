@@ -9,6 +9,7 @@
     "./agent-host": "./src/agent-host.ts",
     "./trigger-service": "./src/trigger-service.ts",
     "./protocol-run-manager": "./src/protocol-run-manager.ts",
+    "./sidecar-ipc": "./src/sidecar-ipc.ts",
     "./plugins-dir": "./src/plugins-dir.ts",
     "./package.json": "./package.json"
   },
