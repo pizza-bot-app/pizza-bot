@@ -25,6 +25,7 @@ import { findMcpNode } from "@pizza-bot/plugin-sdk/runtime-resolver";
 import { PROTOCOL_VERSION } from "@pizza-bot/core";
 import { isAllowedRendererNavigation } from "./navigation-policy.js";
 import { handleSquirrelStartup, SQUIRREL_APP_ID } from "./squirrel-startup.js";
+import { resolveWindowIconPath } from "./window-icon.js";
 import {
   BoundedRetention,
   NATIVE_NOTIFICATION_CHANNELS,
@@ -58,7 +59,12 @@ if (handleSquirrelStartup()) {
 if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
-if (process.platform === "win32") {
+// Dev runs (`electron .`) share this process's win32 platform check but must not
+// register the production AUMID against node_modules/electron/dist/electron.exe —
+// Windows caches that pairing (Start Menu shortcut + jump-list store) keyed by the
+// AUMID string, and the generic Electron name/icon then bleeds into the real
+// packaged install on the same machine, surviving reinstalls.
+if (process.platform === "win32" && app.isPackaged) {
   app.setAppUserModelId(SQUIRREL_APP_ID);
 }
 
@@ -585,11 +591,18 @@ async function restartSidecar(): Promise<void> {
 function createWindow(connection: ActiveConnection): void {
   rendererApiToken = connection.apiToken;
   const rendererEntry = resolveRendererEntry();
+  const windowIcon = resolveWindowIconPath({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+  });
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     center: true,
     title: "Pizza Bot OSS",
+    ...(windowIcon ? { icon: windowIcon } : {}),
     webPreferences: {
       // Sandboxed Electron preloads load as CommonJS.
       preload: path.join(__dirname, "preload.cjs"),

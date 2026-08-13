@@ -75,6 +75,8 @@ const config: ForgeConfig = {
       path.join(repoRoot, "dist", "THIRD_PARTY_LICENSES.txt"),
       path.join(shellRoot, "dist-server"),
       path.join(repoRoot, "apps", "web", "dist"),
+      path.join(iconsDir, "icon.ico"),
+      path.join(iconsDir, "icon.png"),
       // Staged, not repo-root: shipped plugins need their own node_modules.
       path.join(shellRoot, "dist-plugins", "plugins"),
       path.join(repoRoot, "skills"),
