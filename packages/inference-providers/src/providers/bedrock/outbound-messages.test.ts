@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import {
-  endsWithDocumentBlock,
+  endsWithCacheIncompatibleDocument,
   sanitizeBedrockDocumentName,
   sanitizeDocumentNamesForBedrock,
   stripReasoningForBedrock,
@@ -178,6 +178,8 @@ describe("sanitizeDocumentNamesForBedrock", () => {
     expect(out).not.toBe(msg);
     const content = out!.content as Array<Record<string, unknown>>;
     expect((content[1]!.metadata as { name: string }).name).toBe("Blogs Blog ideas md");
+    const originalContent = msg.content as Array<Record<string, unknown>>;
+    expect((originalContent[1]!.metadata as { name: string }).name).toBe("✍️ Blogs/Blog ideas.md");
   });
 
   it("preserves message reference when no file block needs rewriting", () => {
@@ -208,31 +210,71 @@ describe("sanitizeDocumentNamesForBedrock", () => {
   });
 });
 
-describe("endsWithDocumentBlock", () => {
-  const file = { type: "file", source_type: "base64", mime_type: "text/markdown", data: "IyBoaQ==" };
+describe("endsWithCacheIncompatibleDocument", () => {
+  const textFile = { type: "file", source_type: "base64", mime_type: "text/markdown", data: "IyBoaQ==" };
 
-  it("is true when the last message's last block is a file", () => {
-    const msg = new HumanMessage({ content: [{ type: "text", text: "read this" }, file] as unknown as string });
-    expect(endsWithDocumentBlock([msg])).toBe(true);
+  it.each(["text/plain", "text/markdown"])(
+    "disables all request cache points when a trailing %s document rejects adjacency",
+    (mimeType) => {
+      const msg = new HumanMessage({
+        content: [
+          { type: "text", text: "read this" },
+          { type: "file", source_type: "base64", mime_type: mimeType, data: "IyBoaQ==" },
+        ] as unknown as string,
+      });
+      expect(endsWithCacheIncompatibleDocument([msg])).toBe(true);
+    },
+  );
+
+  it("retains cache points for a trailing PDF, including MIME parameters", () => {
+    const msg = new HumanMessage({
+      content: [
+        { type: "text", text: "read this" },
+        {
+          type: "file",
+          source_type: "base64",
+          mime_type: "Application/PDF; charset=binary",
+          data: "JVBERi0=",
+        },
+      ] as unknown as string,
+    });
+    expect(endsWithCacheIncompatibleDocument([msg])).toBe(false);
+  });
+
+  it("conservatively disables cache points for unverified or missing document MIME types", () => {
+    const unverified = new HumanMessage({
+      content: [{ type: "file", source_type: "base64", mimeType: "text/csv", data: "YSxi" }] as unknown as string,
+    });
+    const missing = new HumanMessage({
+      content: [{ type: "file", source_type: "base64", data: "YSxi" }] as unknown as string,
+    });
+    expect(endsWithCacheIncompatibleDocument([unverified])).toBe(true);
+    expect(endsWithCacheIncompatibleDocument([missing])).toBe(true);
   });
 
   it("is false when a text block follows the file", () => {
-    const msg = new HumanMessage({ content: [file, { type: "text", text: "read this" }] as unknown as string });
-    expect(endsWithDocumentBlock([msg])).toBe(false);
+    const msg = new HumanMessage({ content: [textFile, { type: "text", text: "read this" }] as unknown as string });
+    expect(endsWithCacheIncompatibleDocument([msg])).toBe(false);
   });
 
-  it("is false for string content, empty input, and non-file endings", () => {
-    expect(endsWithDocumentBlock([])).toBe(false);
-    expect(endsWithDocumentBlock([new HumanMessage("plain")])).toBe(false);
+  it("is false for string content, empty input, and image endings", () => {
+    expect(endsWithCacheIncompatibleDocument([])).toBe(false);
+    expect(endsWithCacheIncompatibleDocument([new HumanMessage("plain")])).toBe(false);
     expect(
-      endsWithDocumentBlock([new AIMessage({ content: [{ type: "text", text: "hi" }] as unknown as string })]),
+      endsWithCacheIncompatibleDocument([
+        new HumanMessage({
+          content: [
+            { type: "image", source_type: "base64", mime_type: "image/png", data: "QUJD" },
+          ] as unknown as string,
+        }),
+      ]),
     ).toBe(false);
   });
 
   it("only inspects the last message", () => {
-    const withFile = new HumanMessage({ content: [file] as unknown as string });
+    const withFile = new HumanMessage({ content: [textFile] as unknown as string });
     const plain = new AIMessage("noted");
-    expect(endsWithDocumentBlock([withFile, plain])).toBe(false);
-    expect(endsWithDocumentBlock([plain, withFile])).toBe(true);
+    expect(endsWithCacheIncompatibleDocument([withFile, plain])).toBe(false);
+    expect(endsWithCacheIncompatibleDocument([plain, withFile])).toBe(true);
   });
 });

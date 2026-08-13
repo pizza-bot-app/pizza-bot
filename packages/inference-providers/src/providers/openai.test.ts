@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { HumanMessage } from "@langchain/core/messages";
+import {
+  convertMessagesToCompletionsMessageParams,
+  convertMessagesToResponsesInput,
+} from "@langchain/openai";
 import { isChatModel, OpenAiLangChainModelProvider, retryOutputCap } from "./openai.js";
 
 describe("OpenAI model discovery", () => {
@@ -122,5 +127,47 @@ describe("OpenAI model construction", () => {
     const model = await provider.buildModel("custom-chat-model");
 
     expect(model.profile.maxInputTokens).toBe(40_960);
+  });
+});
+
+describe("OpenAI attachment conversion", () => {
+  it("preserves the original filename and extension in both request formats", () => {
+    const filename = "✍️ Blogs Blog ideas.md";
+    const message = new HumanMessage({
+      content: [{
+        type: "file",
+        source_type: "base64",
+        mime_type: "text/markdown",
+        data: "IyBoaQ==",
+        metadata: { name: filename },
+      }] as unknown as string,
+    });
+
+    expect(convertMessagesToCompletionsMessageParams({
+      messages: [message],
+      model: "gpt-4o",
+    })).toEqual([{
+      role: "user",
+      content: [{
+        type: "file",
+        file: {
+          file_data: "data:text/markdown;base64,IyBoaQ==",
+          filename,
+        },
+      }],
+    }]);
+    expect(convertMessagesToResponsesInput({
+      messages: [message],
+      model: "gpt-5",
+      zdrEnabled: false,
+    })).toEqual([{
+      type: "message",
+      role: "user",
+      content: [{
+        type: "input_file",
+        file_data: "data:text/markdown;base64,IyBoaQ==",
+        filename,
+      }],
+    }]);
   });
 });

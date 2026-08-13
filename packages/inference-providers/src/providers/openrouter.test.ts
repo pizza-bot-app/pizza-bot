@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { HumanMessage } from "@langchain/core/messages";
 import { OpenRouterLangChainModelProvider } from "./openrouter.js";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("OpenRouter model discovery", () => {
   it("maps the native catalog to model descriptors", async () => {
@@ -135,5 +140,62 @@ describe("OpenRouter model construction", () => {
     await expect(provider.buildModel("openai/gpt-4o")).rejects.toMatchObject({
       code: "AUTH_EXPIRED",
     });
+  });
+});
+
+describe("OpenRouter attachment conversion", () => {
+  it("preserves the original filename and extension in the request body", async () => {
+    const fetchFn = vi.fn(async (
+      _input: Parameters<typeof fetch>[0],
+      _init?: Parameters<typeof fetch>[1],
+    ) => new Response(JSON.stringify({
+      id: "generation-1",
+      model: "openai/gpt-4o",
+      choices: [{
+        index: 0,
+        message: { role: "assistant", content: "ok" },
+        finish_reason: "stop",
+      }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchFn);
+    const provider = new OpenRouterLangChainModelProvider({
+      apiKey: "test-key",
+      models: [{
+        id: "openai/gpt-4o",
+        provider: "openrouter",
+        displayName: "GPT-4o",
+      }],
+    });
+    const model = await provider.buildModel("openai/gpt-4o");
+    const filename = "✍️ Blogs Blog ideas.md";
+
+    await model.invoke([new HumanMessage({
+      content: [{
+        type: "file",
+        source_type: "base64",
+        mime_type: "text/markdown",
+        data: "IyBoaQ==",
+        metadata: { name: filename },
+      }] as unknown as string,
+    })]);
+
+    const init = fetchFn.mock.calls[0]?.[1];
+    const body = JSON.parse(String(init?.body)) as {
+      messages: Array<{ content: unknown }>;
+    };
+    expect(body.messages).toEqual([{
+      role: "user",
+      content: [{
+        type: "file",
+        file: {
+          file_data: "data:text/markdown;base64,IyBoaQ==",
+          filename,
+        },
+      }],
+    }]);
   });
 });

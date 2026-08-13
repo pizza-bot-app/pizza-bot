@@ -79,16 +79,24 @@ const DOCUMENT_NAME_DISALLOWED = /[^A-Za-z0-9_\s()[\]-]/g;
 const WHITESPACE_RUN = /\s+/g;
 
 /**
- * Bedrock's Anthropic translation rejects a cachePoint that directly follows a
- * text-format document block ("content.N.type: Field required"), and
- * `@langchain/aws` always appends the cache point to the last message's
- * content. Callers use this to drop `cache_control` for such turns.
+ * Bedrock accepts a cache point after PDFs but rejects one after text documents.
+ * Unknown document formats stay uncached until their adjacency is verified.
  */
-export function endsWithDocumentBlock(messages: BaseMessage[]): boolean {
+export function endsWithCacheIncompatibleDocument(messages: BaseMessage[]): boolean {
   const last = messages[messages.length - 1];
   if (!last || !Array.isArray(last.content)) return false;
-  const block = last.content[last.content.length - 1] as { type?: unknown } | undefined;
-  return typeof block === "object" && block !== null && block.type === "file";
+  const block = last.content[last.content.length - 1] as
+    | { type?: unknown; mime_type?: unknown; mimeType?: unknown }
+    | undefined;
+  if (typeof block !== "object" || block === null || block.type !== "file") return false;
+  const rawMimeType =
+    typeof block.mime_type === "string"
+      ? block.mime_type
+      : typeof block.mimeType === "string"
+        ? block.mimeType
+        : "";
+  const mimeType = rawMimeType.split(";", 1)[0]!.trim().toLowerCase();
+  return mimeType !== "application/pdf";
 }
 
 /**
