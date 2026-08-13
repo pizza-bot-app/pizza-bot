@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HumanMessage } from "@langchain/core/messages";
 
 const sdk = vi.hoisted(() => ({
   chatConfig: undefined as Record<string, unknown> | undefined,
   bedrockClientConfig: undefined as Record<string, unknown> | undefined,
+  outboundMessages: undefined as unknown[] | undefined,
+  outboundOptions: undefined as Record<string, unknown> | undefined,
   bedrockSend: vi.fn(),
   iniCredentials: Symbol("ini-credentials"),
   nodeCredentials: Symbol("node-credentials"),
@@ -21,16 +24,22 @@ vi.mock("@langchain/aws", () => ({
       sdk.chatConfig = config;
     }
 
-    _generate(): undefined {
-      return undefined;
+    _generate(messages: unknown[], options: Record<string, unknown>) {
+      sdk.outboundMessages = messages;
+      sdk.outboundOptions = options;
+      return { generations: [] };
     }
 
-    _streamResponseChunks(): undefined {
-      return undefined;
+    _streamResponseChunks(messages: unknown[], options: Record<string, unknown>) {
+      sdk.outboundMessages = messages;
+      sdk.outboundOptions = options;
+      return (async function* () {})();
     }
 
-    _streamChatModelEvents(): undefined {
-      return undefined;
+    _streamChatModelEvents(messages: unknown[], options: Record<string, unknown>) {
+      sdk.outboundMessages = messages;
+      sdk.outboundOptions = options;
+      return (async function* () {})();
     }
 
     get profile() {
@@ -59,6 +68,8 @@ describe("BedrockLangChainModelProvider authentication", () => {
   beforeEach(() => {
     sdk.chatConfig = undefined;
     sdk.bedrockClientConfig = undefined;
+    sdk.outboundMessages = undefined;
+    sdk.outboundOptions = undefined;
     sdk.bedrockSend.mockReset().mockResolvedValue({});
     sdk.fromIni.mockReset().mockReturnValue(sdk.iniCredentials);
     sdk.fromNodeProviderChain.mockReset().mockReturnValue(sdk.nodeCredentials);
@@ -332,5 +343,91 @@ describe("BedrockLangChainModelProvider authentication", () => {
         supportsVision: true,
       }),
     ]);
+  });
+});
+
+describe("Bedrock outbound attachment projection", () => {
+  it("sanitizes only the provider-facing name and drops cache points for text documents", async () => {
+    const provider = new BedrockLangChainModelProvider({
+      models: [{
+        id: "global.anthropic.claude-sonnet-5",
+        provider: "bedrock",
+        displayName: "Claude Sonnet 5",
+      }],
+    });
+    const model = await provider.buildModel("global.anthropic.claude-sonnet-5");
+    const message = new HumanMessage({
+      content: [{
+        type: "file",
+        source_type: "base64",
+        mime_type: "text/markdown",
+        data: "IyBoaQ==",
+        metadata: { name: "✍️ Blogs/Blog ideas.md" },
+      }] as unknown as string,
+    });
+    const stream = (model as unknown as {
+      _streamResponseChunks(
+        messages: unknown[],
+        options: Record<string, unknown>,
+      ): AsyncIterable<unknown>;
+    })._streamResponseChunks([message], {
+      cache_control: { type: "ephemeral" },
+      signal: "preserved",
+    });
+
+    for await (const _chunk of stream) {
+      // The mocked provider emits no chunks.
+    }
+
+    const outbound = sdk.outboundMessages?.[0] as HumanMessage;
+    expect(outbound).not.toBe(message);
+    expect(outbound.content).toEqual([{
+      type: "file",
+      source_type: "base64",
+      mime_type: "text/markdown",
+      data: "IyBoaQ==",
+      metadata: { name: "Blogs Blog ideas md" },
+    }]);
+    expect(message.content).toEqual([{
+      type: "file",
+      source_type: "base64",
+      mime_type: "text/markdown",
+      data: "IyBoaQ==",
+      metadata: { name: "✍️ Blogs/Blog ideas.md" },
+    }]);
+    expect(sdk.outboundOptions).toEqual({ signal: "preserved" });
+  });
+
+  it("retains cache points for PDF documents", async () => {
+    const provider = new BedrockLangChainModelProvider({
+      models: [{
+        id: "global.anthropic.claude-sonnet-5",
+        provider: "bedrock",
+        displayName: "Claude Sonnet 5",
+      }],
+    });
+    const model = await provider.buildModel("global.anthropic.claude-sonnet-5");
+    const message = new HumanMessage({
+      content: [{
+        type: "file",
+        source_type: "base64",
+        mime_type: "application/pdf",
+        data: "JVBERi0=",
+        metadata: { name: "report.pdf" },
+      }] as unknown as string,
+    });
+    const cacheControl = { type: "ephemeral" };
+    const stream = (model as unknown as {
+      _streamResponseChunks(
+        messages: unknown[],
+        options: Record<string, unknown>,
+      ): AsyncIterable<unknown>;
+    })._streamResponseChunks([message], { cache_control: cacheControl });
+
+    for await (const _chunk of stream) {
+      // The mocked provider emits no chunks.
+    }
+
+    expect(sdk.outboundOptions).toEqual({ cache_control: cacheControl });
   });
 });
