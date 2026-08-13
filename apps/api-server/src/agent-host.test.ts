@@ -454,21 +454,6 @@ describe("AgentHost.deleteThread", () => {
     dataRoot = mkdtempSync(join(tmpdir(), "delete-data-"));
     pluginsDir = mkdtempSync(join(tmpdir(), "delete-plugins-"));
     host = await AgentHost.create({ dataRoot, pluginsDir });
-    // The checkpoints table is created lazily on first write; seed one so
-    // deleteThread's checkpoint purge runs against a table that exists, as it
-    // always does in production once a thread has taken a run.
-    await host.persistence.checkpointer.put(
-      { configurable: { thread_id: "seed", checkpoint_ns: "" } },
-      {
-        v: 4,
-        id: "chk-seed",
-        ts: "2026-07-04T00:00:00.000Z",
-        channel_values: {},
-        channel_versions: {},
-        versions_seen: {},
-      } as never,
-      { source: "input", step: 0 } as never,
-    );
   });
 
   afterEach(async () => {
@@ -497,7 +482,7 @@ describe("AgentHost.deleteThread", () => {
     expect(host.threadActivity.listAfter(0)).toHaveLength(0);
   });
 
-  it("reports deleted:false for an unknown thread", async () => {
+  it("reports deleted:false before the checkpoint schema has been initialized", async () => {
     await expect(host.deleteThread("missing")).resolves.toBe(false);
   });
 

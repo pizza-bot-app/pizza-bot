@@ -43,6 +43,7 @@ import { LogsModule } from "./components/logs/LogsModule.js";
 import { useDesktopConnection } from "./use-desktop-connection.js";
 import { useDesktopNotifications } from "./desktop-notifications.js";
 import { initialThreadId } from "./initial-thread-selection.js";
+import { activeSelectionAfterDelete } from "./lib/list-nav.js";
 
 function panesClass(showRail: boolean): string {
   return showRail ? "panes no-inspector" : "panes solo";
@@ -287,11 +288,9 @@ export function App() {
       if (!prev.has(threadId)) return prev;
       const next = new Set(prev);
       next.delete(threadId);
-      setActiveThreadId((active) =>
-        active === threadId ? ([...next][next.size - 1] ?? null) : active,
-      );
       return next;
     });
+    setActiveThreadId((active) => activeSelectionAfterDelete(active, threadId));
     setThreadTitles((prev) => {
       if (!prev.has(threadId)) return prev;
       const next = new Map(prev);

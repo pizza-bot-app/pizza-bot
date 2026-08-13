@@ -501,6 +501,10 @@ export class AgentHost {
       this.threadActivity.deleteByThread(threadId);
       const deleted = this.threadStore.delete(threadId);
       this.search.deleteThread(threadId);
+      // SqliteSaver.deleteThread skips its lazy schema setup on an unopened database.
+      await this.persistence.checkpointer.getTuple({
+        configurable: { thread_id: threadId, checkpoint_ns: "" },
+      });
       await this.persistence.checkpointer.deleteThread(threadId);
       completed = true;
       return deleted;
