@@ -33,6 +33,11 @@ import {
   installProcessErrorHandlers,
   withLogContext,
 } from "@pizza-bot/logging";
+import {
+  applySidecarSecretUpdate,
+  isSidecarSecretUpdate,
+  type SidecarSecretUpdateResult,
+} from "./sidecar-ipc.js";
 
 export const API_VERSION = String(PROTOCOL_VERSION);
 
@@ -207,6 +212,23 @@ export async function main(): Promise<void> {
     .startAutomations()
     .catch((err) => console.error("[trigger-service] startup failed:", err));
 
+  const onParentMessage = (message: unknown): void => {
+    if (!isSidecarSecretUpdate(message)) return;
+    let ok = true;
+    try {
+      applySidecarSecretUpdate(message);
+    } catch {
+      ok = false;
+    }
+    const result: SidecarSecretUpdateResult = {
+      type: "secrets.updated",
+      requestId: message.requestId,
+      ok,
+    };
+    process.send?.(result);
+  };
+  process.on("message", onParentMessage);
+
   const server = serve({ fetch: app.fetch, hostname: network.hostname, port }, (info) => {
     console.log(
       `[api-server] listening on http://${network.hostname}:${info.port} ` +
@@ -225,6 +247,7 @@ export async function main(): Promise<void> {
   const shutdown = async (reason: string, exitAfter = false): Promise<void> => {
     if (closing) return;
     closing = true;
+    process.off("message", onParentMessage);
     console.log(`[api-server] ${reason}: shutting down`);
     const stopped = new Promise<void>((resolve) => server.close(() => resolve()));
     await host.close().catch((err) => console.error("[api-server] host close failed:", err));

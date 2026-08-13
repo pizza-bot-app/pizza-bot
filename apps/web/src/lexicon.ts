@@ -52,7 +52,7 @@ export const L = {
   providerEnvBadge: "From environment",
   providerEnvNote: "This provider resolves its credentials from the ambient environment — no configuration needed.",
   secretRefHint: "Enter the name of an environment variable holding this secret, referenced as ${MY_VAR}. The value is never stored — only the reference.",
-  secretKeychainHint: "Stored encrypted in your OS keychain by the desktop app. The key never reaches the server or this page — only a reference is saved.",
+  secretKeychainHint: "Stored encrypted in your OS keychain by the desktop app. Only a generated reference is sent over HTTP or saved.",
   secretStoredPlaceholder: "•••••••• (stored — leave blank to keep)",
   secretUnavailablePlaceholder: "Enter this credential again",
   secretUnavailableHint: "The saved credential cannot be read by this app. Enter it again and save.",
