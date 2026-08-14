@@ -247,6 +247,54 @@ export interface OpenAiChatModelOptions {
   fetch?: typeof fetch;
 }
 
+interface ResponsesImageBlock {
+  type?: string;
+  source_type?: string;
+  mime_type?: string;
+  data?: string;
+  url?: string;
+  metadata?: { detail?: unknown };
+}
+
+// @langchain/openai@1.5.5 emits Chat Completions image blocks inside Responses input.
+function projectImagesForResponses(messages: BaseMessage[]): BaseMessage[] {
+  let changed = false;
+  const projected = messages.map((message) => {
+    if (typeof message.getType !== "function" || message.getType() !== "human") {
+      return message;
+    }
+    if (!Array.isArray(message.content)) return message;
+
+    let contentChanged = false;
+    const content = message.content.map((item) => {
+      if (!item || typeof item !== "object") return item;
+      const block = item as ResponsesImageBlock;
+      if (block.type !== "image") return item;
+      const imageUrl = block.source_type === "base64" && typeof block.data === "string"
+        ? `data:${block.mime_type ?? "image/png"};base64,${block.data}`
+        : block.source_type === "url" && typeof block.url === "string"
+        ? block.url
+        : undefined;
+      if (!imageUrl) return item;
+
+      contentChanged = true;
+      const detail = block.metadata?.detail;
+      return {
+        type: "input_image",
+        image_url: imageUrl,
+        detail: detail === "low" || detail === "high" ? detail : "auto",
+      };
+    });
+    if (!contentChanged) return message;
+
+    changed = true;
+    const clone = Object.create(Object.getPrototypeOf(message));
+    Object.assign(clone, message, { content });
+    return clone as BaseMessage;
+  });
+  return changed ? projected : messages;
+}
+
 export async function createOpenAiChatModel(
   options: OpenAiChatModelOptions,
 ): Promise<BaseChatModel> {
@@ -281,12 +329,50 @@ export async function createOpenAiChatModel(
       return withContextWindow(super.profile, descriptor?.contextWindow);
     }
 
+    private outbound(messages: BaseMessage[]): BaseMessage[] {
+      return apiMode === "responses"
+        ? projectImagesForResponses(messages)
+        : messages;
+    }
+
     protected override _useResponsesApi(
       callOptions: this["ParsedCallOptions"] | undefined,
     ): boolean {
       if (apiMode === "responses") return true;
       if (apiMode === "chat-completions") return false;
       return super._useResponsesApi(callOptions);
+    }
+
+    override _generate(
+      messages: BaseMessage[],
+      callOptions: this["ParsedCallOptions"],
+      runManager?: CallbackManagerForLLMRun,
+    ) {
+      return super._generate(this.outbound(messages), callOptions, runManager);
+    }
+
+    override _streamResponseChunks(
+      messages: BaseMessage[],
+      callOptions: this["ParsedCallOptions"],
+      runManager?: CallbackManagerForLLMRun,
+    ) {
+      return super._streamResponseChunks(
+        this.outbound(messages),
+        callOptions,
+        runManager,
+      );
+    }
+
+    override async *_streamChatModelEvents(
+      messages: BaseMessage[],
+      callOptions: this["ParsedCallOptions"],
+      runManager?: CallbackManagerForLLMRun,
+    ) {
+      yield* super._streamChatModelEvents(
+        this.outbound(messages),
+        callOptions,
+        runManager,
+      );
     }
 
     override withConfig(config: Partial<this["ParsedCallOptions"]>) {

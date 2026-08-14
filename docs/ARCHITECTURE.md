@@ -542,7 +542,10 @@ host and protocol paths are Bedrock concerns, and its HTTP transport supports
 both Bedrock API keys and SigV4 credentials. The OpenAI adapter
 independently selects Automatic, Responses, or Chat Completions for custom
 compatible endpoints. The Anthropic adapter likewise owns custom Messages API
-endpoints and `x-api-key` versus bearer authentication.
+endpoints and `x-api-key` versus bearer authentication. OpenAI-compatible
+Responses models receive native `input_image` blocks because the upstream
+converter otherwise emits Chat Completions image content inside the Responses
+payload.
 
 Skill workers mark terminal responses whose provider metadata reports an
 output-token limit with an `OUTPUT_TRUNCATED` notice. DeepAgents carries that
