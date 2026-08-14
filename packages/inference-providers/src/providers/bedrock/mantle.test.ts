@@ -100,7 +100,24 @@ describe("Bedrock Mantle discovery", () => {
 });
 
 describe("Bedrock Mantle invocation", () => {
-  it("streams xAI models through the OpenAI-namespaced Responses endpoint", async () => {
+  it.each([
+    {
+      family: "xAI",
+      modelId: "xai.grok-4.3",
+      displayName: "Grok 4.3",
+      region: "us-west-2",
+    },
+    {
+      family: "Gemma 4",
+      modelId: "google.gemma-4-31b",
+      displayName: "Gemma 4 31B",
+      region: "us-east-1",
+    },
+  ])("streams $family models through the OpenAI-namespaced Responses endpoint", async ({
+    modelId,
+    displayName,
+    region,
+  }) => {
     const requests: Array<{
       url: string;
       authorization: string | null;
@@ -110,7 +127,7 @@ describe("Bedrock Mantle invocation", () => {
       const url = String(input);
       if (url.endsWith("/v1/models")) {
         return new Response(JSON.stringify({
-          data: [{ id: "xai.grok-4.3", display_name: "Grok 4.3" }],
+          data: [{ id: modelId, display_name: displayName }],
         }), { status: 200 });
       }
       requests.push({
@@ -126,7 +143,7 @@ describe("Bedrock Mantle invocation", () => {
       });
     });
     const provider = new BedrockLangChainModelProvider({
-      region: "us-west-2",
+      region,
       client: {
         send: vi.fn(async (command: unknown) =>
           command?.constructor.name === "ListInferenceProfilesCommand"
@@ -143,12 +160,12 @@ describe("Bedrock Mantle invocation", () => {
     });
     await provider.listModels();
 
-    const model = await provider.buildModel("xai.grok-4.3");
+    const model = await provider.buildModel(modelId);
     await expect(collect(model.bindTools!([TEST_TOOL]).stream("hello")))
       .rejects.toThrow("stop");
 
     expect(requests).toEqual([{
-      url: "https://bedrock-mantle.us-west-2.api.aws/openai/v1/responses",
+      url: `https://bedrock-mantle.${region}.api.aws/openai/v1/responses`,
       authorization: "Bearer bedrock-key",
       hasTool: true,
     }]);
