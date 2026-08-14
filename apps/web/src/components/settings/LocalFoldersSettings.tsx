@@ -160,11 +160,7 @@ export function LocalFoldersSettings({
                 <input
                   value={folderPath}
                   onChange={(event) => setFolderPath(event.target.value)}
-                  placeholder={
-                    navigator.platform.startsWith("Win")
-                      ? "C:\\Users\\name\\Documents"
-                      : "/home/name/Documents"
-                  }
+                  placeholder="Absolute path on backend"
                 />
                 {(
                   (canPickDirectory && window.__PIZZA_LOCAL_FOLDERS__) ||
@@ -243,7 +239,7 @@ export function LocalFoldersSettings({
             : "Allow read and write access?"}
           message={readOnly
             ? "Pizza Bot and delegated workers will be able to read every accessible file in this folder during conversations and background runs. File contents may be sent to your configured model providers."
-            : "Pizza Bot and delegated workers will be able to read, create, change, and delete files in this folder during conversations and background runs. File contents may be sent to your configured model providers."}
+            : "Pizza Bot and delegated workers will be able to read, create, and modify files in this folder during conversations and background runs. File contents may be sent to your configured model providers."}
           confirmLabel={readOnly ? "Allow read access" : "Allow read and write"}
           busy={busy}
           error={error}
