@@ -7,7 +7,7 @@ export interface LocalFolder {
   /** Absolute canonical path on the backend host. */
   path: string;
   virtualPath: string;
-  readOnly: true;
+  readOnly: boolean;
   createdAt: string;
 }
 
@@ -21,6 +21,8 @@ export interface LocalFolderList {
 
 export interface CreateLocalFolderInput {
   path: string;
+  /** Defaults to true when omitted. */
+  readOnly?: boolean;
 }
 
 export interface LocalFolderBrowseEntry {

@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("LocalFolderStore", () => {
-  it("persists stable read-only virtual mounts", () => {
+  it("persists stable virtual mounts and their access mode", () => {
     const root = mkdtempSync(join(tmpdir(), "pizza-local-folders-"));
     roots.push(root);
     const file = join(root, "app.sqlite");
@@ -29,12 +29,13 @@ describe("LocalFolderStore", () => {
         id: "project-files",
         label: "Project files",
         path: join(root, "project"),
+        readOnly: false,
       }),
     ).toMatchObject({
       id: "project-files",
       label: "Project files",
       virtualPath: "/local/project-files",
-      readOnly: true,
+      readOnly: false,
     });
     first.close();
 

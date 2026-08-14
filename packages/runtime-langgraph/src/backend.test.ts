@@ -74,6 +74,100 @@ describe("buildBackend", () => {
     removeDir(dir);
   });
 
+  it("allows every mutation only while a folder has write access", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "local-folder-writable-"));
+    const canonicalDir = realpathSync(dir);
+    let readOnly = false;
+    const backend = buildBackend({
+      localFolders: () => [{
+        id: "workspace",
+        label: "Workspace",
+        path: canonicalDir,
+        virtualPath: "/local/workspace",
+        readOnly,
+        createdAt: new Date().toISOString(),
+      }],
+    }) as CompositeBackend;
+
+    expect(
+      await backend.write("/local/workspace/nested/notes.md", "first"),
+    ).toMatchObject({ path: "/local/workspace/nested/notes.md" });
+    expect(readFileSync(join(dir, "nested", "notes.md"), "utf8")).toBe("first");
+
+    expect(
+      await backend.edit(
+        "/local/workspace/nested/notes.md",
+        "first",
+        "updated",
+      ),
+    ).toMatchObject({
+      path: "/local/workspace/nested/notes.md",
+      occurrences: 1,
+    });
+    expect(readFileSync(join(dir, "nested", "notes.md"), "utf8")).toBe(
+      "updated",
+    );
+
+    expect(
+      await backend.uploadFiles?.([
+        [
+          "/local/workspace/nested/upload.bin",
+          new TextEncoder().encode("binary"),
+        ],
+      ]),
+    ).toEqual([
+      {
+        path: "/local/workspace/nested/upload.bin",
+        error: null,
+      },
+    ]);
+    expect(readFileSync(join(dir, "nested", "upload.bin"), "utf8")).toBe(
+      "binary",
+    );
+
+    expect(
+      await backend.delete("/local/workspace/nested/notes.md"),
+    ).toMatchObject({ path: "/local/workspace/nested/notes.md" });
+    expect(() =>
+      readFileSync(join(dir, "nested", "notes.md"), "utf8")
+    ).toThrow();
+
+    readOnly = true;
+    expect(
+      (await backend.write("/local/workspace/blocked.md", "no")).error,
+    ).toContain("read-only");
+    expect(
+      (
+        await backend.edit(
+          "/local/workspace/nested/upload.bin",
+          "binary",
+          "changed",
+        )
+      ).error,
+    ).toContain("read-only");
+    expect(
+      (await backend.delete("/local/workspace/nested/upload.bin")).error,
+    ).toContain("read-only");
+    expect(
+      await backend.uploadFiles?.([
+        [
+          "/local/workspace/blocked.bin",
+          new TextEncoder().encode("no"),
+        ],
+      ]),
+    ).toEqual([
+      {
+        path: "/local/workspace/blocked.bin",
+        error: "permission_denied",
+      },
+    ]);
+    expect(readFileSync(join(dir, "nested", "upload.bin"), "utf8")).toBe(
+      "binary",
+    );
+
+    removeDir(dir);
+  });
+
   it.skipIf(process.platform === "win32")(
     "rejects a symlink that escapes an approved folder",
     async () => {
@@ -91,7 +185,7 @@ describe("buildBackend", () => {
           label: "Root",
           path: canonicalRoot,
           virtualPath: "/local/root",
-          readOnly: true,
+          readOnly: false,
           createdAt: new Date().toISOString(),
         }],
       }) as CompositeBackend;
@@ -107,6 +201,25 @@ describe("buildBackend", () => {
           entry.path
         ),
       ).not.toContain("/local/root/linked/secret.txt");
+      expect(
+        (await backend.write("/local/root/linked/secret.txt", "changed")).error,
+      ).toContain("not allowed");
+      expect(
+        await backend.uploadFiles?.([
+          [
+            "/local/root/linked/upload.bin",
+            new TextEncoder().encode("changed"),
+          ],
+        ]),
+      ).toEqual([
+        {
+          path: "/local/root/linked/upload.bin",
+          error: "permission_denied",
+        },
+      ]);
+      expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe(
+        "not approved",
+      );
 
       removeDir(root);
       symlinkSync(outside, root, "dir");

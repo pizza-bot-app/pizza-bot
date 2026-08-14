@@ -1137,13 +1137,17 @@ body {
   border-radius: 4px; background: var(--panel-2); color: var(--dim);
   font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px;
 }
-.local-folder-read-only {
+.local-folder-access {
   display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto;
   color: var(--dim); font-size: 11.5px;
 }
 .local-folder-remove { margin-left: 2px; }
 .local-folder-path-input { display: flex; align-items: stretch; gap: 8px; }
 .local-folder-path-input input { min-width: 0; flex: 1; }
+.local-folder-access-picker { width: fit-content; }
+.local-folder-access-picker .segmented-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
 .local-folder-form-actions { display: flex; justify-content: flex-end; }
 .local-folder-picker { width: min(560px, calc(100vw - 32px)); }
 .local-folder-picker-location {
@@ -1646,6 +1650,12 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
   .settings-row-adaptive .settings-theme-toggle,
   .settings-row-adaptive .settings-provider-default { width: 100%; max-width: none; }
   .settings-row-adaptive .settings-theme-toggle .segmented-btn { flex: 1 1 0; min-width: 0; }
+  .local-folder-row { flex-wrap: wrap; }
+  .local-folder-row .settings-row-text {
+    flex: 1 1 calc(100% - 42px); min-width: calc(100% - 42px);
+  }
+  .local-folder-access { margin-left: 36px; }
+  .local-folder-remove { margin-left: auto; }
   .module-body.mobile-list .module-detail { display: none; }
   .module-body.mobile-detail .resource-list,
   .module-body.mobile-detail .schedules-list { display: none; }

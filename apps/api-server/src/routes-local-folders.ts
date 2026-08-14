@@ -232,6 +232,12 @@ export function localFolderRoutes(
       );
     }
     const raw = (await c.req.json().catch(() => ({}))) as Partial<CreateLocalFolderInput>;
+    if (raw.readOnly !== undefined && typeof raw.readOnly !== "boolean") {
+      return c.json(
+        { error: "invalid_access", detail: "readOnly must be a boolean" },
+        400,
+      );
+    }
     const directory = await canonicalDirectory(raw.path);
     if (!directory.ok) {
       return c.json({ error: "invalid_path", detail: directory.detail }, 400);
@@ -258,6 +264,7 @@ export function localFolderRoutes(
       id: uniqueId(host, label),
       label,
       path: directory.path,
+      readOnly: raw.readOnly ?? true,
     });
     return c.json(folder, 201);
   });

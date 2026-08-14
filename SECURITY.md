@@ -99,16 +99,18 @@ use a SQLite-aware snapshot when backing up live databases.
 - **No implicit filesystem grant.** Pizza Bot does not receive access to the
   user's home directory by default. A user or backend operator must add each
   directory explicitly under **Settings > Files**.
-- **Read-only virtual mounts.** Grants appear to Pizza Bot and delegated workers
-  beneath `/local/<folder-id>/`. Mutating backend operations are denied.
-  DeepAgents virtual mode provides lexical confinement, and Pizza Bot also
-  validates canonical paths for every operation to reject traversal and
-  symlink or junction escapes. The Pizza Bot data root and its ancestors and
-  descendants cannot be granted.
+- **Permission-scoped virtual mounts.** Grants appear to Pizza Bot and delegated
+  workers beneath `/local/<folder-id>/` and default to read-only. Write access
+  is a separate explicit choice that allows creating, changing, and deleting
+  files beneath that root. DeepAgents virtual mode provides lexical confinement,
+  and Pizza Bot also validates canonical paths and mutation parents to reject
+  traversal and symlink or junction escapes. The Pizza Bot data root and its
+  ancestors and descendants cannot be granted.
 - **Folder contents can leave the machine.** The agent may read any accessible
   file below a granted root and include it in prompts or tool calls sent to the
   configured model and MCP providers. Review a folder's complete contents
-  before granting it.
+  before granting it. For writable grants, also assume the agent may modify or
+  delete those contents.
 - **Grants belong to the backend host.** The embedded desktop backend uses a
   native directory picker. A standalone backend accepts only absolute paths on
   its own Linux or Windows host; a remote desktop path has no meaning there. An
@@ -117,10 +119,10 @@ use a SQLite-aware snapshot when backing up live databases.
   canonical roots and rejects symlinks and junctions.
 - **Standalone configuration is opt-in.** The add/remove API is disabled unless
   `PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION=1`. Enabling it allows any holder of
-  the shared backend bearer token to grant readable backend directories and,
-  when browse roots are configured, enumerate directory names beneath them.
-  Use it only for an administrative session. The embedded sidecar enables it
-  for its local Settings UI.
+  the shared backend bearer token to grant read or write access to backend
+  directories and, when browse roots are configured, enumerate directory names
+  beneath them. Use it only for an administrative session. The embedded sidecar
+  enables it for its local Settings UI.
 - **Revocation is prospective.** Removing a grant blocks subsequent operations,
   including operations from already-compiled agent graphs. It cannot retract
   content already placed in a conversation or sent to a provider.

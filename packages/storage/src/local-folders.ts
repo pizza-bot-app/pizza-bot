@@ -8,6 +8,7 @@ interface LocalFolderRow {
   id: string;
   label: string;
   path: string;
+  read_only: number;
   created_at: string;
 }
 
@@ -17,12 +18,12 @@ function fromRow(row: LocalFolderRow): LocalFolder {
     label: row.label,
     path: row.path,
     virtualPath: `${LOCAL_FOLDER_VIRTUAL_ROOT}/${row.id}`,
-    readOnly: true,
+    readOnly: row.read_only !== 0,
     createdAt: row.created_at,
   };
 }
 
-/** Persists read-only backend-host folder grants. */
+/** Persists backend-host folder grants. */
 export class LocalFolderStore {
   constructor(private readonly db: Database.Database) {
     this.db.exec(`
@@ -30,6 +31,7 @@ export class LocalFolderStore {
         id         TEXT PRIMARY KEY,
         label      TEXT NOT NULL,
         path       TEXT NOT NULL UNIQUE,
+        read_only  INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL
       );
     `);
@@ -38,7 +40,7 @@ export class LocalFolderStore {
   list(): LocalFolder[] {
     return this.db
       .prepare<[], LocalFolderRow>(
-        "SELECT id, label, path, created_at FROM local_folders ORDER BY label COLLATE NOCASE, id",
+        "SELECT id, label, path, read_only, created_at FROM local_folders ORDER BY label COLLATE NOCASE, id",
       )
       .all()
       .map(fromRow);
@@ -47,19 +49,24 @@ export class LocalFolderStore {
   get(id: string): LocalFolder | undefined {
     const row = this.db
       .prepare<[string], LocalFolderRow>(
-        "SELECT id, label, path, created_at FROM local_folders WHERE id = ?",
+        "SELECT id, label, path, read_only, created_at FROM local_folders WHERE id = ?",
       )
       .get(id);
     return row ? fromRow(row) : undefined;
   }
 
-  create(input: { id: string; label: string; path: string }): LocalFolder {
+  create(input: {
+    id: string;
+    label: string;
+    path: string;
+    readOnly: boolean;
+  }): LocalFolder {
     const createdAt = new Date().toISOString();
     this.db
       .prepare(
-        "INSERT INTO local_folders (id, label, path, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO local_folders (id, label, path, read_only, created_at) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(input.id, input.label, input.path, createdAt);
+      .run(input.id, input.label, input.path, input.readOnly ? 1 : 0, createdAt);
     return this.get(input.id)!;
   }
 

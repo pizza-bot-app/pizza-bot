@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, LockKeyhole, Plus, Trash2 } from "lucide-react";
+import {
+  FolderOpen,
+  LockKeyhole,
+  PencilLine,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import type { LocalFolder, LocalFolderList } from "@pizza-bot/core";
 import type { ApiClient } from "@/api-client";
 import { ConfirmationDialog } from "../ConfirmationDialog.js";
@@ -20,6 +26,7 @@ export function LocalFoldersSettings({
 }: LocalFoldersSettingsProps) {
   const [snapshot, setSnapshot] = useState<LocalFolderList>();
   const [folderPath, setFolderPath] = useState("");
+  const [readOnly, setReadOnly] = useState(true);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [showBackendPicker, setShowBackendPicker] = useState(false);
@@ -64,9 +71,13 @@ export function LocalFoldersSettings({
     setBusy(true);
     setError(undefined);
     try {
-      await client.createLocalFolder({ path: folderPath.trim() });
+      await client.createLocalFolder({
+        path: folderPath.trim(),
+        readOnly,
+      });
       await load();
       setFolderPath("");
+      setReadOnly(true);
       setConfirmAdd(false);
     } catch (cause) {
       setError(message(cause));
@@ -106,8 +117,11 @@ export function LocalFoldersSettings({
                   </div>
                   <code className="local-folder-virtual">{folder.virtualPath}</code>
                 </div>
-                <span className="local-folder-read-only">
-                  <LockKeyhole size={13} /> Read only
+                <span className="local-folder-access">
+                  {folder.readOnly
+                    ? <LockKeyhole size={13} />
+                    : <PencilLine size={13} />}
+                  {folder.readOnly ? "Read only" : "Read and write"}
                 </span>
                 {snapshot.configurable && (
                   <button
@@ -166,6 +180,31 @@ export function LocalFoldersSettings({
                 )}
               </div>
             </label>
+            <div className="field">
+              <span className="field-label">Access</span>
+              <div
+                className="segmented local-folder-access-picker"
+                role="group"
+                aria-label="Folder access"
+              >
+                <button
+                  type="button"
+                  className={`segmented-btn${readOnly ? " active" : ""}`}
+                  aria-pressed={readOnly}
+                  onClick={() => setReadOnly(true)}
+                >
+                  <LockKeyhole size={14} /> Read only
+                </button>
+                <button
+                  type="button"
+                  className={`segmented-btn${readOnly ? "" : " active"}`}
+                  aria-pressed={!readOnly}
+                  onClick={() => setReadOnly(false)}
+                >
+                  <PencilLine size={14} /> Read and write
+                </button>
+              </div>
+            </div>
             <div className="local-folder-form-actions">
               <button
                 type="button"
@@ -199,9 +238,13 @@ export function LocalFoldersSettings({
 
       {confirmAdd && (
         <ConfirmationDialog
-          title="Allow folder access?"
-          message="Pizza Bot and delegated workers will be able to read every accessible file in this folder during conversations and background runs. File contents may be sent to your configured model providers."
-          confirmLabel="Allow read access"
+          title={readOnly
+            ? "Allow folder access?"
+            : "Allow read and write access?"}
+          message={readOnly
+            ? "Pizza Bot and delegated workers will be able to read every accessible file in this folder during conversations and background runs. File contents may be sent to your configured model providers."
+            : "Pizza Bot and delegated workers will be able to read, create, change, and delete files in this folder during conversations and background runs. File contents may be sent to your configured model providers."}
+          confirmLabel={readOnly ? "Allow read access" : "Allow read and write"}
           busy={busy}
           error={error}
           onCancel={() => {

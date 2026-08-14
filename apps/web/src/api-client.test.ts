@@ -313,7 +313,7 @@ describe("ApiClient", () => {
                 label: "Project",
                 path: "/srv/project",
                 virtualPath: "/local/project",
-                readOnly: true,
+                readOnly: false,
                 createdAt: "now",
               }),
           { status: init?.method === "POST" ? 201 : 200 },
@@ -326,8 +326,11 @@ describe("ApiClient", () => {
       directories: [{ path: "/srv/project" }],
     });
     expect(
-      await client.createLocalFolder({ path: "/srv/project" }),
-    ).toMatchObject({ id: "project", readOnly: true });
+      await client.createLocalFolder({
+        path: "/srv/project",
+        readOnly: false,
+      }),
+    ).toMatchObject({ id: "project", readOnly: false });
     expect(await client.deleteLocalFolder("project")).toBe(true);
     expect(calls).toEqual([
       {
@@ -338,7 +341,7 @@ describe("ApiClient", () => {
       {
         url: "http://x/local-folders",
         method: "POST",
-        body: JSON.stringify({ path: "/srv/project" }),
+        body: JSON.stringify({ path: "/srv/project", readOnly: false }),
       },
       {
         url: "http://x/local-folders/project",

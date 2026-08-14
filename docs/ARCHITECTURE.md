@@ -180,6 +180,17 @@ in `core/src/protocol-types.ts`:
 - **Checkpointer** and **store** are passed *into* `createDeepAgent` (never set
   post-hoc). Checkpointer = short-term, thread-scoped; store = long-term,
   cross-thread.
+- **Filesystem backend** is a `CompositeBackend`: checkpoint-scoped files remain
+  in `StateBackend`, durable memory is routed to `/memories/`, and explicit
+  backend-host folder grants are routed beneath `/local/<id>/`. Grants default
+  to read-only and may explicitly allow writes. Granted roots use
+  `FilesystemBackend({ virtualMode: true })` plus canonical path and mutation
+  parent checks that reject traversal and symlink/junction escapes. The backend
+  reads the SQLite grant registry for every operation, so removal revokes access
+  from already-compiled graphs. Standalone directory browsing is a separate,
+  operator-configured capability: the API lists directories only beneath
+  canonical `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS` and never follows symlinks while
+  browsing.
 - **Model context limits** are resolved by each inference-provider adapter from
   effective local configuration or provider metadata, with models.dev filling
   missing catalog fields. The adapter publishes the same available limit as

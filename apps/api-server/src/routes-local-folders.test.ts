@@ -140,10 +140,12 @@ describe("local folder routes", () => {
     ).toThrow("directory is not accessible");
   });
 
-  it("adds canonical individual folders and removes them", async () => {
+  it("defaults grants to read-only and accepts explicit write access", async () => {
     const app = buildApp(host, { allowLocalFolderConfiguration: true });
     const project = join(allowed, "Project Files");
+    const writable = join(allowed, "Writable");
     mkdirSync(project);
+    mkdirSync(writable);
     const response = await app.request("/local-folders", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -158,6 +160,18 @@ describe("local folder routes", () => {
       readOnly: true,
     });
 
+    const writableResponse = await app.request("/local-folders", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: writable, readOnly: false }),
+    });
+    expect(writableResponse.status).toBe(201);
+    expect(await writableResponse.json()).toMatchObject({
+      id: "writable",
+      label: "Writable",
+      readOnly: false,
+    });
+
     const duplicate = await app.request("/local-folders", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -168,6 +182,11 @@ describe("local folder routes", () => {
     expect(
       await (
         await app.request("/local-folders/project-files", { method: "DELETE" })
+      ).json(),
+    ).toEqual({ deleted: true });
+    expect(
+      await (
+        await app.request("/local-folders/writable", { method: "DELETE" })
       ).json(),
     ).toEqual({ deleted: true });
     expect(host.localFolders.list()).toEqual([]);
@@ -200,5 +219,12 @@ describe("local folder routes", () => {
       body: JSON.stringify({ path: join(dataRoot, "..") }),
     });
     expect(protectedParent.status).toBe(400);
+
+    const invalidAccess = await app.request("/local-folders", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: allowed, readOnly: "false" }),
+    });
+    expect(invalidAccess.status).toBe(400);
   });
 });

@@ -186,8 +186,9 @@ desktop settings do not appear automatically.
 - MCP servers are configured in `<PIZZA_DATA_ROOT>/.mcp.json`. Environment
   references in that file expand from the backend process environment.
 - Local-folder grants are paths on the backend host, not the connected desktop.
-  The agent sees each grant read-only at `/local/<folder-id>/`; no folder,
-  including the backend user's home directory, is granted by default.
+  The agent sees each grant at `/local/<folder-id>/`. Grants default to
+  read-only and can explicitly allow writes; no folder, including the backend
+  user's home directory, is granted by default.
 - User plugins, skills, attachments, conversations, and logs belong to the
   selected server data root. Bundled **Plugin** packages and **Built-in** skills
   are included in the artifact.
@@ -220,8 +221,9 @@ The picker lists directories only, does not follow symlinks or junctions, and
 cannot leave those canonical roots. Display labels and virtual path ids are
 derived from the selected directory name. While configuration is enabled,
 anyone with the backend bearer token can enumerate directory names beneath the
-browse roots and grant read access to any directory readable by the backend
-process, except the Pizza Bot data root and its ancestors or descendants.
+browse roots and grant read or write access to directories accessible by the
+backend process, except the Pizza Bot data root and its ancestors or
+descendants.
 
 For example, this stores an Anthropic environment reference without sending the
 secret over the API:

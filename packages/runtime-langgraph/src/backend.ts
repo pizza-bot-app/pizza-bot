@@ -1,5 +1,5 @@
 /** Routes durable memories and approved local folders outside checkpoint state. */
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import {
   StateBackend,
@@ -19,14 +19,17 @@ import {
   type ReadResult,
   type WriteResult,
 } from "deepagents";
-import type { LocalFolder } from "@pizza-bot/core";
+import {
+  LOCAL_FOLDER_VIRTUAL_ROOT,
+  type LocalFolder,
+} from "@pizza-bot/core";
 
 export interface BuildBackendOptions {
   /** Global memory root; when set, `/memories/` is confined to this directory. */
   memoriesDir?: string;
   /** Live settings gate. Defaults to enabled for backwards-compatible callers. */
   memoryEnabled?: () => boolean;
-  /** Live read-only grants mounted beneath `/local/<id>/`. */
+  /** Live grants mounted beneath `/local/<id>/`. */
   localFolders?: () => readonly LocalFolder[];
 }
 
@@ -94,6 +97,12 @@ function pathIsWithin(root: string, candidate: string): boolean {
   );
 }
 
+interface ResolvedLocalFolder {
+  folder: LocalFolder;
+  folderPath: string;
+  backend: FilesystemBackend;
+}
+
 class LocalFoldersBackend implements BackendProtocolV2 {
   private readonly backends = new Map<string, FilesystemBackend>();
 
@@ -152,6 +161,39 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     }
   }
 
+  private async mutationAllowed(
+    folder: LocalFolder,
+    folderPath: string,
+  ): Promise<boolean> {
+    try {
+      const canonicalRoot = await realpath(folder.path);
+      if (path.relative(path.resolve(folder.path), canonicalRoot) !== "") {
+        return false;
+      }
+      const candidate = path.resolve(
+        canonicalRoot,
+        folderPath.replace(/^\/+/, ""),
+      );
+      if (!pathIsWithin(canonicalRoot, candidate)) return false;
+
+      let current = canonicalRoot;
+      const relative = path.relative(canonicalRoot, candidate);
+      for (const segment of relative.split(path.sep).filter(Boolean)) {
+        current = path.join(current, segment);
+        try {
+          if ((await lstat(current)).isSymbolicLink()) return false;
+          if (!pathIsWithin(canonicalRoot, await realpath(current))) return false;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+          return false;
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private prefix<T extends { path: string }>(folder: LocalFolder, value: T): T {
     return {
       ...value,
@@ -161,10 +203,30 @@ class LocalFoldersBackend implements BackendProtocolV2 {
 
   private async readable(
     virtualPath: string,
-  ): Promise<{ folder: LocalFolder; folderPath: string; backend: FilesystemBackend } | undefined> {
+  ): Promise<ResolvedLocalFolder | undefined> {
     const { folder, folderPath } = this.split(virtualPath);
     if (!folder || !(await this.contained(folder, folderPath))) return undefined;
     return { folder, folderPath, backend: this.backend(folder) };
+  }
+
+  private async writable(
+    virtualPath: string,
+  ): Promise<
+    | { ok: true; value: ResolvedLocalFolder }
+    | { ok: false; error: string }
+  > {
+    const { folder, folderPath } = this.split(virtualPath);
+    if (!folder) return { ok: false, error: LOCAL_FOLDER_DENIED_ERROR };
+    if (folder.readOnly) {
+      return { ok: false, error: LOCAL_FOLDER_READ_ONLY_ERROR };
+    }
+    if (!(await this.mutationAllowed(folder, folderPath))) {
+      return { ok: false, error: LOCAL_FOLDER_DENIED_ERROR };
+    }
+    return {
+      ok: true,
+      value: { folder, folderPath, backend: this.backend(folder) },
+    };
   }
 
   async ls(virtualPath: string): Promise<LsResult> {
@@ -296,27 +358,67 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     return { files, truncated };
   }
 
-  write(): Promise<WriteResult> {
-    return Promise.resolve({ error: LOCAL_FOLDER_READ_ONLY_ERROR });
+  async write(virtualPath: string, content: string): Promise<WriteResult> {
+    const resolved = await this.writable(virtualPath);
+    if (!resolved.ok) return { error: resolved.error };
+    const result = await resolved.value.backend.write(
+      resolved.value.folderPath,
+      content,
+    );
+    return result.error
+      ? result
+      : { ...result, path: `${LOCAL_FOLDER_VIRTUAL_ROOT}${virtualPath}` };
   }
 
-  edit(): Promise<EditResult> {
-    return Promise.resolve({ error: LOCAL_FOLDER_READ_ONLY_ERROR });
+  async edit(
+    virtualPath: string,
+    oldString: string,
+    newString: string,
+    replaceAll?: boolean,
+  ): Promise<EditResult> {
+    const resolved = await this.writable(virtualPath);
+    if (!resolved.ok) return { error: resolved.error };
+    const result = await resolved.value.backend.edit(
+      resolved.value.folderPath,
+      oldString,
+      newString,
+      replaceAll,
+    );
+    return result.error
+      ? result
+      : { ...result, path: `${LOCAL_FOLDER_VIRTUAL_ROOT}${virtualPath}` };
   }
 
-  delete(): Promise<DeleteResult> {
-    return Promise.resolve({ error: LOCAL_FOLDER_READ_ONLY_ERROR });
+  async delete(virtualPath: string): Promise<DeleteResult> {
+    const resolved = await this.writable(virtualPath);
+    if (!resolved.ok) return { error: resolved.error };
+    const result = await resolved.value.backend.delete(
+      resolved.value.folderPath,
+    );
+    return result.error
+      ? result
+      : { ...result, path: `${LOCAL_FOLDER_VIRTUAL_ROOT}${virtualPath}` };
   }
 
-  uploadFiles(
+  async uploadFiles(
     files: Array<[string, Uint8Array]>,
   ): Promise<FileUploadResponse[]> {
-    return Promise.resolve(
-      files.map(([filePath]) => ({
-        path: filePath,
-        error: "permission_denied",
-      })),
-    );
+    const responses: FileUploadResponse[] = [];
+    for (const [virtualPath, content] of files) {
+      const resolved = await this.writable(virtualPath);
+      if (!resolved.ok) {
+        responses.push({ path: virtualPath, error: "permission_denied" });
+        continue;
+      }
+      const [result] = await resolved.value.backend.uploadFiles([
+        [resolved.value.folderPath, content],
+      ]);
+      responses.push({
+        path: virtualPath,
+        error: result?.error ?? null,
+      });
+    }
+    return responses;
   }
 
   async downloadFiles(paths: string[]): Promise<FileDownloadResponse[]> {
