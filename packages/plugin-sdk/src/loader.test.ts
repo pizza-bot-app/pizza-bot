@@ -33,7 +33,7 @@ async function writeEnvExpansionPluginFixture(): Promise<string> {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PLUGINS_DIR = resolve(__dirname, "../../../plugins");
+const EXAMPLES_DIR = resolve(__dirname, "../../../examples/plugins");
 const EXAMPLE_ROOT = resolve(__dirname, "../../../examples/plugins/mcp-status");
 const MANIFEST = resolve(EXAMPLE_ROOT, ".claude-plugin/plugin.json");
 
@@ -62,11 +62,10 @@ describe("FsPluginLoader", () => {
   it("discovers plugins under a directory and returns their manifests", async () => {
     const loader = new FsPluginLoader();
     const reg = new ContributionRegistry();
-    const manifests = await loader.discover(PLUGINS_DIR, reg);
-    expect(manifests.map((m) => m.name)).toContain("playwright-mcp");
-    expect(reg.skills.size).toBeGreaterThanOrEqual(1);
-    expect(reg.skills.has("browser-automation")).toBe(true);
-    expect(reg.mcpServers.has("playwright")).toBe(true);
+    const manifests = await loader.discover(EXAMPLES_DIR, reg);
+    expect(manifests.map((m) => m.name)).toEqual(["mcp-status"]);
+    expect(reg.skills.has("health-report")).toBe(true);
+    expect(reg.mcpServers.has("mcp-status")).toBe(true);
   });
 
   it("expands ${ENV_VAR} in an MCP entry (plugin .mcp.json bearer token)", async () => {
