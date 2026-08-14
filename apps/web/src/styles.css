@@ -4,13 +4,16 @@
   scrollbar-width: thin;
 }
 html, body, #root { height: 100%; margin: 0; }
+@supports (height: 100dvh) {
+  html, body, #root { height: 100dvh; }
+}
 body {
   background: var(--bg);
   color: var(--text);
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
 }
 
-.app { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.app { display: flex; flex-direction: column; height: 100%; overflow: hidden; overscroll-behavior: none; }
 
 .body { display: flex; flex: 1; min-height: 0; }
 
@@ -110,7 +113,10 @@ body {
   font-size: 10px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase;
 }
 
-.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 8px; }
+.sidebar-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: none;
+  padding: 0 8px 8px;
+}
 
 .sidebar-empty {
   padding: 40px 24px; text-align: center; color: var(--dim);
@@ -160,6 +166,31 @@ body {
 }
 .thread-row:hover { background: var(--panel-2); }
 .thread-row.active { background: var(--panel-2); border-right-color: var(--brand); }
+
+.thread-swipe {
+  position: relative; overflow: hidden;
+  background: transparent;
+}
+.thread-swipe-content {
+  position: relative; z-index: 1; background: var(--sidebar-bg);
+  border-radius: 8px; overflow: hidden;
+  touch-action: pan-y; transition: transform .18s ease-out;
+}
+.thread-swipe .thread-row { border-radius: 0; }
+.thread-swipe.dragging .thread-swipe-content { transition: none; }
+.thread-swipe-delete {
+  position: absolute; z-index: 0; top: 0; right: 0; bottom: 0;
+  width: 76px; padding: 0; border: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  border-radius: 0 8px 8px 0;
+  background: transparent; color: var(--destructive-foreground);
+  font: inherit; font-size: 11px; font-weight: 700; cursor: pointer;
+  visibility: hidden;
+}
+.thread-swipe.open .thread-swipe-delete,
+.thread-swipe.dragging .thread-swipe-delete {
+  visibility: visible; background: var(--danger);
+}
 
 .thread-actions {
   position: absolute; top: 6px; right: 10px;
@@ -359,7 +390,9 @@ body {
 .chat-header-title-input.error {
   border-color: var(--error); outline-color: color-mix(in srgb, var(--error) 20%, transparent);
 }
-.feed-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.feed-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: none;
+}
 
 .welcome {
   display: flex; flex-direction: column; align-items: center;
@@ -487,7 +520,11 @@ body {
 }
 .transcript-tool-io.error { color: var(--danger, #f87171); }
 
-.feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.feed {
+  flex: 1; overflow-y: auto; overscroll-behavior-y: none;
+  padding: 16px; display: flex; flex-direction: column; gap: 14px;
+}
+.conversation-scroll { overscroll-behavior-y: none; }
 .feed.empty { align-items: center; justify-content: center; color: var(--dim); text-align: center; }
 .msg { display: flex; flex-direction: column; gap: 4px; max-width: 760px; }
 .msg-user { align-self: flex-end; align-items: flex-end; }
@@ -1487,6 +1524,13 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
 
 /* Keep this breakpoint synchronized with MOBILE_BREAKPOINT in use-is-mobile.ts. */
 @media (max-width: 768px) {
+  /* iOS zooms focused text-entry controls whose computed font is below 16px. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
   .body { flex-direction: column; }
   .iconrail { display: none; }
   .mobile-nav {
