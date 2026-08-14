@@ -1,0 +1,7 @@
+{
+  "name": "@pizza-bot/example-plugin-mcp-status",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-contained reference plugin with an MCP server and skill."
+}

@@ -184,6 +184,12 @@ describe("splitSkillMd / composeSkillMd", () => {
     expect(twice).toBe(once);
   });
 
+  it("removes repeated leading CRLFs before composing the body", () => {
+    expect(composeSkillMd("n", "d", "\r\n\r\n# Title\r\n")).toBe(
+      '---\nname: "n"\ndescription: "d"\n---\n\n# Title\n',
+    );
+  });
+
   it("omits the trailing block for an empty body", () => {
     expect(composeSkillMd("n", "d", "")).toBe('---\nname: "n"\ndescription: "d"\n---\n');
   });

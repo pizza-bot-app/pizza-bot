@@ -270,6 +270,12 @@ describe("Anthropic endpoint normalization", () => {
       "https://proxy.example/anthropic/v1/messages",
     )).toBe("https://proxy.example/anthropic");
   });
+
+  it("removes long trailing slash runs without changing the endpoint", () => {
+    expect(normalizeBaseUrl(`https://api.anthropic.com${"/".repeat(80_000)}`)).toBe(
+      "https://api.anthropic.com",
+    );
+  });
 });
 
 const TEST_TOOL = {

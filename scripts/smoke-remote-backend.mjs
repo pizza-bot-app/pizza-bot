@@ -90,7 +90,7 @@ try {
 
   await waitForHealthy(baseUrl, origin);
 
-  const shippedSkill = await fetch(`${baseUrl}/skills/health-report`, {
+  const shippedSkill = await fetch(`${baseUrl}/skills/browser-automation`, {
     headers: authHeaders,
   });
   assert.equal(shippedSkill.status, 200);
@@ -100,23 +100,23 @@ try {
       source: shippedSkillBody.source,
       pluginName: shippedSkillBody.pluginName,
     },
-    { source: "plugin", pluginName: "mcp-status" },
+    { source: "plugin", pluginName: "playwright-mcp" },
   );
 
   const plugins = await fetch(`${baseUrl}/plugins`, { headers: authHeaders });
   assert.equal(plugins.status, 200);
   assert.deepEqual(
     (await plugins.json()).plugins.map((plugin) => plugin.name).sort(),
-    ["mcp-status"],
+    ["playwright-mcp"],
   );
 
   const mcpServers = await waitForMcpLoaded(baseUrl, authHeaders);
   assert.deepEqual(
     mcpServers
-      .filter((server) => server.name === "mcp-status")
+      .filter((server) => server.name === "playwright")
       .map((server) => ({ name: server.name, status: server.status }))
       .sort((a, b) => a.name.localeCompare(b.name)),
-    [{ name: "mcp-status", status: "loaded" }],
+    [{ name: "playwright", status: "loaded" }],
   );
 
   streamAbort = new AbortController();
@@ -251,7 +251,7 @@ async function waitForMcpLoaded(baseUrl, headers) {
     const response = await fetch(`${baseUrl}/status`, { headers });
     assert.equal(response.status, 200);
     servers = (await response.json()).mcp.servers;
-    const shipped = servers.filter((server) => server.name === "mcp-status");
+    const shipped = servers.filter((server) => server.name === "playwright");
     if (shipped.length === 1 && shipped[0].status === "loaded") {
       return servers;
     }

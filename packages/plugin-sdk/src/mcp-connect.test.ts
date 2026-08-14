@@ -11,7 +11,10 @@ import {
 } from "./mcp-servers-config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const STATUS_SERVER = resolve(__dirname, "../../../plugins/example-mcp-status/src/server.js");
+const STATUS_SERVER = resolve(
+  __dirname,
+  "../../../examples/plugins/mcp-status/src/server.js",
+);
 const EMPTY_DESC_SERVER = resolve(__dirname, "__fixtures__/mcp-empty-desc-server.mjs");
 const DELAYED_SERVER = resolve(__dirname, "__fixtures__/mcp-delayed-server.mjs");
 

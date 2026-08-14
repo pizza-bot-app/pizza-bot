@@ -313,7 +313,7 @@ export function skillRoutes(host: AgentHost): Hono {
     parse: parseBody,
     exists: (skillsDir, id) => userSkillExists(skillsDir, id),
     patchable: (_skillsDir, id) =>
-      host.skillFor(id).then((entry) => entry?.source === "builtin"),
+      host.skillFor(id).then((entry) => entry !== undefined && entry.source !== "user"),
     reserved: (_skillsDir, id) => host.skillFor(id).then((e) => Boolean(e)),
     write: (skillsDir, id, parsed) => writeSkill(skillsDir, id, parsed),
     remove: async (skillsDir, id) => {

@@ -292,7 +292,11 @@ export async function createAnthropicChatModel(
 }
 
 export function normalizeBaseUrl(value: string | undefined): string | undefined {
-  const baseUrl = value?.trim().replace(/\/+$/, "");
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  let end = trimmed.length;
+  while (end > 0 && trimmed.charCodeAt(end - 1) === 0x2f) end -= 1;
+  const baseUrl = trimmed.slice(0, end);
   if (!baseUrl) return undefined;
   return baseUrl.replace(/\/v1\/messages$/i, "");
 }

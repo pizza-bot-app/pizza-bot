@@ -24,7 +24,21 @@ provided in LICENSE. These files have been modified for Pizza Bot OSS.
 
 Distributed backend and desktop artifacts also include
 THIRD_PARTY_LICENSES.txt, generated from the installed dependency tree used to
-build the artifact.
+build the artifact. It contains the license texts and package versions for
+DeepAgents, LangChain, LangGraph, the LangGraph SDK, and other bundled
+dependencies. Those LangChain projects are MIT-licensed by their respective
+copyright holders:
+
+https://github.com/langchain-ai/deepagentsjs
+https://github.com/langchain-ai/langchainjs
+https://github.com/langchain-ai/langgraphjs
+
+The bundled Browser Automation Plugin uses Microsoft's Playwright MCP and
+Playwright projects, licensed under the Apache License, Version 2.0. Their
+license and third-party notice texts are included in THIRD_PARTY_LICENSES.txt:
+
+https://github.com/microsoft/playwright-mcp
+https://github.com/microsoft/playwright
 
 Files in apps/web/src/components/ui are derived from shadcn/ui:
 https://github.com/shadcn-ui/ui

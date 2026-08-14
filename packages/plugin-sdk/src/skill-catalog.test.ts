@@ -15,8 +15,9 @@ import {
 } from "./skill-catalog.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const EXAMPLE_ROOT = resolve(__dirname, "../../../plugins/example-mcp-status");
+const EXAMPLE_ROOT = resolve(__dirname, "../../../examples/plugins/mcp-status");
 const MANIFEST = resolve(EXAMPLE_ROOT, ".claude-plugin/plugin.json");
+const BUILTIN_SKILLS_DIR = resolve(__dirname, "../../../skills");
 
 describe("loadSkillCatalog", () => {
   it("reads a plugin-shipped skill into a catalog entry with parsed metadata", async () => {
@@ -313,6 +314,23 @@ describe("loadBuiltinSkills", () => {
     ]);
 
     expect((await loadBuiltinSkills(dir)).get("research")?.source).toBe("builtin");
+  });
+
+  it("loads the bundled Pizza Bot Guide and its references", async () => {
+    const guide = (await loadBuiltinSkills(BUILTIN_SKILLS_DIR)).get("pizza-bot-guide");
+
+    expect(guide).toMatchObject({
+      name: "Pizza Bot Guide",
+      source: "builtin",
+      declaredTools: [],
+    });
+    expect(guide?.files.map((file) => file.path)).toEqual(
+      expect.arrayContaining([
+        "/skills/pizza-bot-guide/SKILL.md",
+        "/skills/pizza-bot-guide/references/project.md",
+        "/skills/pizza-bot-guide/references/workflows.md",
+      ]),
+    );
   });
 });
 
