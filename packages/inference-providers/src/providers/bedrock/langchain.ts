@@ -1,4 +1,4 @@
-/** Amazon Bedrock provider backed by lazy-loaded `ChatBedrockConverse`. */
+/** Amazon Bedrock provider with native Converse and Mantle protocol routing. */
 import type { BaseMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type {
@@ -30,8 +30,19 @@ import {
 import { withContextWindow } from "../../model-profile.js";
 import {
   catalogConnectionError,
+  catalogHttpError,
   missingCatalogCredentials,
 } from "../../catalog-error.js";
+import { createAnthropicChatModel } from "../anthropic.js";
+import { createOpenAiChatModel } from "../openai.js";
+import { createSigV4Fetch, mantleEndpoint } from "./mantle.js";
+
+type BedrockProtocol = "converse" | "responses" | "messages";
+
+interface RoutedModel {
+  descriptor: ModelDescriptor;
+  protocol: BedrockProtocol;
+}
 
 class BedrockBuildError extends Error {
   constructor(
@@ -51,8 +62,12 @@ export class BedrockLangChainModelProvider implements ModelProvider {
   private readonly models: ModelDescriptor[] | undefined;
   private readonly maxTokens: number;
   private readonly client: { send(command: unknown): Promise<unknown> } | undefined;
+  private readonly fetchFn: typeof fetch;
   private readonly modelsDev: ModelsDevCatalogLoader;
   private readonly descriptors = new Map<string, ModelDescriptor>();
+  private readonly protocols = new Map<string, BedrockProtocol>();
+  private readonly learnedMaxTokens = new Map<string, number>();
+  private mantleFetchPromise: Promise<typeof fetch> | undefined;
   private region: string;
   private authMethod: "aws-profile" | "access-keys" | "bedrock-api-key" | undefined;
   private profile: string | undefined;
@@ -67,9 +82,11 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     this.models = opts.models;
     this.maxTokens = resolveMaxTokens(opts.maxTokens);
     this.client = opts.client;
+    this.fetchFn = opts.fetch ?? fetch;
     this.modelsDev = resolveModelsDevCatalog(opts.modelsDev, opts.modelsDevFetch);
     for (const descriptor of opts.models ?? []) {
       this.descriptors.set(descriptor.id, descriptor);
+      this.protocols.set(descriptor.id, defaultProtocol(descriptor.id));
     }
     this.profile = opts.profile?.trim() || undefined;
     this.authMethod = this.profile ? "aws-profile" : undefined;
@@ -164,7 +181,9 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     this.bedrockApiKey = cfg.method === "bedrock-api-key"
       ? cfg.values.apiKey?.trim() || undefined
       : undefined;
+    this.mantleFetchPromise = undefined;
     if (!this.models) this.descriptors.clear();
+    if (!this.models) this.protocols.clear();
   }
 
   async listModels(): Promise<ModelDescriptor[]> {
@@ -178,33 +197,49 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         ListInferenceProfilesCommand,
       } = await import("@aws-sdk/client-bedrock");
       const client = this.client ?? new BedrockClient(await this.clientConfig());
-      const [foundationResult, profileResult] = await Promise.allSettled([
+      const [foundationResult, profileResult, mantleResult] = await Promise.allSettled([
         client.send(new ListFoundationModelsCommand({
           byInferenceType: "ON_DEMAND",
           byOutputModality: "TEXT",
         })),
         client.send(new ListInferenceProfilesCommand({ maxResults: 1000 })),
+        this.listMantleModels(),
       ]);
       const foundationModels = foundationResult.status === "fulfilled"
-        ? foundationDescriptors(foundationResult.value)
+        ? foundationDescriptors(foundationResult.value).map(withDefaultProtocol)
         : [];
       const inferenceProfiles = profileResult.status === "fulfilled"
-        ? profileDescriptors(profileResult.value)
+        ? profileDescriptors(profileResult.value).map(withConverseProtocol)
+        : [];
+      const mantleModels = mantleResult.status === "fulfilled"
+        ? mantleResult.value
         : [];
       if (
         foundationResult.status === "rejected" &&
-        profileResult.status === "rejected"
+        profileResult.status === "rejected" &&
+        mantleResult.status === "rejected"
       ) {
         throw foundationResult.reason;
       }
+      const routed = mergeRoutedModels([
+        ...inferenceProfiles,
+        ...foundationModels,
+        ...mantleModels,
+      ]);
       const descriptors = await enrichModelDescriptors(
-        dedupeModels([...inferenceProfiles, ...foundationModels]),
+        routed.map(({ descriptor, protocol }) => ({
+          ...descriptor,
+          displayName: protocolDisplayName(descriptor.displayName, protocol),
+        })),
         "amazon-bedrock",
         this.modelsDev,
       );
       this.descriptors.clear();
-      for (const descriptor of descriptors) {
+      this.protocols.clear();
+      for (const [index, descriptor] of descriptors.entries()) {
         this.descriptors.set(descriptor.id, descriptor);
+        const protocol = routed[index]?.protocol;
+        if (protocol) this.protocols.set(descriptor.id, protocol);
       }
       return descriptors;
     } catch (cause) {
@@ -234,12 +269,53 @@ export class BedrockLangChainModelProvider implements ModelProvider {
   }
 
   private async construct(modelId: string): Promise<BaseChatModel> {
-    const { ChatBedrockConverse } = await import("@langchain/aws");
-
     if (!this.descriptors.has(modelId)) {
       await this.listModels().catch(() => []);
     }
     const descriptor = this.descriptors.get(modelId);
+    const protocol = this.protocols.get(modelId) ?? defaultProtocol(modelId);
+    if (protocol === "responses") {
+      const configuredMax = Math.min(
+        this.maxTokens,
+        descriptor?.maxOutputTokens ?? Number.POSITIVE_INFINITY,
+      );
+      return createOpenAiChatModel({
+        modelId,
+        apiKey: this.bedrockApiKey ?? "bedrock-sigv4",
+        maxTokens: Math.min(
+          configuredMax,
+          this.learnedMaxTokens.get(modelId) ?? Number.POSITIVE_INFINITY,
+        ),
+        apiMode: "responses",
+        baseUrl: `${mantleEndpoint(this.region)}/openai/v1`,
+        fetch: await this.mantleFetch(),
+        learnedMaxTokens: this.learnedMaxTokens,
+        ...(descriptor ? { descriptor } : {}),
+      });
+    }
+    if (protocol === "messages") {
+      return createAnthropicChatModel({
+        modelId,
+        apiKey: this.bedrockApiKey ?? "bedrock-sigv4",
+        maxTokens: Math.min(
+          this.maxTokens,
+          descriptor?.maxOutputTokens ?? Number.POSITIVE_INFINITY,
+        ),
+        baseUrl: `${mantleEndpoint(this.region)}/anthropic`,
+        authMode: "api-key",
+        fetch: await this.mantleFetch(),
+        ...(descriptor ? { descriptor } : {}),
+      });
+    }
+
+    return this.constructConverse(modelId, descriptor);
+  }
+
+  private async constructConverse(
+    modelId: string,
+    descriptor: ModelDescriptor | undefined,
+  ): Promise<BaseChatModel> {
+    const { ChatBedrockConverse } = await import("@langchain/aws");
     const reasoning = supportsReasoning(modelId);
 
     // The base signatures use `this["ParsedCallOptions"]`, which cannot be named
@@ -310,6 +386,41 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     });
   }
 
+  private async listMantleModels(): Promise<RoutedModel[]> {
+    const response = await (await this.mantleFetch())(
+      `${mantleEndpoint(this.region)}/v1/models`,
+      {
+        ...(this.bedrockApiKey
+          ? { headers: { authorization: `Bearer ${this.bedrockApiKey}` } }
+          : {}),
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) throw catalogHttpError("Amazon Bedrock Mantle", response.status);
+    const body = (await response.json()) as MantleModelsResponse;
+    return (body.data ?? []).flatMap((model) => {
+      if (!model.id || !isConversationalModel(model.id)) return [];
+      return [{
+        descriptor: {
+          id: model.id,
+          provider: "bedrock",
+          displayName: `${model.display_name ?? model.id} (Bedrock)`,
+          supportsTools: true,
+        },
+        protocol: model.id.toLowerCase().startsWith("anthropic.")
+          ? "messages"
+          : "responses",
+      }];
+    });
+  }
+
+  private async mantleFetch(): Promise<typeof fetch> {
+    if (this.bedrockApiKey) return this.fetchFn;
+    this.mantleFetchPromise ??= (async () =>
+      createSigV4Fetch(this.region, await this.credentials(), this.fetchFn))();
+    return this.mantleFetchPromise;
+  }
+
   private async credentials() {
     if (this.accessKeyId && this.secretAccessKey) {
       return {
@@ -365,6 +476,13 @@ interface InferenceProfilesResponse {
   }>;
 }
 
+interface MantleModelsResponse {
+  data?: Array<{
+    id?: string;
+    display_name?: string;
+  }>;
+}
+
 function foundationDescriptors(raw: unknown): ModelDescriptor[] {
   const response = raw as FoundationModelsResponse;
   return (response.modelSummaries ?? []).flatMap((model) => {
@@ -415,6 +533,39 @@ function isConversationalModel(modelId: string): boolean {
   ].some((nonChat) => id.includes(nonChat));
 }
 
-function dedupeModels(models: ModelDescriptor[]): ModelDescriptor[] {
-  return [...new Map(models.map((model) => [model.id, model])).values()];
+function withConverseProtocol(descriptor: ModelDescriptor): RoutedModel {
+  return { descriptor, protocol: "converse" };
+}
+
+function withDefaultProtocol(descriptor: ModelDescriptor): RoutedModel {
+  return { descriptor, protocol: defaultProtocol(descriptor.id) };
+}
+
+function defaultProtocol(modelId: string): BedrockProtocol {
+  const id = modelId.toLowerCase();
+  if (id.startsWith("openai.")) return "responses";
+  if (id.startsWith("anthropic.")) return "messages";
+  return "converse";
+}
+
+function protocolDisplayName(
+  displayName: string,
+  protocol: BedrockProtocol,
+): string {
+  const name = displayName.replace(/ \(Bedrock\)$/, "");
+  return `${name} (${protocol === "converse" ? "Runtime" : "Mantle"})`;
+}
+
+function mergeRoutedModels(models: RoutedModel[]): RoutedModel[] {
+  const merged = new Map<string, RoutedModel>();
+  for (const model of models) {
+    const existing = merged.get(model.descriptor.id);
+    merged.set(model.descriptor.id, existing
+      ? {
+          descriptor: { ...existing.descriptor, ...model.descriptor },
+          protocol: model.protocol,
+        }
+      : model);
+  }
+  return [...merged.values()];
 }

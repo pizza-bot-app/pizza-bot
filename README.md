@@ -55,6 +55,19 @@ CLI development, desktop packages, and remote backends.
 | Terminal CLI | Scripts, terminals, and remote backends | [CLI](docs/RUNNING.md#cli) |
 | Standalone backend | Remote Electron, Docker, or Linux services | [Backend guide](docs/STANDALONE_BACKEND.md) |
 
+A running api-server needs access to at least one model provider; HTTP clients
+do not. Configure Amazon Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter,
+or Ollama in **Settings > Providers**. Bedrock accepts an AWS profile, AWS
+access keys, or a Bedrock API key, with an optional region override; otherwise
+`AWS_REGION` or `us-west-2` is used. Bedrock combines its native catalog with
+the regional Mantle catalog and routes models through Converse, OpenAI
+Responses, or Anthropic Messages according to their advertised API family.
+OpenAI and Anthropic also accept custom Base URLs for compatible endpoints;
+OpenAI can explicitly select Responses or Chat Completions, and Anthropic
+supports `x-api-key` or bearer authentication. Select a model with
+`PIZZA_MODEL=<provider>:<id>`. Desktop-entered secrets go to the OS keychain;
+server configuration persists only environment-variable references.
+
 ## Extend it
 
 Add MCP servers from the UI or `<PIZZA_DATA_ROOT>/.mcp.json`. Add Agent Skills

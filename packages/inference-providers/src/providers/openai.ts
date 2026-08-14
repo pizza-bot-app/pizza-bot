@@ -4,6 +4,7 @@ import type { BaseMessage } from "@langchain/core/messages";
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import type { ChatGenerationChunk, ChatResult } from "@langchain/core/outputs";
 import type { ChatModelStreamEvent } from "@langchain/core/language_models/event";
+import type { ChatOpenAIFields } from "@langchain/openai";
 import type { ModelProvider, ModelDescriptor, ResolvedProviderConfig, ProviderAuthMethod } from "@pizza-bot/core";
 import {
   enrichModelDescriptors,
@@ -20,6 +21,8 @@ import {
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const FETCH_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_TOKENS = 8_192;
+
+export type OpenAiApiMode = "auto" | "responses" | "chat-completions";
 
 interface OpenAiModelsResponse {
   data?: Array<{ id?: string }>;
@@ -63,6 +66,7 @@ export interface OpenAiProviderOptions {
   modelsDevFetch?: typeof fetch;
   catalogProvider?: string;
   maxTokens?: number;
+  apiMode?: OpenAiApiMode;
 }
 
 class OpenAiBuildError extends Error {
@@ -83,6 +87,18 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
     fields: [
       { key: "apiKey", label: "API key", type: "password", required: true },
       { key: "baseUrl", label: "Base URL", type: "text", required: false },
+      {
+        key: "apiMode",
+        label: "API",
+        type: "select",
+        required: false,
+        default: "auto",
+        options: [
+          { value: "auto", label: "Automatic" },
+          { value: "responses", label: "Responses" },
+          { value: "chat-completions", label: "Chat Completions" },
+        ],
+      },
       {
         key: "maxTokens",
         label: "Output token budget",
@@ -112,6 +128,7 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
   private baseUrl: string | undefined;
   private maxTokens: number;
   private catalogProvider: string | undefined;
+  private apiMode: OpenAiApiMode;
 
   constructor(opts: OpenAiProviderOptions = {}) {
     this.models = opts.models;
@@ -121,6 +138,7 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
     this.baseUrl = opts.baseUrl;
     this.maxTokens = positiveInteger(opts.maxTokens) ?? DEFAULT_MAX_TOKENS;
     this.catalogProvider = opts.catalogProvider;
+    this.apiMode = opts.apiMode ?? "auto";
     for (const descriptor of opts.models ?? []) {
       this.descriptors.set(descriptor.id, descriptor);
     }
@@ -129,10 +147,10 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
   configure(cfg: ResolvedProviderConfig): void {
     const key = cfg.values.apiKey?.trim();
     if (key) this.apiKey = key;
-    const base = cfg.values.baseUrl?.trim();
-    if (base) this.baseUrl = base;
+    this.baseUrl = cfg.values.baseUrl?.trim() || undefined;
     this.maxTokens = positiveInteger(cfg.values.maxTokens) ?? DEFAULT_MAX_TOKENS;
     this.catalogProvider = cfg.values.catalogProvider?.trim() || undefined;
+    this.apiMode = parseApiMode(cfg.values.apiMode);
     if (!this.models) this.descriptors.clear();
   }
 
@@ -140,7 +158,8 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
     if (this.models) return this.models;
     const apiKey = this.apiKey ?? process.env.OPENAI_API_KEY;
     if (!apiKey) throw missingCatalogCredentials("OpenAI");
-    const baseUrl = (this.baseUrl ?? process.env.OPENAI_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+    const baseUrl =
+      (this.baseUrl ?? process.env.OPENAI_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, "");
 
     try {
       const response = await this.fetchFn(`${baseUrl}/models`, {
@@ -186,12 +205,11 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
   }
 
   private async construct(modelId: string): Promise<BaseChatModel> {
-    const { ChatOpenAI } = await import("@langchain/openai");
     const apiKey = this.apiKey ?? process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new OpenAiBuildError("No OpenAI API key configured (set OPENAI_API_KEY).", "AUTH_EXPIRED");
     }
-    const baseUrl = this.baseUrl ?? process.env.OPENAI_BASE_URL;
+    const configuredBaseUrl = this.baseUrl ?? process.env.OPENAI_BASE_URL;
     if (!this.descriptors.has(modelId)) {
       await this.listModels().catch(() => []);
     }
@@ -205,79 +223,158 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
       configuredMax,
       learnedMaxTokens.get(modelId) ?? Number.POSITIVE_INFINITY,
     );
-
-    const fields = {
-      model: modelId,
+    return createOpenAiChatModel({
+      modelId,
       apiKey,
       maxTokens: initialMax,
-      ...(baseUrl ? { configuration: { baseURL: baseUrl } } : {}),
-    };
-    const retryModel = (error: unknown) => {
-      const retryCap = retryOutputCap(error, initialMax);
-      if (retryCap === undefined) return undefined;
-      learnedMaxTokens.set(modelId, retryCap);
-      return new ChatOpenAI({ ...fields, maxTokens: retryCap });
-    };
+      apiMode: this.apiMode,
+      learnedMaxTokens,
+      fetch: this.fetchFn,
+      ...(descriptor ? { descriptor } : {}),
+      ...(configuredBaseUrl ? { baseUrl: configuredBaseUrl } : {}),
+    });
+  }
+}
 
-    class AdaptiveChatOpenAI extends ChatOpenAI {
-      override get profile() {
-        return withContextWindow(super.profile, descriptor?.contextWindow);
-      }
+export interface OpenAiChatModelOptions {
+  modelId: string;
+  apiKey: string;
+  maxTokens: number;
+  apiMode: OpenAiApiMode;
+  descriptor?: ModelDescriptor;
+  learnedMaxTokens?: Map<string, number>;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+}
 
-      override async _generate(
-        messages: BaseMessage[],
-        options: this["ParsedCallOptions"],
-        runManager?: CallbackManagerForLLMRun,
-      ): Promise<ChatResult> {
-        try {
-          return await super._generate(messages, options, runManager);
-        } catch (error) {
-          const retry = retryModel(error);
-          if (!retry) throw error;
-          return retry._generate(messages, options, runManager);
+export async function createOpenAiChatModel(
+  options: OpenAiChatModelOptions,
+): Promise<BaseChatModel> {
+  const { ChatOpenAI } = await import("@langchain/openai");
+  const {
+    modelId,
+    apiKey,
+    maxTokens,
+    apiMode,
+    descriptor,
+    learnedMaxTokens,
+    baseUrl,
+    fetch: fetchFn,
+  } = options;
+  const fields = {
+    model: modelId,
+    apiKey,
+    maxTokens,
+    useResponsesApi: apiMode === "responses",
+    ...((baseUrl || fetchFn)
+      ? {
+          configuration: {
+            ...(baseUrl ? { baseURL: baseUrl } : {}),
+            ...(fetchFn ? { fetch: fetchFn } : {}),
+          },
         }
-      }
+      : {}),
+  };
 
-      override async *_streamResponseChunks(
-        messages: BaseMessage[],
-        options: this["ParsedCallOptions"],
-        runManager?: CallbackManagerForLLMRun,
-      ): AsyncGenerator<ChatGenerationChunk> {
-        let emitted = false;
-        try {
-          for await (const chunk of super._streamResponseChunks(messages, options, runManager)) {
-            emitted = true;
-            yield chunk;
-          }
-        } catch (error) {
-          const retry = emitted ? undefined : retryModel(error);
-          if (!retry) throw error;
-          yield* retry._streamResponseChunks(messages, options, runManager);
-        }
-      }
+  class DialectChatOpenAI extends ChatOpenAI {
+    override get profile() {
+      return withContextWindow(super.profile, descriptor?.contextWindow);
+    }
 
-      override async *_streamChatModelEvents(
-        messages: BaseMessage[],
-        options: this["ParsedCallOptions"],
-        runManager?: CallbackManagerForLLMRun,
-      ): AsyncGenerator<ChatModelStreamEvent> {
-        let emitted = false;
-        try {
-          for await (const event of super._streamChatModelEvents(messages, options, runManager)) {
-            emitted = true;
-            yield event;
-          }
-        } catch (error) {
-          const retry = emitted ? undefined : retryModel(error);
-          if (!retry) throw error;
-          yield* retry._streamChatModelEvents(messages, options, runManager);
-        }
+    protected override _useResponsesApi(
+      callOptions: this["ParsedCallOptions"] | undefined,
+    ): boolean {
+      if (apiMode === "responses") return true;
+      if (apiMode === "chat-completions") return false;
+      return super._useResponsesApi(callOptions);
+    }
+
+    override withConfig(config: Partial<this["ParsedCallOptions"]>) {
+      const model = this.clone(this.fields);
+      model.defaultOptions = {
+        ...this.defaultOptions,
+        ...config,
+      };
+      return model;
+    }
+
+    protected clone(fields?: ChatOpenAIFields): DialectChatOpenAI {
+      return new DialectChatOpenAI(fields);
+    }
+  }
+
+  class AdaptiveChatOpenAI extends DialectChatOpenAI {
+    protected override clone(fields?: ChatOpenAIFields): AdaptiveChatOpenAI {
+      return new AdaptiveChatOpenAI(fields);
+    }
+
+    override async _generate(
+      messages: BaseMessage[],
+      callOptions: this["ParsedCallOptions"],
+      runManager?: CallbackManagerForLLMRun,
+    ): Promise<ChatResult> {
+      try {
+        return await super._generate(messages, callOptions, runManager);
+      } catch (error) {
+        const retry = retryModel(error);
+        if (!retry) throw error;
+        return retry._generate(messages, callOptions, runManager);
       }
     }
 
-    return new AdaptiveChatOpenAI(fields);
+    override async *_streamResponseChunks(
+      messages: BaseMessage[],
+      callOptions: this["ParsedCallOptions"],
+      runManager?: CallbackManagerForLLMRun,
+    ): AsyncGenerator<ChatGenerationChunk> {
+      let emitted = false;
+      try {
+        for await (const chunk of super._streamResponseChunks(
+          messages,
+          callOptions,
+          runManager,
+        )) {
+          emitted = true;
+          yield chunk;
+        }
+      } catch (error) {
+        const retry = emitted ? undefined : retryModel(error);
+        if (!retry) throw error;
+        yield* retry._streamResponseChunks(messages, callOptions, runManager);
+      }
+    }
+
+    override async *_streamChatModelEvents(
+      messages: BaseMessage[],
+      callOptions: this["ParsedCallOptions"],
+      runManager?: CallbackManagerForLLMRun,
+    ): AsyncGenerator<ChatModelStreamEvent> {
+      let emitted = false;
+      try {
+        for await (const event of super._streamChatModelEvents(
+          messages,
+          callOptions,
+          runManager,
+        )) {
+          emitted = true;
+          yield event;
+        }
+      } catch (error) {
+        const retry = emitted ? undefined : retryModel(error);
+        if (!retry) throw error;
+        yield* retry._streamChatModelEvents(messages, callOptions, runManager);
+      }
+    }
   }
 
+  const retryModel = (error: unknown) => {
+    const retryCap = retryOutputCap(error, maxTokens);
+    if (retryCap === undefined) return undefined;
+    learnedMaxTokens?.set(modelId, retryCap);
+    return new DialectChatOpenAI({ ...fields, maxTokens: retryCap });
+  };
+
+  return new AdaptiveChatOpenAI(fields);
 }
 
 /** The models API includes embeddings, image, audio, and moderation models. */
@@ -306,6 +403,10 @@ function inferCatalogProvider(baseUrl: string): string | undefined {
 function positiveInteger(value: number | string | undefined): number | undefined {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function parseApiMode(value: string | undefined): OpenAiApiMode {
+  return value === "responses" || value === "chat-completions" ? value : "auto";
 }
 
 export function retryOutputCap(error: unknown, current: number): number | undefined {

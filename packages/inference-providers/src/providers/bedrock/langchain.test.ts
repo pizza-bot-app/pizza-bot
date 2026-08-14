@@ -11,6 +11,7 @@ const sdk = vi.hoisted(() => ({
   nodeCredentials: Symbol("node-credentials"),
   fromIni: vi.fn(),
   fromNodeProviderChain: vi.fn(),
+  mantleFetch: vi.fn(),
 }));
 
 vi.mock("@aws-sdk/credential-providers", () => ({
@@ -73,6 +74,11 @@ describe("BedrockLangChainModelProvider authentication", () => {
     sdk.bedrockSend.mockReset().mockResolvedValue({});
     sdk.fromIni.mockReset().mockReturnValue(sdk.iniCredentials);
     sdk.fromNodeProviderChain.mockReset().mockReturnValue(sdk.nodeCredentials);
+    sdk.mantleFetch.mockReset().mockResolvedValue(new Response(
+      JSON.stringify({ data: [] }),
+      { status: 200 },
+    ));
+    vi.stubGlobal("fetch", sdk.mantleFetch);
   });
 
   it("exposes discovered profiles and uses the configured profile for credentials", async () => {
@@ -101,9 +107,10 @@ describe("BedrockLangChainModelProvider authentication", () => {
 
     await provider.buildModel("global.anthropic.claude-sonnet-5");
 
-    expect(sdk.fromIni).toHaveBeenCalledTimes(2);
+    expect(sdk.fromIni).toHaveBeenCalledTimes(3);
     expect(sdk.fromIni).toHaveBeenNthCalledWith(1, { profile: "production" });
     expect(sdk.fromIni).toHaveBeenNthCalledWith(2, { profile: "production" });
+    expect(sdk.fromIni).toHaveBeenNthCalledWith(3, { profile: "production" });
     expect(sdk.fromNodeProviderChain).not.toHaveBeenCalled();
     expect(sdk.chatConfig?.credentials).toBe(sdk.iniCredentials);
   });
@@ -243,6 +250,32 @@ describe("BedrockLangChainModelProvider authentication", () => {
     });
   });
 
+  it("reuses the Mantle signer until provider configuration changes", async () => {
+    sdk.fromIni.mockReturnValue({
+      accessKeyId: "access-key",
+      secretAccessKey: "secret-key",
+    });
+    sdk.mantleFetch.mockImplementation(async () => new Response(JSON.stringify({
+      data: [{ id: "openai.gpt-5.6-sol", display_name: "GPT-5.6 Sol" }],
+    }), { status: 200 }));
+    const provider = new BedrockLangChainModelProvider({
+      profiles: ["production"],
+    });
+    provider.configure({ method: "aws-profile", values: { profile: "production" } });
+
+    await provider.listModels();
+    expect(sdk.fromIni).toHaveBeenCalledTimes(2);
+
+    await provider.buildModel("openai.gpt-5.6-sol");
+
+    expect(sdk.fromIni).toHaveBeenCalledTimes(2);
+
+    provider.configure({ method: "aws-profile", values: { profile: "production" } });
+    await provider.listModels();
+
+    expect(sdk.fromIni).toHaveBeenCalledTimes(4);
+  });
+
   it("clears credentials from the previously selected method", async () => {
     const provider = new BedrockLangChainModelProvider();
     provider.configure({
@@ -334,6 +367,7 @@ describe("BedrockLangChainModelProvider authentication", () => {
     await expect(provider.listModels()).resolves.toEqual([
       expect.objectContaining({
         id: "global.anthropic.claude-sonnet-5",
+        displayName: "Global Claude Sonnet 5 (Runtime)",
         contextWindow: 1_000_000,
         maxOutputTokens: 128_000,
         supportsVision: true,

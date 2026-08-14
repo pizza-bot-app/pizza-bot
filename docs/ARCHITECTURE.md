@@ -532,7 +532,16 @@ under `inference-providers/providers/<id>` (Bedrock keeps its own subdirectory f
 the shim's multiple files). Provider quirks stay provider-local: the Bedrock
 adapter (`inference-providers/providers/bedrock`) owns the `maxTokens` default
 (8192, so Sonnet-5 adaptive thinking can't blank a turn) and a temporary
-reasoning-replay shim; a new provider owns its own.
+reasoning-replay shim. It also combines native Bedrock discovery with Mantle's
+regional `/v1/models` catalog and records the protocol supplied by each source:
+inference profiles and other native models use Converse, raw OpenAI model
+families use Responses, and raw Anthropic model families use Messages. Mantle
+catalog entries retain the protocol family exposed by that catalog. The regional
+Mantle host and protocol paths are Bedrock concerns, and its HTTP transport
+supports both Bedrock API keys and SigV4 credentials. The OpenAI adapter
+independently selects Automatic, Responses, or Chat Completions for custom
+compatible endpoints. The Anthropic adapter likewise owns custom Messages API
+endpoints and `x-api-key` versus bearer authentication.
 
 Skill workers mark terminal responses whose provider metadata reports an
 output-token limit with an `OUTPUT_TRUNCATED` notice. DeepAgents carries that
@@ -540,8 +549,8 @@ notice in the task result so Pizza Bot can distinguish incomplete delegated work
 from a completed result. The worker does not retry the model call, and this
 behavior is not installed on Pizza Bot itself.
 
-The Bedrock shim subclasses `ChatBedrockConverse` and strips prior reasoning
-blocks only at its three model-call entry points. This is intentionally below
+The Bedrock Converse shim subclasses `ChatBedrockConverse` and strips prior
+reasoning blocks only at its three model-call entry points. This is intentionally below
 DeepAgents: Pizza Bot and all skill workers use ordinary initialized LangChain
 model instances, with no replacement subgraphs. The shim is
 necessary because `@langchain/aws` currently discards Bedrock reasoning signatures

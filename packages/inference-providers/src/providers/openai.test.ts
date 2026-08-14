@@ -1,10 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HumanMessage } from "@langchain/core/messages";
 import {
   convertMessagesToCompletionsMessageParams,
   convertMessagesToResponsesInput,
 } from "@langchain/openai";
 import { isChatModel, OpenAiLangChainModelProvider, retryOutputCap } from "./openai.js";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("OpenAI model discovery", () => {
   it("lists chat models returned by the configured endpoint", async () => {
@@ -128,6 +132,96 @@ describe("OpenAI model construction", () => {
 
     expect(model.profile.maxInputTokens).toBe(40_960);
   });
+
+  it("uses Responses for the configured API mode, including output-cap retries", async () => {
+    const requests: Array<{
+      url: string;
+      authorization: string | null;
+      hasTool: boolean;
+    }> = [];
+    let requestCount = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({
+        url: String(input),
+        authorization: new Headers(init?.headers).get("authorization"),
+        hasTool: String(init?.body).includes("lookup"),
+      });
+      requestCount += 1;
+      const message = requestCount <= 2
+        ? "max_tokens (8192) is greater than max_total_tokens: 4096"
+        : "stop";
+      return openAiError(message);
+    }));
+    const provider = new OpenAiLangChainModelProvider({
+      models: [{
+        id: "custom-responses-model",
+        provider: "openai",
+        displayName: "Custom Responses Model",
+      }],
+    });
+    provider.configure({
+      method: "api-key",
+      values: {
+        apiKey: "test-key",
+        baseUrl: "https://proxy.example/openai/v1",
+        apiMode: "responses",
+      },
+    });
+
+    const model = await provider.buildModel("custom-responses-model");
+    await expect(consume(model.bindTools!([TEST_TOOL]).stream("hello"))).rejects.toThrow("max_tokens");
+
+    expect(requests).toEqual([
+      {
+        url: "https://proxy.example/openai/v1/responses",
+        authorization: "Bearer test-key",
+        hasTool: true,
+      },
+      {
+        url: "https://proxy.example/openai/v1/responses",
+        authorization: "Bearer test-key",
+        hasTool: true,
+      },
+    ]);
+  });
+
+  it("can force Chat Completions for models LangChain would route to Responses", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return openAiError("stop");
+    }));
+    const provider = new OpenAiLangChainModelProvider({
+      apiKey: "test-key",
+      baseUrl: "https://proxy.example/v1",
+      apiMode: "chat-completions",
+      models: [{
+        id: "gpt-5.5-pro",
+        provider: "openai",
+        displayName: "GPT-5.5 Pro",
+      }],
+    });
+
+    const model = await provider.buildModel("gpt-5.5-pro");
+    await expect(consume(model.bindTools!([TEST_TOOL]).stream("hello"))).rejects.toThrow("stop");
+
+    expect(urls).toEqual(["https://proxy.example/v1/chat/completions"]);
+  });
+
+  it("exposes all supported API modes in provider settings", () => {
+    const provider = new OpenAiLangChainModelProvider();
+    const apiMode = provider.authSchema[0]?.fields.find((field) => field.key === "apiMode");
+
+    expect(apiMode).toMatchObject({
+      type: "select",
+      default: "auto",
+      options: [
+        { value: "auto" },
+        { value: "responses" },
+        { value: "chat-completions" },
+      ],
+    });
+  });
 });
 
 describe("OpenAI attachment conversion", () => {
@@ -171,3 +265,27 @@ describe("OpenAI attachment conversion", () => {
     }]);
   });
 });
+
+function openAiError(message: string): Response {
+  return new Response(JSON.stringify({
+    error: { message, type: "invalid_request_error" },
+  }), {
+    status: 400,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+const TEST_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "lookup",
+    description: "Look up a value",
+    parameters: { type: "object", properties: {} },
+  },
+};
+
+async function consume(stream: Promise<AsyncIterable<unknown>>): Promise<void> {
+  for await (const _chunk of await stream) {
+    // The test responses fail before producing a chunk.
+  }
+}
