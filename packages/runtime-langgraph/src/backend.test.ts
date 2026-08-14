@@ -37,8 +37,23 @@ describe("buildBackend", () => {
   it("mounts approved local folders read-only and revokes them live", async () => {
     const dir = mkdtempSync(join(tmpdir(), "local-folder-backend-"));
     writeFileSync(join(dir, "notes.md"), "approved notes", "utf8");
-    const screenshot = "Screenshot 2026-08-03 at 4.06.57 PM.png";
+    const screenshot = "Screenshot 2026-08-03 at 4.06.57\u202fPM.png";
+    const screenshotPath =
+      "/local/notes/Screenshot 2026-08-03 at 4.06.57%E2%80%AFPM.png";
     writeFileSync(join(dir, screenshot), Buffer.from([137, 80, 78, 71]));
+    writeFileSync(join(dir, "100% ready.txt"), "ordinary text", "utf8");
+    writeFileSync(join(dir, "ambiguous name.txt"), "ordinary space", "utf8");
+    writeFileSync(
+      join(dir, "ambiguous\u202fname.txt"),
+      "narrow no-break space",
+      "utf8",
+    );
+    const unicodeDirectory = "R\u00e9sum\u00e9\u202ffiles";
+    mkdirSync(join(dir, unicodeDirectory));
+    writeFileSync(join(dir, unicodeDirectory, "details.md"), "nested", "utf8");
+    if (process.platform !== "win32") {
+      writeFileSync(join(dir, String.raw`slash\name.txt`), "backslash", "utf8");
+    }
     const canonicalDir = realpathSync(dir);
     let folders = [{
       id: "notes",
@@ -59,16 +74,59 @@ describe("buildBackend", () => {
     expect((await backend.read("/local/notes/notes.md")).content).toContain(
       "approved notes",
     );
+    const listedPaths = (await backend.ls("/local/notes/")).files?.map(
+      (entry) => entry.path,
+    );
+    expect(listedPaths).toContain(screenshotPath);
+    expect(listedPaths).toContain("/local/notes/100%25 ready.txt");
+    expect(listedPaths).toContain(
+      "/local/notes/R%C3%A9sum%C3%A9%E2%80%AFfiles/",
+    );
+    if (process.platform !== "win32") {
+      expect(listedPaths).toContain("/local/notes/slash%5Cname.txt");
+    }
     expect(
-      await backend.read(`/local/notes/${screenshot}`),
+      await backend.read(screenshotPath),
     ).toMatchObject({
       content: new Uint8Array([137, 80, 78, 71]),
       mimeType: "image/png",
     });
     expect(
+      (await backend.read("/local/notes/100%25 ready.txt")).content,
+    ).toContain("ordinary text");
+    expect(
       (
         await backend.read(
-          "/local/notes/Screenshot 2026\u201308\u201303 at 4.06.57 PM.png",
+          "/local/notes/R%C3%A9sum%C3%A9%E2%80%AFfiles/details.md",
+        )
+      ).content,
+    ).toContain("nested");
+    if (process.platform !== "win32") {
+      expect(
+        (await backend.read("/local/notes/slash%5Cname.txt")).content,
+      ).toContain("backslash");
+    }
+    expect(
+      (
+        await backend.glob("Screenshot 2026-08-03*", "/local/notes")
+      ).files?.map((entry) => entry.path),
+    ).toContain(screenshotPath);
+    expect(
+      (
+        await backend.grep("ordinary text", "/local/notes")
+      ).matches?.map((entry) => entry.path),
+    ).toContain("/local/notes/100%25 ready.txt");
+    expect(
+      (
+        await backend.read(
+          "/local/notes/Screenshot 2026-08-03 at 4.06.57 PM.png",
+        )
+      ).content,
+    ).toEqual(new Uint8Array([137, 80, 78, 71]));
+    expect(
+      (
+        await backend.read(
+          "/local/notes/ambiguous%E2%80%87name.txt",
         )
       ).error,
     ).toContain("no such file or directory");
@@ -110,42 +168,70 @@ describe("buildBackend", () => {
     expect(readFileSync(join(dir, "nested", "notes.md"), "utf8")).toBe("first");
 
     expect(
+      await backend.write(
+        "/local/workspace/r%C3%A9sum%C3%A9%20notes.txt",
+        "encoded",
+      ),
+    ).toMatchObject({
+      path: "/local/workspace/r%C3%A9sum%C3%A9 notes.txt",
+    });
+    expect(readFileSync(join(dir, "r\u00e9sum\u00e9 notes.txt"), "utf8")).toBe(
+      "encoded",
+    );
+
+    expect(
       await backend.edit(
-        "/local/workspace/nested/notes.md",
-        "first",
+        "/local/workspace/r%C3%A9sum%C3%A9 notes.txt",
+        "encoded",
         "updated",
       ),
     ).toMatchObject({
-      path: "/local/workspace/nested/notes.md",
+      path: "/local/workspace/r%C3%A9sum%C3%A9 notes.txt",
       occurrences: 1,
     });
-    expect(readFileSync(join(dir, "nested", "notes.md"), "utf8")).toBe(
+    expect(readFileSync(join(dir, "r\u00e9sum\u00e9 notes.txt"), "utf8")).toBe(
       "updated",
     );
 
     expect(
       await backend.uploadFiles?.([
         [
-          "/local/workspace/nested/upload.bin",
+          "/local/workspace/nested/100%25-upload.bin",
           new TextEncoder().encode("binary"),
         ],
       ]),
     ).toEqual([
       {
-        path: "/local/workspace/nested/upload.bin",
+        path: "/local/workspace/nested/100%25-upload.bin",
         error: null,
       },
     ]);
-    expect(readFileSync(join(dir, "nested", "upload.bin"), "utf8")).toBe(
+    expect(readFileSync(join(dir, "nested", "100%-upload.bin"), "utf8")).toBe(
       "binary",
     );
+    expect(
+      await backend.downloadFiles?.([
+        "/local/workspace/nested/100%25-upload.bin",
+      ]),
+    ).toMatchObject([
+      {
+        path: "/local/workspace/nested/100%25-upload.bin",
+        error: null,
+      },
+    ]);
 
     expect(
-      await backend.delete("/local/workspace/nested/notes.md"),
-    ).toMatchObject({ path: "/local/workspace/nested/notes.md" });
+      await backend.delete("/local/workspace/r%C3%A9sum%C3%A9 notes.txt"),
+    ).toMatchObject({
+      path: "/local/workspace/r%C3%A9sum%C3%A9 notes.txt",
+    });
     expect(() =>
-      readFileSync(join(dir, "nested", "notes.md"), "utf8")
+      readFileSync(join(dir, "r\u00e9sum\u00e9 notes.txt"), "utf8")
     ).toThrow();
+    expect(
+      (await backend.write("/local/workspace/%2E%2E/outside.md", "no"))
+        .error,
+    ).toContain("not allowed");
 
     readOnly = true;
     expect(
@@ -154,14 +240,18 @@ describe("buildBackend", () => {
     expect(
       (
         await backend.edit(
-          "/local/workspace/nested/upload.bin",
+          "/local/workspace/nested/100%25-upload.bin",
           "binary",
           "changed",
         )
       ).error,
     ).toContain("read-only");
     expect(
-      (await backend.delete("/local/workspace/nested/upload.bin")).error,
+      (
+        await backend.delete(
+          "/local/workspace/nested/100%25-upload.bin",
+        )
+      ).error,
     ).toContain("read-only");
     expect(
       await backend.uploadFiles?.([
@@ -176,7 +266,7 @@ describe("buildBackend", () => {
         error: "permission_denied",
       },
     ]);
-    expect(readFileSync(join(dir, "nested", "upload.bin"), "utf8")).toBe(
+    expect(readFileSync(join(dir, "nested", "100%-upload.bin"), "utf8")).toBe(
       "binary",
     );
 

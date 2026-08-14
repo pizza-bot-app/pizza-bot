@@ -32,7 +32,16 @@ describe("PIZZA_BOT_AGENT", () => {
       "only the direct tool uses snake_case `subagent_type`",
     );
     expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
-      "do not normalize their case or punctuation",
+      "do not normalize their case, punctuation, or percent escapes",
+    );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "`eval` interpreter is computation-only",
+    );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "Never offer or claim an operation unless a matching tool is available",
+    );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "claim completion only after its tool call succeeds",
     );
     expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain("write_todos");
     expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain(

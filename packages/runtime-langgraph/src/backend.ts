@@ -1,5 +1,5 @@
 /** Routes durable memories and approved local folders outside checkpoint state. */
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import {
   StateBackend,
@@ -36,6 +36,56 @@ export interface BuildBackendOptions {
 const MEMORY_DISABLED_ERROR = "Durable memory is disabled in Settings.";
 const LOCAL_FOLDER_READ_ONLY_ERROR = "Local folders are read-only.";
 const LOCAL_FOLDER_DENIED_ERROR = "Local folder access is not allowed.";
+
+function encodeVirtualSegment(segment: string): string {
+  return [...new TextEncoder().encode(segment)]
+    .map((byte) =>
+      byte >= 0x20 &&
+      byte <= 0x7e &&
+      byte !== 0x25 &&
+      byte !== 0x2f &&
+      byte !== 0x5c
+        ? String.fromCharCode(byte)
+        : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`,
+    )
+    .join("");
+}
+
+function encodeBackendPath(backendPath: string): string {
+  return backendPath
+    .split("/")
+    .map((segment) => encodeVirtualSegment(segment))
+    .join("/");
+}
+
+function decodeVirtualSegment(segment: string): string | undefined {
+  let valid = true;
+  const decoded = segment.replace(/(?:%[0-9A-Fa-f]{2})+/g, (encoded) => {
+    const bytes = encoded
+      .slice(1)
+      .split("%")
+      .map((hex) => Number.parseInt(hex, 16));
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(
+        new Uint8Array(bytes),
+      );
+    } catch {
+      valid = false;
+      return "";
+    }
+  });
+  if (
+    !valid ||
+    decoded === "." ||
+    decoded === ".." ||
+    decoded.includes("/") ||
+    decoded.includes("\0") ||
+    (path.sep === "\\" && decoded.includes("\\"))
+  ) {
+    return undefined;
+  }
+  return decoded;
+}
 
 function gatedMemoryBackend(
   backend: FilesystemBackend,
@@ -135,13 +185,17 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     const segments = virtualPath.split("/").filter(Boolean);
     const id = segments.shift();
     if (!id || id === "." || id === "..") return { folderPath: "/" };
-    if (segments.some((segment) => segment === "." || segment === "..")) {
-      return { folderPath: "/" };
+    const decodedSegments: string[] = [];
+    for (const segment of segments) {
+      const decoded = decodeVirtualSegment(segment);
+      if (decoded === undefined) return { folderPath: "/" };
+      decodedSegments.push(decoded);
     }
     const folder = this.folder(id);
     return {
       ...(folder ? { folder } : {}),
-      folderPath: segments.length > 0 ? `/${segments.join("/")}` : "/",
+      folderPath:
+        decodedSegments.length > 0 ? `/${decodedSegments.join("/")}` : "/",
     };
   }
 
@@ -226,8 +280,12 @@ class LocalFoldersBackend implements BackendProtocolV2 {
   private prefix<T extends { path: string }>(folder: LocalFolder, value: T): T {
     return {
       ...value,
-      path: `/${folder.id}${value.path}`,
+      path: `/${folder.id}${encodeBackendPath(value.path)}`,
     };
+  }
+
+  private mountedPath(folder: LocalFolder, folderPath: string): string {
+    return `${LOCAL_FOLDER_VIRTUAL_ROOT}/${folder.id}${encodeBackendPath(folderPath)}`;
   }
 
   private async readable(
@@ -235,13 +293,66 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     allowMissing = false,
   ): Promise<ResolvedLocalFolder | undefined> {
     const { folder, folderPath } = this.split(virtualPath);
-    if (
-      !folder ||
-      !(await this.contained(folder, folderPath, allowMissing))
-    ) {
+    if (!folder) return undefined;
+
+    let readablePath = folderPath;
+    if (!(await this.contained(folder, folderPath))) {
+      const normalizedPath = await this.normalizedExistingPath(
+        folder,
+        folderPath,
+      );
+      if (normalizedPath) {
+        readablePath = normalizedPath;
+      } else if (!(allowMissing && await this.contained(
+        folder,
+        folderPath,
+        true,
+      ))) {
+        return undefined;
+      }
+    }
+    return {
+      folder,
+      folderPath: readablePath,
+      backend: this.backend(folder),
+    };
+  }
+
+  private async normalizedExistingPath(
+    folder: LocalFolder,
+    folderPath: string,
+  ): Promise<string | undefined> {
+    try {
+      const canonicalRoot = await realpath(folder.path);
+      if (path.relative(path.resolve(folder.path), canonicalRoot) !== "") {
+        return undefined;
+      }
+
+      let current = canonicalRoot;
+      const resolvedSegments: string[] = [];
+      for (const requested of folderPath.split("/").filter(Boolean)) {
+        const names = await readdir(current);
+        const exact = names.find((name) => name === requested);
+        const normalizedMatches = exact
+          ? [exact]
+          : names.filter(
+              (name) => name.normalize("NFKC") === requested.normalize("NFKC"),
+            );
+        if (normalizedMatches.length !== 1) return undefined;
+
+        const matched = normalizedMatches[0]!;
+        current = path.join(current, matched);
+        if (!pathIsWithin(canonicalRoot, await realpath(current))) {
+          return undefined;
+        }
+        resolvedSegments.push(matched);
+      }
+      return resolvedSegments.length > 0
+        ? `/${resolvedSegments.join("/")}`
+        : "/";
+    } catch {
       return undefined;
     }
-    return { folder, folderPath, backend: this.backend(folder) };
   }
 
   private async writable(
@@ -402,7 +513,13 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     );
     return result.error
       ? result
-      : { ...result, path: `${LOCAL_FOLDER_VIRTUAL_ROOT}${virtualPath}` };
+      : {
+          ...result,
+          path: this.mountedPath(
+            resolved.value.folder,
+            resolved.value.folderPath,
+          ),
+        };
   }
 
   async edit(
@@ -421,7 +538,13 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     );
     return result.error
       ? result
-      : { ...result, path: `${LOCAL_FOLDER_VIRTUAL_ROOT}${virtualPath}` };
+      : {
+          ...result,
+          path: this.mountedPath(
+            resolved.value.folder,
+            resolved.value.folderPath,
+          ),
+        };
   }
 
   async delete(virtualPath: string): Promise<DeleteResult> {
@@ -432,7 +555,13 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     );
     return result.error
       ? result
-      : { ...result, path: `${LOCAL_FOLDER_VIRTUAL_ROOT}${virtualPath}` };
+      : {
+          ...result,
+          path: this.mountedPath(
+            resolved.value.folder,
+            resolved.value.folderPath,
+          ),
+        };
   }
 
   async uploadFiles(
@@ -449,7 +578,10 @@ class LocalFoldersBackend implements BackendProtocolV2 {
         [resolved.value.folderPath, content],
       ]);
       responses.push({
-        path: virtualPath,
+        path: this.mountedPath(
+          resolved.value.folder,
+          resolved.value.folderPath,
+        ),
         error: result?.error ?? null,
       });
     }
@@ -471,7 +603,7 @@ class LocalFoldersBackend implements BackendProtocolV2 {
           resolved.folderPath,
         ]);
         return {
-          path: virtualPath,
+          path: this.mountedPath(resolved.folder, resolved.folderPath),
           content: result?.content ?? null,
           error: result?.error ?? null,
         };
