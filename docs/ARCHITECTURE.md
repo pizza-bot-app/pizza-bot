@@ -535,13 +535,17 @@ adapter (`inference-providers/providers/bedrock`) owns the `maxTokens` default
 reasoning-replay shim. It also combines native Bedrock discovery with Mantle's
 regional `/v1/models` catalog and records the protocol supplied by each source:
 inference profiles and other native models use Converse, raw OpenAI model
-families use Responses, and raw Anthropic model families use Messages. Mantle
-catalog entries retain the protocol family exposed by that catalog. The regional
-Mantle host and protocol paths are Bedrock concerns, and its HTTP transport
-supports both Bedrock API keys and SigV4 credentials. The OpenAI adapter
+families, xAI, and Gemma 4 use Responses, raw Anthropic model families use
+Messages, and other Mantle model families use Chat Completions. Mantle catalog
+entries retain the protocol family exposed by that catalog. The regional Mantle
+host and protocol paths are Bedrock concerns, and its HTTP transport supports
+both Bedrock API keys and SigV4 credentials. The OpenAI adapter
 independently selects Automatic, Responses, or Chat Completions for custom
 compatible endpoints. The Anthropic adapter likewise owns custom Messages API
-endpoints and `x-api-key` versus bearer authentication.
+endpoints and `x-api-key` versus bearer authentication. OpenAI-compatible
+Responses models receive native `input_image` blocks because the upstream
+converter otherwise emits Chat Completions image content inside the Responses
+payload.
 
 Skill workers mark terminal responses whose provider metadata reports an
 output-token limit with an `OUTPUT_TRUNCATED` notice. DeepAgents carries that

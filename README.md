@@ -61,7 +61,8 @@ or Ollama in **Settings > Providers**. Bedrock accepts an AWS profile, AWS
 access keys, or a Bedrock API key, with an optional region override; otherwise
 `AWS_REGION` or `us-west-2` is used. Bedrock combines its native catalog with
 the regional Mantle catalog and routes models through Converse, OpenAI
-Responses, or Anthropic Messages according to their advertised API family.
+Responses or Chat Completions, or Anthropic Messages according to their
+advertised API family.
 OpenAI and Anthropic also accept custom Base URLs for compatible endpoints;
 OpenAI can explicitly select Responses or Chat Completions, and Anthropic
 supports `x-api-key` or bearer authentication. Select a model with

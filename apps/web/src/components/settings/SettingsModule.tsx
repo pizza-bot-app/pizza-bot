@@ -30,12 +30,12 @@ export interface SettingsModuleProps {
   models: ModelsInfo;
   allModels: ModelsInfo;
   defaultModel: string | null;
-  onProviderUpdate: (id: string, config: { method: string; values: Record<string, string> }) => Promise<unknown>;
-  onProviderRemove: (id: string) => Promise<unknown>;
-  onProviderModelsChange: (
+  onProviderSave: (
     id: string,
+    config: { method: string; values: Record<string, string> },
     preferences: import("@/api-client").ProviderModelPreferences,
   ) => Promise<unknown>;
+  onProviderRemove: (id: string) => Promise<unknown>;
   onRetryModels: () => Promise<unknown>;
   onSetDefaultModel: (model: string | null) => Promise<unknown>;
   enableMemories: boolean;
@@ -83,9 +83,8 @@ export function SettingsModule({
   models,
   allModels,
   defaultModel,
-  onProviderUpdate,
+  onProviderSave,
   onProviderRemove,
-  onProviderModelsChange,
   onRetryModels,
   onSetDefaultModel,
   enableMemories,
@@ -300,9 +299,8 @@ export function SettingsModule({
               models={models}
               allModels={allModels}
               defaultModel={defaultModel}
-              onUpdate={onProviderUpdate}
+              onSave={onProviderSave}
               onRemove={onProviderRemove}
-              onSetModels={onProviderModelsChange}
               onRetryModels={onRetryModels}
               onSetDefault={onSetDefaultModel}
               selectedProviderId={selectedProviderId}

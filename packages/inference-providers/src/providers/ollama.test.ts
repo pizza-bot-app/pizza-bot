@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { OllamaLangChainModelProvider } from "./ollama.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("Ollama model discovery", () => {
   it("reports an unavailable daemon as a retryable network failure", async () => {
@@ -53,5 +57,22 @@ describe("Ollama model discovery", () => {
 
     const model = await provider.buildModel("small:latest");
     expect(model.profile.maxInputTokens).toBe(8_192);
+  });
+
+  it("replaces a cleared custom host with the environment fallback", async () => {
+    vi.stubEnv("OLLAMA_HOST", "http://ollama-fallback.example");
+    const fetchFn = vi.fn(async () => Response.json({ models: [] }));
+    const provider = new OllamaLangChainModelProvider({
+      host: "http://ollama-custom.example",
+      fetch: fetchFn,
+    });
+
+    provider.configure({ method: "local", values: {} });
+    await provider.listModels();
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      "http://ollama-fallback.example/api/tags",
+      expect.any(Object),
+    );
   });
 });

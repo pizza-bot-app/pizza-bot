@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApiClient, MemoryDoc, MemoryInfo, StatusInfo } from "@/api-client";
+import type {
+  ApiClient,
+  MemoryDoc,
+  MemoryInfo,
+  ProviderView,
+  StatusInfo,
+} from "@/api-client";
 
 const react = vi.hoisted(() => ({
   cleanups: [] as Array<() => void>,
@@ -21,7 +27,7 @@ vi.mock("react", () => ({
   },
 }));
 
-const { useMemoriesAdmin, useStatus } = await import("./use-app-data.js");
+const { useMemoriesAdmin, useProvidersAdmin, useStatus } = await import("./use-app-data.js");
 
 const memory = (id: string): MemoryInfo => ({
   id,
@@ -179,5 +185,149 @@ describe("useStatus polling", () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(getStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let an older poll overwrite a manual refresh", async () => {
+    const initial = deferred<StatusInfo | undefined>();
+    const refreshed = deferred<StatusInfo | undefined>();
+    const stale = statusWithMcp([
+      { name: "mail", status: "loading", toolCount: 0 },
+    ]);
+    const current = statusWithMcp([
+      { name: "mail", status: "loaded", toolCount: 3 },
+    ]);
+    const getStatus = vi.fn<() => Promise<StatusInfo | undefined>>()
+      .mockReturnValueOnce(initial.promise)
+      .mockReturnValueOnce(refreshed.promise);
+
+    const status = useStatus({ getStatus } as unknown as ApiClient, 100, 10);
+    const refresh = status.refresh();
+    refreshed.resolve(current);
+    await refresh;
+
+    initial.resolve(stale);
+    await Promise.resolve();
+
+    expect(getStatus).toHaveBeenCalledTimes(2);
+    expect(react.stateWrites[0]).toHaveLength(1);
+    const apply = react.stateWrites[0]![0] as (previous: {
+      status: StatusInfo | undefined;
+      reachable: boolean | undefined;
+    }) => {
+      status: StatusInfo | undefined;
+      reachable: boolean | undefined;
+    };
+    expect(apply({ status: undefined, reachable: undefined })).toEqual({
+      status: current,
+      reachable: true,
+    });
+  });
+});
+
+describe("useProvidersAdmin save", () => {
+  const configuredProvider: ProviderView = {
+    id: "anthropic",
+    configurable: true,
+    availableWithoutConfig: false,
+    modelPreferences: { mode: "selected", selected: ["claude-sonnet"] },
+  };
+
+  beforeEach(() => {
+    react.cleanups.splice(0).forEach((cleanup) => cleanup());
+    react.stateWrites = [];
+    react.stateIndex = 0;
+  });
+
+  afterEach(() => {
+    react.cleanups.splice(0).forEach((cleanup) => cleanup());
+  });
+
+  it("publishes one refresh only after both provider mutations succeed", async () => {
+    const events: string[] = [];
+    const client = {
+      listProviders: async () => {
+        events.push("providers");
+        return [configuredProvider];
+      },
+      getDefaultModel: async () => null,
+      updateProvider: async () => {
+        events.push("config");
+        return {};
+      },
+      updateProviderModels: async () => {
+        events.push("preferences");
+        return configuredProvider.modelPreferences;
+      },
+    } as unknown as ApiClient;
+    const admin = useProvidersAdmin(
+      client,
+      async () => {
+        events.push("catalogs");
+      },
+      async () => {
+        events.push("status");
+      },
+    );
+    await Promise.resolve();
+    events.length = 0;
+
+    await admin.save(
+      "anthropic",
+      { method: "api-key", values: { apiKey: "${ANTHROPIC_API_KEY}" } },
+      configuredProvider.modelPreferences,
+    );
+
+    expect(events).toEqual([
+      "config",
+      "preferences",
+      "providers",
+      "catalogs",
+      "status",
+    ]);
+  });
+
+  it("reloads authoritative state after the preference mutation fails", async () => {
+    const events: string[] = [];
+    const failure = new Error("preferences failed");
+    const client = {
+      listProviders: async () => {
+        events.push("providers");
+        return [configuredProvider];
+      },
+      getDefaultModel: async () => null,
+      updateProvider: async () => {
+        events.push("config");
+        return {};
+      },
+      updateProviderModels: async () => {
+        events.push("preferences");
+        throw failure;
+      },
+    } as unknown as ApiClient;
+    const admin = useProvidersAdmin(
+      client,
+      async () => {
+        events.push("catalogs");
+      },
+      async () => {
+        events.push("status");
+      },
+    );
+    await Promise.resolve();
+    events.length = 0;
+
+    await expect(admin.save(
+      "anthropic",
+      { method: "api-key", values: { apiKey: "${ANTHROPIC_API_KEY}" } },
+      configuredProvider.modelPreferences,
+    )).rejects.toBe(failure);
+
+    expect(events).toEqual([
+      "config",
+      "preferences",
+      "providers",
+      "catalogs",
+      "status",
+    ]);
   });
 });

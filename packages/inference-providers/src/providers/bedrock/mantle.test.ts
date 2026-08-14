@@ -100,6 +100,131 @@ describe("Bedrock Mantle discovery", () => {
 });
 
 describe("Bedrock Mantle invocation", () => {
+  it.each([
+    {
+      family: "xAI",
+      modelId: "xai.grok-4.3",
+      displayName: "Grok 4.3",
+      region: "us-west-2",
+    },
+    {
+      family: "Gemma 4",
+      modelId: "google.gemma-4-31b",
+      displayName: "Gemma 4 31B",
+      region: "us-east-1",
+    },
+  ])("streams $family models through the OpenAI-namespaced Responses endpoint", async ({
+    modelId,
+    displayName,
+    region,
+  }) => {
+    const requests: Array<{
+      url: string;
+      authorization: string | null;
+      hasTool: boolean;
+    }> = [];
+    const fetchFn = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/models")) {
+        return new Response(JSON.stringify({
+          data: [{ id: modelId, display_name: displayName }],
+        }), { status: 200 });
+      }
+      requests.push({
+        url,
+        authorization: new Headers(init?.headers).get("authorization"),
+        hasTool: String(init?.body).includes("lookup"),
+      });
+      return new Response(JSON.stringify({
+        error: { message: "stop", type: "invalid_request_error" },
+      }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const provider = new BedrockLangChainModelProvider({
+      region,
+      client: {
+        send: vi.fn(async (command: unknown) =>
+          command?.constructor.name === "ListInferenceProfilesCommand"
+            ? { inferenceProfileSummaries: [] }
+            : { modelSummaries: [] }),
+      },
+      fetch: fetchFn,
+      modelsDevFetch: vi.fn(async () =>
+        new Response(JSON.stringify({}), { status: 200 })),
+    });
+    provider.configure({
+      method: "bedrock-api-key",
+      values: { apiKey: "bedrock-key" },
+    });
+    await provider.listModels();
+
+    const model = await provider.buildModel(modelId);
+    await expect(collect(model.bindTools!([TEST_TOOL]).stream("hello")))
+      .rejects.toThrow("stop");
+
+    expect(requests).toEqual([{
+      url: `https://bedrock-mantle.${region}.api.aws/openai/v1/responses`,
+      authorization: "Bearer bedrock-key",
+      hasTool: true,
+    }]);
+  });
+
+  it("streams other model families through the regional Chat Completions endpoint", async () => {
+    const requests: Array<{
+      url: string;
+      authorization: string | null;
+      hasTool: boolean;
+    }> = [];
+    const fetchFn = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/models")) {
+        return new Response(JSON.stringify({
+          data: [{ id: "zai.glm-4.7-flash", display_name: "GLM 4.7 Flash" }],
+        }), { status: 200 });
+      }
+      requests.push({
+        url,
+        authorization: new Headers(init?.headers).get("authorization"),
+        hasTool: String(init?.body).includes("lookup"),
+      });
+      return new Response(JSON.stringify({
+        error: { message: "stop", type: "invalid_request_error" },
+      }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const provider = new BedrockLangChainModelProvider({
+      region: "eu-west-1",
+      client: {
+        send: vi.fn(async (command: unknown) =>
+          command?.constructor.name === "ListInferenceProfilesCommand"
+            ? { inferenceProfileSummaries: [] }
+            : { modelSummaries: [] }),
+      },
+      fetch: fetchFn,
+      modelsDevFetch: vi.fn(async () =>
+        new Response(JSON.stringify({}), { status: 200 })),
+    });
+    provider.configure({
+      method: "bedrock-api-key",
+      values: { apiKey: "bedrock-key" },
+    });
+    await provider.listModels();
+
+    const model = await provider.buildModel("zai.glm-4.7-flash");
+    await expect(collect(model.bindTools!([TEST_TOOL]).stream("hello")))
+      .rejects.toThrow("stop");
+
+    expect(requests).toEqual([{
+      url: "https://bedrock-mantle.eu-west-1.api.aws/v1/chat/completions",
+      authorization: "Bearer bedrock-key",
+      hasTool: true,
+    }]);
+  });
+
   it("streams OpenAI-family models through the regional Responses endpoint", async () => {
     const requests: Array<{
       url: string;

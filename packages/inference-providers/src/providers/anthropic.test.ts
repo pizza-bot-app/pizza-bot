@@ -3,6 +3,7 @@ import { AnthropicLangChainModelProvider, normalizeBaseUrl } from "./anthropic.j
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("Anthropic model discovery", () => {
@@ -65,6 +66,26 @@ describe("Anthropic model discovery", () => {
     });
   });
 
+  it("replaces a cleared custom endpoint with the environment fallback", async () => {
+    vi.stubEnv("ANTHROPIC_BASE_URL", "https://anthropic-fallback.example");
+    const fetchFn = vi.fn(async () => Response.json({ data: [] }));
+    const provider = new AnthropicLangChainModelProvider({
+      apiKey: "test-key",
+      baseUrl: "https://anthropic-custom.example",
+      fetch: fetchFn,
+    });
+
+    provider.configure({
+      method: "api-key",
+      values: { apiKey: "test-key" },
+    });
+    await provider.listModels();
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://anthropic-fallback.example/v1/models?limit=1000",
+      expect.any(Object),
+    );
+  });
 });
 
 describe("Anthropic model construction", () => {

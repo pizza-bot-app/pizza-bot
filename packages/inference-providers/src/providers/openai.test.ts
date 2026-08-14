@@ -8,6 +8,7 @@ import { isChatModel, OpenAiLangChainModelProvider, retryOutputCap } from "./ope
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("OpenAI model discovery", () => {
@@ -89,6 +90,27 @@ describe("OpenAI model discovery", () => {
       }),
     ]);
     expect(modelsDevFetch).toHaveBeenCalledOnce();
+  });
+
+  it("replaces a cleared custom endpoint with the environment fallback", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "https://openai-fallback.example/v1");
+    const fetchFn = vi.fn(async () => Response.json({ data: [] }));
+    const provider = new OpenAiLangChainModelProvider({
+      apiKey: "test-key",
+      baseUrl: "https://openai-custom.example/v1",
+      fetch: fetchFn,
+    });
+
+    provider.configure({
+      method: "api-key",
+      values: { apiKey: "test-key" },
+    });
+    await provider.listModels();
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://openai-fallback.example/v1/models",
+      expect.any(Object),
+    );
   });
 });
 
@@ -225,6 +247,56 @@ describe("OpenAI model construction", () => {
 });
 
 describe("OpenAI attachment conversion", () => {
+  it("projects base64 images into native Responses input blocks", async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    const provider = new OpenAiLangChainModelProvider({
+      fetch: vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return openAiError("stop");
+      }),
+      models: [{
+        id: "responses-vision-model",
+        provider: "openai",
+        displayName: "Responses Vision Model",
+      }],
+    });
+    provider.configure({
+      method: "api-key",
+      values: {
+        apiKey: "test-key",
+        baseUrl: "https://proxy.example/openai/v1",
+        apiMode: "responses",
+      },
+    });
+    const message = new HumanMessage({
+      content: [
+        { type: "text", text: "what is this?" },
+        {
+          type: "image",
+          source_type: "base64",
+          mime_type: "image/png",
+          data: "QUJD",
+        },
+      ] as unknown as string,
+    });
+
+    const model = await provider.buildModel("responses-vision-model");
+    await expect(consume(model.stream([message]))).rejects.toThrow("stop");
+
+    expect(requestBody?.input).toEqual([{
+      type: "message",
+      role: "user",
+      content: [
+        { type: "input_text", text: "what is this?" },
+        {
+          type: "input_image",
+          image_url: "data:image/png;base64,QUJD",
+          detail: "auto",
+        },
+      ],
+    }]);
+  });
+
   it("preserves the original filename and extension in both request formats", () => {
     const filename = "✍️ Blogs Blog ideas.md";
     const message = new HumanMessage({

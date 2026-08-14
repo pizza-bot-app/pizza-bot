@@ -24,9 +24,12 @@ export interface ProvidersSettingsProps {
   models: ModelsInfo;
   allModels: ModelsInfo;
   defaultModel: string | null;
-  onUpdate: (id: string, config: { method: string; values: Record<string, string> }) => Promise<unknown>;
+  onSave: (
+    id: string,
+    config: { method: string; values: Record<string, string> },
+    preferences: ProviderModelPreferences,
+  ) => Promise<unknown>;
   onRemove: (id: string) => Promise<unknown>;
-  onSetModels: (id: string, preferences: ProviderModelPreferences) => Promise<unknown>;
   onRetryModels: () => Promise<unknown>;
   onSetDefault: (model: string | null) => Promise<unknown>;
   selectedProviderId: string | null;
@@ -66,9 +69,8 @@ export function ProvidersSettings({
   models,
   allModels,
   defaultModel,
-  onUpdate,
+  onSave,
   onRemove,
-  onSetModels,
   onRetryModels,
   onSetDefault,
   selectedProviderId,
@@ -109,9 +111,8 @@ export function ProvidersSettings({
             provider={p}
             models={allModels.models.filter((model) => model.provider === p.id)}
             catalog={allModels.providers?.find((catalog) => catalog.provider === p.id)}
-            onUpdate={onUpdate}
+            onSave={onSave}
             onRemove={onRemove}
-            onSetModels={onSetModels}
             onRetryModels={onRetryModels}
           />
         </div>
@@ -222,17 +223,19 @@ function ProviderRow({
   provider,
   models,
   catalog,
-  onUpdate,
+  onSave,
   onRemove,
-  onSetModels,
   onRetryModels,
 }: {
   provider: ProviderView;
   models: ModelsInfo["models"];
   catalog?: ModelCatalogStatus;
-  onUpdate: (id: string, config: { method: string; values: Record<string, string> }) => Promise<unknown>;
+  onSave: (
+    id: string,
+    config: { method: string; values: Record<string, string> },
+    preferences: ProviderModelPreferences,
+  ) => Promise<unknown>;
   onRemove: (id: string) => Promise<unknown>;
-  onSetModels: (id: string, preferences: ProviderModelPreferences) => Promise<unknown>;
   onRetryModels: () => Promise<unknown>;
 }) {
   const notify = useAppToast();
@@ -309,8 +312,11 @@ function ProviderRow({
           out[field.key] = raw;
         }
       }
-      await onUpdate(provider.id, { method: method.id, values: out });
-      await onSetModels(provider.id, modelPreferences);
+      await onSave(
+        provider.id,
+        { method: method.id, values: out },
+        modelPreferences,
+      );
       notify({ title: `${provider.id} saved`, tone: "success" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
