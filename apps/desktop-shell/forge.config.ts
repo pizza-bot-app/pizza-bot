@@ -20,7 +20,7 @@ const repoRoot = path.resolve(shellRoot, "..", "..");
 // packaging. Without this, signing variables stored only in `.env` silently
 // produce unsigned artifacts. `loadEnvFile` never overwrites an exported var, so
 // a shell export or CI secret still wins.
-for (const name of [".env", ".env.local"]) {
+for (const name of [".env.local", ".env"]) {
   try {
     process.loadEnvFile(path.join(repoRoot, name));
   } catch {

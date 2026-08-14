@@ -30,9 +30,17 @@ describe("loadDotEnv", () => {
     expect(process.env.PIZZA_LOAD_ENV_TEST).toBe("from_data_root");
   });
 
+  it("prefers .env.local over .env in the same directory", () => {
+    writeFileSync(join(dataRoot, ".env"), "PIZZA_LOAD_ENV_TEST=from_env\n");
+    writeFileSync(join(dataRoot, ".env.local"), "PIZZA_LOAD_ENV_TEST=from_env_local\n");
+    loadDotEnv();
+    expect(process.env.PIZZA_LOAD_ENV_TEST).toBe("from_env_local");
+  });
+
   it("never overrides an already-set variable", () => {
     process.env.PIZZA_LOAD_ENV_TEST_PRESET = "from_shell";
     writeFileSync(join(dataRoot, ".env"), "PIZZA_LOAD_ENV_TEST_PRESET=from_file\n");
+    writeFileSync(join(dataRoot, ".env.local"), "PIZZA_LOAD_ENV_TEST_PRESET=from_local_file\n");
     loadDotEnv();
     expect(process.env.PIZZA_LOAD_ENV_TEST_PRESET).toBe("from_shell");
   });

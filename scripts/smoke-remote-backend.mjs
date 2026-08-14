@@ -119,6 +119,17 @@ try {
     [{ name: "playwright", status: "loaded" }],
   );
 
+  const skills = await fetch(`${baseUrl}/skills`, { headers: authHeaders });
+  assert.equal(skills.status, 200);
+  const browserAutomation = (await skills.json()).skills.find(
+    (skill) => skill.id === "browser-automation",
+  );
+  assert.equal(
+    browserAutomation?.status,
+    "ready",
+    `bundled browser skill must be ready: ${browserAutomation?.statusDetail ?? "not found"}`,
+  );
+
   streamAbort = new AbortController();
   const stream = await fetch(`${baseUrl}/threads/events`, {
     headers: authHeaders,

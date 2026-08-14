@@ -497,7 +497,8 @@ standard Agent Server surface includes broader assistant, run, store, and cron
 contracts plus deployment infrastructure that this local-first application does
 not need. Pizza Bot instead requires a lightweight Node process that can run
 inside an Electron sidecar while preserving background runs and reconnect
-replay.
+replay. A separately deployed service with supporting persistence and pub-sub
+infrastructure cannot provide that embedded desktop process model.
 
 The api-server, `ProtocolRunManager`, and trigger service provide that narrower
 host. Pizza Bot reuses native LangGraph `ProtocolEvent` frames and
