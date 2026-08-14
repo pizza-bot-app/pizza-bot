@@ -199,16 +199,27 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     };
   }
 
+  /**
+   * Rejects a grant root that is itself a link. `lstat` decides link-ness because
+   * native `realpath` expands Windows 8.3 short names, so string-matching the
+   * configured path against its canonical form would deny a legitimate alias
+   * such as `C:\Users\RUNNER~1\AppData\Local\Temp\notes`.
+   */
+  private async canonicalRoot(
+    folder: LocalFolder,
+  ): Promise<string | undefined> {
+    if ((await lstat(folder.path)).isSymbolicLink()) return undefined;
+    return realpath(folder.path);
+  }
+
   private async contained(
     folder: LocalFolder,
     folderPath: string,
     allowMissing = false,
   ): Promise<boolean> {
     try {
-      const canonicalRoot = await realpath(folder.path);
-      if (path.relative(path.resolve(folder.path), canonicalRoot) !== "") {
-        return false;
-      }
+      const canonicalRoot = await this.canonicalRoot(folder);
+      if (!canonicalRoot) return false;
       const candidate = path.resolve(
         canonicalRoot,
         folderPath.replace(/^\/+/, ""),
@@ -249,10 +260,8 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     folderPath: string,
   ): Promise<boolean> {
     try {
-      const canonicalRoot = await realpath(folder.path);
-      if (path.relative(path.resolve(folder.path), canonicalRoot) !== "") {
-        return false;
-      }
+      const canonicalRoot = await this.canonicalRoot(folder);
+      if (!canonicalRoot) return false;
       const candidate = path.resolve(
         canonicalRoot,
         folderPath.replace(/^\/+/, ""),
@@ -323,10 +332,8 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     folderPath: string,
   ): Promise<string | undefined> {
     try {
-      const canonicalRoot = await realpath(folder.path);
-      if (path.relative(path.resolve(folder.path), canonicalRoot) !== "") {
-        return undefined;
-      }
+      const canonicalRoot = await this.canonicalRoot(folder);
+      if (!canonicalRoot) return undefined;
 
       let current = canonicalRoot;
       const resolvedSegments: string[] = [];

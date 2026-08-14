@@ -76,12 +76,16 @@ async function canonicalDirectory(input: unknown): Promise<
   }
 }
 
+// These roots are compared against request paths canonicalized by `fs/promises`
+// realpath, so they must use `realpathSync.native`: the JS `realpathSync` keeps
+// Windows 8.3 short names that the native one expands, and mixing the two makes
+// the containment checks below miss.
 function canonicalDataRoot(host: AgentHost): string | undefined {
   if (host.dataRoot === ":memory:" || host.dataRoot.startsWith("file::memory:")) {
     return undefined;
   }
   try {
-    return realpathSync(host.dataRoot);
+    return realpathSync.native(host.dataRoot);
   } catch {
     return path.resolve(host.dataRoot);
   }
@@ -138,7 +142,7 @@ function canonicalBrowseRoots(
     }
     let canonical: string;
     try {
-      canonical = realpathSync(configured);
+      canonical = realpathSync.native(configured);
       if (!statSync(canonical).isDirectory()) throw new Error("not a directory");
     } catch {
       throw new Error(

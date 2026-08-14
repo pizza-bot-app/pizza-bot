@@ -6,6 +6,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+// `.native` mirrors the routes' canonicalization; the JS `realpathSync` keeps
+// Windows 8.3 short names that the native one expands.
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,7 +74,7 @@ describe("local folder routes", () => {
       parentPath: null,
       directories: [{
         name: allowed.split(/[\\/]/).at(-1),
-        path: realpathSync(allowed),
+        path: realpathSync.native(allowed),
       }],
     });
     expect(
@@ -82,9 +84,9 @@ describe("local folder routes", () => {
         )
       ).json(),
     ).toEqual({
-      currentPath: realpathSync(allowed),
+      currentPath: realpathSync.native(allowed),
       parentPath: null,
-      directories: [{ name: "child", path: realpathSync(child) }],
+      directories: [{ name: "child", path: realpathSync.native(child) }],
     });
     expect(
       await (
@@ -93,9 +95,9 @@ describe("local folder routes", () => {
         )
       ).json(),
     ).toMatchObject({
-      currentPath: realpathSync(child),
-      parentPath: realpathSync(allowed),
-      directories: [{ name: "nested", path: realpathSync(nested) }],
+      currentPath: realpathSync.native(child),
+      parentPath: realpathSync.native(allowed),
+      directories: [{ name: "nested", path: realpathSync.native(nested) }],
     });
     expect(
       (
@@ -155,7 +157,7 @@ describe("local folder routes", () => {
     expect(await response.json()).toMatchObject({
       id: "project-files",
       label: "Project Files",
-      path: realpathSync(project),
+      path: realpathSync.native(project),
       virtualPath: "/local/project-files",
       readOnly: true,
     });
