@@ -145,17 +145,46 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     };
   }
 
-  private async contained(folder: LocalFolder, folderPath: string): Promise<boolean> {
+  private async contained(
+    folder: LocalFolder,
+    folderPath: string,
+    allowMissing = false,
+  ): Promise<boolean> {
     try {
-      const candidate = path.resolve(folder.path, folderPath.replace(/^\/+/, ""));
-      const [canonicalRoot, canonical] = await Promise.all([
-        realpath(folder.path),
-        realpath(candidate),
-      ]);
-      return (
-        path.relative(path.resolve(folder.path), canonicalRoot) === "" &&
-        pathIsWithin(canonicalRoot, canonical)
+      const canonicalRoot = await realpath(folder.path);
+      if (path.relative(path.resolve(folder.path), canonicalRoot) !== "") {
+        return false;
+      }
+      const candidate = path.resolve(
+        canonicalRoot,
+        folderPath.replace(/^\/+/, ""),
       );
+      if (!pathIsWithin(canonicalRoot, candidate)) return false;
+      try {
+        return pathIsWithin(canonicalRoot, await realpath(candidate));
+      } catch (error) {
+        if (
+          !allowMissing ||
+          (error as NodeJS.ErrnoException).code !== "ENOENT"
+        ) {
+          return false;
+        }
+        let ancestor = path.dirname(candidate);
+        while (pathIsWithin(canonicalRoot, ancestor)) {
+          try {
+            return pathIsWithin(canonicalRoot, await realpath(ancestor));
+          } catch (ancestorError) {
+            if (
+              (ancestorError as NodeJS.ErrnoException).code !== "ENOENT" ||
+              ancestor === canonicalRoot
+            ) {
+              return false;
+            }
+            ancestor = path.dirname(ancestor);
+          }
+        }
+        return false;
+      }
     } catch {
       return false;
     }
@@ -203,9 +232,15 @@ class LocalFoldersBackend implements BackendProtocolV2 {
 
   private async readable(
     virtualPath: string,
+    allowMissing = false,
   ): Promise<ResolvedLocalFolder | undefined> {
     const { folder, folderPath } = this.split(virtualPath);
-    if (!folder || !(await this.contained(folder, folderPath))) return undefined;
+    if (
+      !folder ||
+      !(await this.contained(folder, folderPath, allowMissing))
+    ) {
+      return undefined;
+    }
     return { folder, folderPath, backend: this.backend(folder) };
   }
 
@@ -258,7 +293,7 @@ class LocalFoldersBackend implements BackendProtocolV2 {
     offset?: number,
     limit?: number,
   ): Promise<ReadResult> {
-    const resolved = await this.readable(virtualPath);
+    const resolved = await this.readable(virtualPath, true);
     if (!resolved) return { error: LOCAL_FOLDER_DENIED_ERROR };
     return resolved.backend.read(resolved.folderPath, offset, limit);
   }
@@ -424,7 +459,7 @@ class LocalFoldersBackend implements BackendProtocolV2 {
   async downloadFiles(paths: string[]): Promise<FileDownloadResponse[]> {
     return Promise.all(
       paths.map(async (virtualPath) => {
-        const resolved = await this.readable(virtualPath);
+        const resolved = await this.readable(virtualPath, true);
         if (!resolved) {
           return {
             path: virtualPath,

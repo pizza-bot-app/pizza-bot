@@ -31,6 +31,9 @@ describe("PIZZA_BOT_AGENT", () => {
     expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
       "only the direct tool uses snake_case `subagent_type`",
     );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "do not normalize their case or punctuation",
+    );
     expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain("write_todos");
     expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain(
       "when a task matches one, read its SKILL.md",

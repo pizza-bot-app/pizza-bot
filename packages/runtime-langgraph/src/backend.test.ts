@@ -37,6 +37,8 @@ describe("buildBackend", () => {
   it("mounts approved local folders read-only and revokes them live", async () => {
     const dir = mkdtempSync(join(tmpdir(), "local-folder-backend-"));
     writeFileSync(join(dir, "notes.md"), "approved notes", "utf8");
+    const screenshot = "Screenshot 2026-08-03 at 4.06.57 PM.png";
+    writeFileSync(join(dir, screenshot), Buffer.from([137, 80, 78, 71]));
     const canonicalDir = realpathSync(dir);
     let folders = [{
       id: "notes",
@@ -57,6 +59,19 @@ describe("buildBackend", () => {
     expect((await backend.read("/local/notes/notes.md")).content).toContain(
       "approved notes",
     );
+    expect(
+      await backend.read(`/local/notes/${screenshot}`),
+    ).toMatchObject({
+      content: new Uint8Array([137, 80, 78, 71]),
+      mimeType: "image/png",
+    });
+    expect(
+      (
+        await backend.read(
+          "/local/notes/Screenshot 2026\u201308\u201303 at 4.06.57 PM.png",
+        )
+      ).error,
+    ).toContain("no such file or directory");
     expect((await backend.write("/local/notes/new.md", "no")).error).toContain(
       "read-only",
     );
@@ -191,6 +206,9 @@ describe("buildBackend", () => {
       }) as CompositeBackend;
 
       expect((await backend.read("/local/root/linked/secret.txt")).error).toContain(
+        "not allowed",
+      );
+      expect((await backend.read("/local/root/linked/missing.txt")).error).toContain(
         "not allowed",
       );
       expect(
