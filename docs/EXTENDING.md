@@ -32,7 +32,7 @@ Keep secrets out of `.mcp.json`. Put them in `<PIZZA_DATA_ROOT>/.env` or
 `.env.local` and reference them as `${ENV_VAR}`. The api-server loads these
 files without overriding values it already found. Precedence is: exported
 process environment, then the data root, current working directory, and
-repository root; within each directory `.env` is read before `.env.local`.
+repository root; within each directory `.env.local` overrides `.env`.
 Restart Pizza Bot or the standalone api-server after changing an environment
 file.
 

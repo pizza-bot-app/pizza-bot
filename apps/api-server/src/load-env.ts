@@ -6,10 +6,8 @@ export function resolveDataRoot(): string {
   return process.env.PIZZA_DATA_ROOT ?? resolve(homedir(), ".pizza-bot-oss");
 }
 
-// Backfill unset env from `.env`/`.env.local` in each candidate; loadEnvFile
-// never overrides an already-set var, so exported vars always win. The data
-// root is the candidate that exists inside a packaged `.app` (whose bundle dir
-// has no `.env`); cwd covers headless launches; repo root covers dev.
+// loadEnvFile never overwrites an already-set var, so loading the local file
+// first gives it precedence while exported vars still win.
 export function loadDotEnv(log: (msg: string) => void = () => {}): void {
   const here = dirname(fileURLToPath(import.meta.url));
   const dataRoot = resolveDataRoot();
@@ -18,7 +16,7 @@ export function loadDotEnv(log: (msg: string) => void = () => {}): void {
   for (const dir of candidateDirs) {
     if (seen.has(dir)) continue;
     seen.add(dir);
-    for (const name of [".env", ".env.local"]) {
+    for (const name of [".env.local", ".env"]) {
       const file = resolve(dir, name);
       try {
         process.loadEnvFile(file);
