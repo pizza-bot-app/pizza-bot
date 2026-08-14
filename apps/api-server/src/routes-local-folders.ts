@@ -4,6 +4,7 @@ import path from "node:path";
 import { Hono } from "hono";
 import type {
   CreateLocalFolderInput,
+  LocalFolder,
   LocalFolderBrowseEntry,
   LocalFolderBrowseResult,
   LocalFolderList,
@@ -94,6 +95,34 @@ function isProtectedPath(
     pathIsWithin(dataRoot, candidate) ||
     pathIsWithin(candidate, dataRoot)
   );
+}
+
+function overlappingGrantError(
+  folders: readonly LocalFolder[],
+  candidatePath: string,
+  candidateReadOnly: boolean,
+): string | undefined {
+  let redundantWith: LocalFolder | undefined;
+  for (const existing of folders) {
+    const existingIsAncestor = pathIsWithin(existing.path, candidatePath);
+    const candidateIsAncestor = pathIsWithin(candidatePath, existing.path);
+    if (!existingIsAncestor && !candidateIsAncestor) continue;
+
+    if (existing.readOnly === candidateReadOnly) {
+      redundantWith ??= existing;
+      continue;
+    }
+
+    const ancestorReadOnly = existingIsAncestor
+      ? existing.readOnly
+      : candidateReadOnly;
+    if (!ancestorReadOnly) {
+      return `Folder grants are additive. This folder overlaps "${existing.label}", and the writable parent would make the read-only folder writable through the parent grant.`;
+    }
+  }
+  return redundantWith
+    ? `Folder grants are additive. This folder overlaps "${redundantWith.label}" with the same access, so the additional grant would be redundant.`
+    : undefined;
 }
 
 function canonicalBrowseRoots(
@@ -258,13 +287,25 @@ export function localFolderRoutes(
         409,
       );
     }
+    const readOnly = raw.readOnly ?? true;
+    const overlapError = overlappingGrantError(
+      host.localFolders.list(),
+      directory.path,
+      readOnly,
+    );
+    if (overlapError) {
+      return c.json(
+        { error: "overlapping_grant", detail: overlapError },
+        409,
+      );
+    }
 
     const label = path.basename(directory.path) || "Folder";
     const folder = host.localFolders.create({
       id: uniqueId(host, label),
       label,
       path: directory.path,
-      readOnly: raw.readOnly ?? true,
+      readOnly,
     });
     return c.json(folder, 201);
   });

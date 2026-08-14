@@ -192,6 +192,49 @@ describe("local folder routes", () => {
     expect(host.localFolders.list()).toEqual([]);
   });
 
+  it("allows only additive overlaps that narrow write access", async () => {
+    const app = buildApp(host, { allowLocalFolderConfiguration: true });
+    const parent = join(allowed, "parent");
+    const writableChild = join(parent, "writable-child");
+    const writableGrandchild = join(writableChild, "grandchild");
+    const readOnlySibling = join(parent, "read-only-sibling");
+    const otherParent = join(allowed, "other-parent");
+    const otherChild = join(otherParent, "child");
+    mkdirSync(writableGrandchild, { recursive: true });
+    mkdirSync(readOnlySibling);
+    mkdirSync(otherChild, { recursive: true });
+
+    const create = (folderPath: string, readOnly: boolean) =>
+      app.request("/local-folders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: folderPath, readOnly }),
+      });
+
+    expect((await create(parent, true)).status).toBe(201);
+    expect((await create(writableChild, false)).status).toBe(201);
+
+    const redundant = await create(writableGrandchild, false);
+    expect(redundant.status).toBe(409);
+    expect(await redundant.json()).toMatchObject({
+      error: "overlapping_grant",
+      detail: expect.stringContaining("grants are additive"),
+    });
+
+    const redundantReadOnly = await create(readOnlySibling, true);
+    expect(redundantReadOnly.status).toBe(409);
+
+    const misleadingChild = await create(writableGrandchild, true);
+    expect(misleadingChild.status).toBe(409);
+    expect(await misleadingChild.json()).toMatchObject({
+      error: "overlapping_grant",
+      detail: expect.stringContaining("writable parent"),
+    });
+
+    expect((await create(otherChild, false)).status).toBe(201);
+    expect((await create(otherParent, true)).status).toBe(201);
+  });
+
   it("rejects relative, missing, file, and Pizza Bot data paths", async () => {
     const app = buildApp(host, { allowLocalFolderConfiguration: true });
     const nested = join(dataRoot, "nested");
