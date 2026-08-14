@@ -38,22 +38,25 @@ the safe defaults, and the choices that weaken them.
 
 ## Credentials and secrets
 
-- **Provider secrets go to the OS keychain.** In the desktop app, model-provider
-  API keys are encrypted with Electron `safeStorage` (the OS keychain) and
-  persisted under `<data-root>/secrets.json` as ciphertext
-  (`apps/desktop-shell/src/secret-store.ts`). Plaintext exists transiently while
-  the user enters it and while the main process passes it to the api-server
-  child; it is never written to disk in the clear or returned to the renderer
-  after storage.
-- **Remote backend tokens use the OS keychain.** A bearer token entered in the
-  desktop Connection settings is encrypted with Electron `safeStorage` before
-  it is written to `desktop-connection.json`. It is exposed only to the
+- **Provider secrets use Electron's OS-backed protection.** In the desktop app,
+  model-provider API keys pass through Electron `safeStorage`, and its output is
+  persisted under `<data-root>/secrets.json`
+  (`apps/desktop-shell/src/secret-store.ts`). Plaintext exists while the user
+  enters it and while the main process passes it to the api-server child; it is
+  not returned to the renderer after storage. The desktop refuses to save a
+  secret when `safeStorage.isEncryptionAvailable()` is false. On Linux,
+  `safeStorage` can select the `basic_text` backend when no compatible secret
+  store is available; in that configuration the value on disk is not
+  meaningfully encrypted.
+- **Remote backend tokens use the same protection.** A bearer token entered in
+  the desktop Connection settings is encrypted with Electron `safeStorage`
+  before it is written to `desktop-connection.json`. It is exposed only to the
   sandboxed renderer that needs it for authenticated API requests. Desktop
   connections outside loopback require HTTPS.
 - **AWS/Bedrock credentials use the same secret boundary.** Named profiles use
   the standard AWS credential chain. Access keys and Bedrock API keys entered in
-  the desktop app are encrypted by the OS keychain like other provider secrets;
-  server-side configuration stores only environment-variable references.
+  the desktop app use `safeStorage` like other provider secrets; server-side
+  configuration stores only environment-variable references.
 - **Environment references stay raw on disk.** MCP server manifests keep
   `${ENV_VAR}` references literally and expand them only for a live connection.
   Literal header and environment values are also accepted and would be stored as
@@ -75,15 +78,17 @@ By default, durable application state lives under `<PIZZA_DATA_ROOT>` (default
 - `skills/`, `plugins/`, `plugin-materializations/`, and `.mcp.json` — user
   capabilities, generated plugin snapshots, and MCP settings.
 - `logs/` — rotated application logs.
-- `secrets.json` and `desktop-connection.json` — encrypted desktop secrets and
-  backend selection.
+- `secrets.json` and `desktop-connection.json` — `safeStorage`-protected desktop
+  secrets and backend selection.
 
 The data root is created with user-only POSIX permissions; databases,
 attachments, MCP configuration, and logs are also restricted to user-only
-modes. Content is not encrypted beyond `secrets.json` and whatever your
-filesystem provides. Anyone who gains access as your user can read conversations
-and long-term memory. `PIZZA_*_DIR` and MCP path overrides can place selected
-resources elsewhere.
+modes. Other content is not encrypted beyond what your filesystem provides.
+Anyone who gains access as your user can read conversations and long-term
+memory, and the Linux `basic_text` fallback does not protect desktop secrets
+from that user. `PIZZA_PLUGINS_DIR`, `PIZZA_SKILLS_DIR`,
+`PIZZA_MEMORIES_DIR`, and `PIZZA_MCP_CONFIG` can place selected resources
+elsewhere; those paths need equivalent access controls and backups.
 
 The SQLite data root supports one backend process on local storage. Do not mount
 one data root into multiple containers, replicas, or hosts. Stop the process or
@@ -127,8 +132,9 @@ prompt, not a sandbox. Only install sources you trust.
 - **Sharing a token across users.** The bearer token is a single shared secret,
   not a per-user credential. Anyone holding it has full API access.
 - **Committing secrets.** Do not put API tokens or provider keys into `.env`
-  files you commit, into MCP manifests, or into URLs. Use the keychain-backed
-  Providers settings or shell-exported environment variables.
+  files you commit, into MCP manifests, or into URLs. Use the desktop Providers
+  settings with a secure `safeStorage` backend, or shell-exported environment
+  variables.
 
 ## Reporting a vulnerability
 
