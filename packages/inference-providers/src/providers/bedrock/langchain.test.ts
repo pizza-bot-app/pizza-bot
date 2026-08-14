@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HumanMessage } from "@langchain/core/messages";
+import {
+  HumanMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 
 const sdk = vi.hoisted(() => ({
   chatConfig: undefined as Record<string, unknown> | undefined,
@@ -159,6 +162,37 @@ describe("BedrockLangChainModelProvider authentication", () => {
       maxInputTokens: 1_000_000,
       toolCalling: true,
     });
+  });
+
+  it("normalizes DeepAgents image tool results before calling Bedrock", async () => {
+    const provider = new BedrockLangChainModelProvider();
+    const model = await provider.buildModel("global.anthropic.claude-sonnet-5");
+    const toolMessage = new ToolMessage({
+      tool_call_id: "read-1",
+      content: [{
+        type: "image",
+        mimeType: "image/png",
+        data: "aW1hZ2U=",
+      }],
+    });
+
+    (model as unknown as {
+      _streamResponseChunks(messages: ToolMessage[], options: object): unknown;
+    })._streamResponseChunks([toolMessage], {});
+
+    expect(sdk.outboundMessages?.[0]).toMatchObject({
+      content: [{
+        type: "image",
+        source_type: "base64",
+        mime_type: "image/png",
+        data: "aW1hZ2U=",
+      }],
+    });
+    expect(toolMessage.content).toEqual([{
+      type: "image",
+      mimeType: "image/png",
+      data: "aW1hZ2U=",
+    }]);
   });
 
   it("uses explicit access keys, an optional session token, and a region override", async () => {

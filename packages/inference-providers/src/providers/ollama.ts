@@ -118,6 +118,7 @@ export class OllamaLangChainModelProvider implements ModelProvider {
         displayName: `${m.name} (Ollama)`,
         contextWindow: this.effectiveContextWindow(details),
         supportsTools: details?.capabilities?.includes("tools") ?? true,
+        supportsVision: details?.capabilities?.includes("vision") === true,
       };
     }));
   }
@@ -131,10 +132,13 @@ export class OllamaLangChainModelProvider implements ModelProvider {
     };
     const details = await this.inspectModel(modelId);
     const numCtx = this.effectiveContextWindow(details);
+    const supportsVision = details?.capabilities?.includes("vision") === true;
     const think = this.thinking === "enabled" ||
       (this.thinking === "auto" && details?.capabilities?.includes("thinking") === true);
     const modelProfile = {
       maxInputTokens: numCtx,
+      imageInputs: supportsVision,
+      imageToolMessage: supportsVision,
       reasoningOutput: think,
       toolCalling: details?.capabilities?.includes("tools") ?? true,
     };
@@ -154,7 +158,7 @@ export class OllamaLangChainModelProvider implements ModelProvider {
           runSignal,
           options.signal,
           () => super._generate(
-            coerceOllamaMessageContent(messages),
+            coerceOllamaMessageContent(messages, supportsVision),
             options,
             runManager,
           ),
@@ -177,7 +181,7 @@ export class OllamaLangChainModelProvider implements ModelProvider {
       ): AsyncGenerator<ChatGenerationChunk> {
         const toolArgNames = buildToolArgNames(options.tools);
         const source = super._streamResponseChunks(
-          coerceOllamaMessageContent(messages),
+          coerceOllamaMessageContent(messages, supportsVision),
           options,
           runManager,
         );
@@ -199,7 +203,7 @@ export class OllamaLangChainModelProvider implements ModelProvider {
         const toolCallIds = new Map<number, string>();
         const toolArgNames = buildToolArgNames(options.tools);
         const source = super._streamChatModelEvents(
-          coerceOllamaMessageContent(messages),
+          coerceOllamaMessageContent(messages, supportsVision),
           options,
           runManager,
         );

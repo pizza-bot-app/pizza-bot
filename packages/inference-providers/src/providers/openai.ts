@@ -24,6 +24,7 @@ import {
   catalogHttpError,
   missingCatalogCredentials,
 } from "../catalog-error.js";
+import { normalizeMultimodalToolResultsForOpenAiResponses } from "./openai-multimodal-fix.js";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const FETCH_TIMEOUT_MS = 5_000;
@@ -425,12 +426,15 @@ export async function createOpenAiChatModel(
       callOptions: this["ParsedCallOptions"],
       runManager?: CallbackManagerForLLMRun,
     ): Promise<ChatResult> {
+      const outboundMessages = this._useResponsesApi(callOptions)
+        ? normalizeMultimodalToolResultsForOpenAiResponses(messages)
+        : messages;
       try {
-        return await super._generate(messages, callOptions, runManager);
+        return await super._generate(outboundMessages, callOptions, runManager);
       } catch (error) {
         const retry = retryModel(error);
         if (!retry) throw error;
-        return retry._generate(messages, callOptions, runManager);
+        return retry._generate(outboundMessages, callOptions, runManager);
       }
     }
 
@@ -439,10 +443,13 @@ export async function createOpenAiChatModel(
       callOptions: this["ParsedCallOptions"],
       runManager?: CallbackManagerForLLMRun,
     ): AsyncGenerator<ChatGenerationChunk> {
+      const outboundMessages = this._useResponsesApi(callOptions)
+        ? normalizeMultimodalToolResultsForOpenAiResponses(messages)
+        : messages;
       let emitted = false;
       try {
         for await (const chunk of super._streamResponseChunks(
-          messages,
+          outboundMessages,
           callOptions,
           runManager,
         )) {
@@ -452,7 +459,7 @@ export async function createOpenAiChatModel(
       } catch (error) {
         const retry = emitted ? undefined : retryModel(error);
         if (!retry) throw error;
-        yield* retry._streamResponseChunks(messages, callOptions, runManager);
+        yield* retry._streamResponseChunks(outboundMessages, callOptions, runManager);
       }
     }
 
@@ -461,10 +468,13 @@ export async function createOpenAiChatModel(
       callOptions: this["ParsedCallOptions"],
       runManager?: CallbackManagerForLLMRun,
     ): AsyncGenerator<ChatModelStreamEvent> {
+      const outboundMessages = this._useResponsesApi(callOptions)
+        ? normalizeMultimodalToolResultsForOpenAiResponses(messages)
+        : messages;
       let emitted = false;
       try {
         for await (const event of super._streamChatModelEvents(
-          messages,
+          outboundMessages,
           callOptions,
           runManager,
         )) {
@@ -474,7 +484,7 @@ export async function createOpenAiChatModel(
       } catch (error) {
         const retry = emitted ? undefined : retryModel(error);
         if (!retry) throw error;
-        yield* retry._streamChatModelEvents(messages, callOptions, runManager);
+        yield* retry._streamChatModelEvents(outboundMessages, callOptions, runManager);
       }
     }
   }
