@@ -227,14 +227,34 @@ describe("provider routes", () => {
   it("passes a non-secret field through unredacted", async () => {
     await put("openai", {
       method: "api-key",
-      values: { apiKey: "${OPENAI_API_KEY}", baseUrl: "https://proxy.example.com/v1" },
+      values: {
+        apiKey: "${OPENAI_API_KEY}",
+        baseUrl: "https://proxy.example.com/v1",
+        apiMode: "responses",
+      },
     });
     const openai = (await list()).find((p) => p.id === "openai")!;
     expect(openai.config?.values.baseUrl).toBe("https://proxy.example.com/v1");
+    expect(openai.config?.values.apiMode).toBe("responses");
     expect(openai.config?.values.apiKey).toEqual({
       hasValue: true,
       available: false,
     });
+
+    await put("anthropic", {
+      method: "api-key",
+      values: {
+        apiKey: "${ANTHROPIC_API_KEY}",
+        baseUrl: "https://proxy.example.com/anthropic",
+        authMode: "api-key",
+        catalogProvider: "anthropic-compatible",
+      },
+    });
+    const anthropic = (await list()).find((p) => p.id === "anthropic")!;
+    expect(anthropic.config?.values.baseUrl)
+      .toBe("https://proxy.example.com/anthropic");
+    expect(anthropic.config?.values.authMode).toBe("api-key");
+    expect(anthropic.config?.values.catalogProvider).toBe("anthropic-compatible");
   });
 
   it("rejects a raw secret value with 400 and persists nothing", async () => {

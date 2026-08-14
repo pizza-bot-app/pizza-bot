@@ -71,6 +71,7 @@ export interface BedrockProviderOptions {
   profile?: string;
   profiles?: readonly string[];
   client?: { send(command: unknown): Promise<unknown> };
+  fetch?: typeof fetch;
   modelsDev?: ModelsDevCatalogLoader;
   modelsDevFetch?: typeof fetch;
 }

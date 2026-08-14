@@ -16,6 +16,8 @@ import {
 const DEFAULT_BASE_URL = "https://api.anthropic.com";
 const FETCH_TIMEOUT_MS = 5_000;
 
+export type AnthropicAuthMode = "api-key" | "bearer";
+
 interface AnthropicModelsResponse {
   data?: Array<{ id?: string; display_name?: string }>;
 }
@@ -67,6 +69,8 @@ export interface AnthropicProviderOptions {
   fetch?: typeof fetch;
   modelsDev?: ModelsDevCatalogLoader;
   modelsDevFetch?: typeof fetch;
+  authMode?: AnthropicAuthMode;
+  catalogProvider?: string;
 }
 
 class AnthropicBuildError extends Error {
@@ -84,7 +88,32 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
   {
     id: "api-key",
     label: "API key",
-    fields: [{ key: "apiKey", label: "API key", type: "password", required: true }],
+    fields: [
+      {
+        key: "apiKey",
+        label: "API key or bearer token",
+        type: "password",
+        required: true,
+      },
+      { key: "baseUrl", label: "Base URL", type: "text", required: false },
+      {
+        key: "authMode",
+        label: "Authentication",
+        type: "select",
+        required: false,
+        default: "api-key",
+        options: [
+          { value: "api-key", label: "API key (x-api-key)" },
+          { value: "bearer", label: "Bearer token (Authorization)" },
+        ],
+      },
+      {
+        key: "catalogProvider",
+        label: "models.dev provider",
+        type: "text",
+        required: false,
+      },
+    ],
   },
 ];
 
@@ -93,19 +122,23 @@ export class AnthropicLangChainModelProvider implements ModelProvider {
   readonly authSchema = AUTH_SCHEMA;
   private readonly models: ModelDescriptor[] | undefined;
   private readonly maxTokens: number;
-  private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
   private readonly modelsDev: ModelsDevCatalogLoader;
   private readonly descriptors = new Map<string, ModelDescriptor>();
   private apiKey: string | undefined;
+  private baseUrl: string | undefined;
+  private authMode: AnthropicAuthMode;
+  private catalogProvider: string | undefined;
 
   constructor(opts: AnthropicProviderOptions = {}) {
     this.models = opts.models;
     this.maxTokens = resolveMaxTokens(opts.maxTokens);
-    this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+    this.baseUrl = normalizeBaseUrl(opts.baseUrl);
     this.fetchFn = opts.fetch ?? fetch;
     this.modelsDev = resolveModelsDevCatalog(opts.modelsDev, opts.modelsDevFetch);
     this.apiKey = opts.apiKey;
+    this.authMode = opts.authMode ?? "api-key";
+    this.catalogProvider = opts.catalogProvider;
     for (const descriptor of opts.models ?? []) {
       this.descriptors.set(descriptor.id, descriptor);
     }
@@ -114,6 +147,9 @@ export class AnthropicLangChainModelProvider implements ModelProvider {
   configure(cfg: ResolvedProviderConfig): void {
     const key = cfg.values.apiKey?.trim();
     if (key) this.apiKey = key;
+    this.baseUrl = normalizeBaseUrl(cfg.values.baseUrl);
+    this.authMode = cfg.values.authMode === "bearer" ? "bearer" : "api-key";
+    this.catalogProvider = cfg.values.catalogProvider?.trim() || undefined;
     if (!this.models) this.descriptors.clear();
   }
 
@@ -121,13 +157,12 @@ export class AnthropicLangChainModelProvider implements ModelProvider {
     if (this.models) return this.models;
     const apiKey = this.apiKey ?? process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw missingCatalogCredentials("Anthropic");
+    const baseUrl = this.resolvedBaseUrl();
+    const catalog = modelCatalogRequest(baseUrl, this.authHeaders(apiKey));
 
     try {
-      const response = await this.fetchFn(`${this.baseUrl}/v1/models?limit=1000`, {
-        headers: {
-          "anthropic-version": "2023-06-01",
-          "x-api-key": apiKey,
-        },
+      const response = await this.fetchFn(catalog.url, {
+        headers: catalog.headers,
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       if (!response.ok) throw catalogHttpError("Anthropic", response.status);
@@ -142,7 +177,11 @@ export class AnthropicLangChainModelProvider implements ModelProvider {
           supportsVision: true,
         }];
       });
-      const descriptors = await enrichModelDescriptors(discovered, "anthropic", this.modelsDev);
+      const descriptors = await enrichModelDescriptors(
+        discovered,
+        this.catalogProvider ?? "anthropic",
+        this.modelsDev,
+      );
       this.descriptors.clear();
       for (const descriptor of descriptors) {
         this.descriptors.set(descriptor.id, descriptor);
@@ -165,7 +204,6 @@ export class AnthropicLangChainModelProvider implements ModelProvider {
   }
 
   private async construct(modelId: string): Promise<BaseChatModel> {
-    const { ChatAnthropic } = await import("@langchain/anthropic");
     const apiKey = this.apiKey ?? process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new AnthropicBuildError("No Anthropic API key configured (set ANTHROPIC_API_KEY).", "AUTH_EXPIRED");
@@ -174,17 +212,100 @@ export class AnthropicLangChainModelProvider implements ModelProvider {
       await this.listModels().catch(() => []);
     }
     const descriptor = this.descriptors.get(modelId);
-
-    class ContextAwareChatAnthropic extends ChatAnthropic {
-      override get profile() {
-        return withContextWindow(super.profile, descriptor?.contextWindow);
-      }
-    }
-
-    return new ContextAwareChatAnthropic({
-      model: modelId,
+    return createAnthropicChatModel({
+      modelId,
       apiKey,
       maxTokens: this.maxTokens,
+      baseUrl: this.resolvedBaseUrl(),
+      authMode: this.authMode,
+      fetch: this.fetchFn,
+      ...(descriptor ? { descriptor } : {}),
     });
   }
+
+  private resolvedBaseUrl(): string {
+    return this.baseUrl ??
+      normalizeBaseUrl(process.env.ANTHROPIC_BASE_URL ?? process.env.ANTHROPIC_API_URL) ??
+      DEFAULT_BASE_URL;
+  }
+
+  private authHeaders(apiKey: string): Record<string, string> {
+    return {
+      "anthropic-version": "2023-06-01",
+      ...(this.authMode === "bearer"
+        ? { authorization: `Bearer ${apiKey}` }
+        : { "x-api-key": apiKey }),
+    };
+  }
+}
+
+export interface AnthropicChatModelOptions {
+  modelId: string;
+  apiKey: string;
+  maxTokens: number;
+  baseUrl: string;
+  authMode: AnthropicAuthMode;
+  descriptor?: ModelDescriptor;
+  fetch?: typeof fetch;
+}
+
+export async function createAnthropicChatModel(
+  options: AnthropicChatModelOptions,
+): Promise<BaseChatModel> {
+  const { ChatAnthropic } = await import("@langchain/anthropic");
+  const {
+    modelId,
+    apiKey,
+    maxTokens,
+    baseUrl,
+    authMode,
+    descriptor,
+    fetch: fetchFn,
+  } = options;
+  const defaultHeaders = authMode === "bearer"
+    ? {
+        authorization: `Bearer ${apiKey}`,
+        "x-api-key": null,
+      }
+    : undefined;
+
+  class ContextAwareChatAnthropic extends ChatAnthropic {
+    override get profile() {
+      return withContextWindow(super.profile, descriptor?.contextWindow);
+    }
+  }
+
+  return new ContextAwareChatAnthropic({
+    model: modelId,
+    apiKey,
+    maxTokens,
+    anthropicApiUrl: baseUrl,
+    ...((defaultHeaders || fetchFn)
+      ? {
+          clientOptions: {
+            ...(defaultHeaders ? { defaultHeaders } : {}),
+            ...(fetchFn ? { fetch: fetchFn } : {}),
+          },
+        }
+      : {}),
+  });
+}
+
+export function normalizeBaseUrl(value: string | undefined): string | undefined {
+  const baseUrl = value?.trim().replace(/\/+$/, "");
+  if (!baseUrl) return undefined;
+  return baseUrl.replace(/\/v1\/messages$/i, "");
+}
+
+function modelCatalogRequest(
+  baseUrl: string,
+  defaultHeaders: Record<string, string>,
+): {
+  url: string;
+  headers: Record<string, string>;
+} {
+  return {
+    url: `${baseUrl}/v1/models?limit=1000`,
+    headers: defaultHeaders,
+  };
 }
