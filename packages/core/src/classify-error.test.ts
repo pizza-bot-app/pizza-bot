@@ -28,6 +28,13 @@ describe("classifyError", () => {
     expect(classifyError(new Error("This model's maximum context length is 200000 tokens"))).toBe(
       "CONTEXT_LENGTH",
     );
+    expect(
+      classifyError(
+        new Error(
+          "400 request (43448 tokens) exceeds the available context size (32768 tokens)",
+        ),
+      ),
+    ).toBe("CONTEXT_LENGTH");
   });
 
   it("maps timeouts to TIMEOUT", () => {

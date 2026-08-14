@@ -2,10 +2,17 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
+import { ContextOverflowError } from "@langchain/core/errors";
 import type { ChatGenerationChunk, ChatResult } from "@langchain/core/outputs";
 import type { ChatModelStreamEvent } from "@langchain/core/language_models/event";
 import type { ChatOpenAIFields } from "@langchain/openai";
-import type { ModelProvider, ModelDescriptor, ResolvedProviderConfig, ProviderAuthMethod } from "@pizza-bot/core";
+import {
+  classifyError,
+  type ModelProvider,
+  type ModelDescriptor,
+  type ResolvedProviderConfig,
+  type ProviderAuthMethod,
+} from "@pizza-bot/core";
 import {
   enrichModelDescriptors,
   resolveModelsDevCatalog,
@@ -139,7 +146,7 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
     this.maxTokens = positiveInteger(opts.maxTokens) ?? DEFAULT_MAX_TOKENS;
     this.catalogProvider = opts.catalogProvider;
     this.apiMode = opts.apiMode ?? "auto";
-    for (const descriptor of opts.models ?? []) {
+    for (const descriptor of this.models ?? []) {
       this.descriptors.set(descriptor.id, descriptor);
     }
   }
@@ -247,6 +254,13 @@ export interface OpenAiChatModelOptions {
   fetch?: typeof fetch;
 }
 
+function normalizeOpenAIModelError(error: unknown): unknown {
+  if (ContextOverflowError.isInstance(error)) return error;
+  if (classifyError(error) !== "CONTEXT_LENGTH") return error;
+  const cause = error instanceof Error ? error : new Error(String(error));
+  return ContextOverflowError.fromError(cause);
+}
+
 interface ResponsesImageBlock {
   type?: string;
   source_type?: string;
@@ -343,24 +357,32 @@ export async function createOpenAiChatModel(
       return super._useResponsesApi(callOptions);
     }
 
-    override _generate(
+    override async _generate(
       messages: BaseMessage[],
       callOptions: this["ParsedCallOptions"],
       runManager?: CallbackManagerForLLMRun,
-    ) {
-      return super._generate(this.outbound(messages), callOptions, runManager);
+    ): Promise<ChatResult> {
+      try {
+        return await super._generate(this.outbound(messages), callOptions, runManager);
+      } catch (error) {
+        throw normalizeOpenAIModelError(error);
+      }
     }
 
-    override _streamResponseChunks(
+    override async *_streamResponseChunks(
       messages: BaseMessage[],
       callOptions: this["ParsedCallOptions"],
       runManager?: CallbackManagerForLLMRun,
-    ) {
-      return super._streamResponseChunks(
-        this.outbound(messages),
-        callOptions,
-        runManager,
-      );
+    ): AsyncGenerator<ChatGenerationChunk> {
+      try {
+        yield* super._streamResponseChunks(
+          this.outbound(messages),
+          callOptions,
+          runManager,
+        );
+      } catch (error) {
+        throw normalizeOpenAIModelError(error);
+      }
     }
 
     override async *_streamChatModelEvents(
@@ -368,11 +390,15 @@ export async function createOpenAiChatModel(
       callOptions: this["ParsedCallOptions"],
       runManager?: CallbackManagerForLLMRun,
     ) {
-      yield* super._streamChatModelEvents(
-        this.outbound(messages),
-        callOptions,
-        runManager,
-      );
+      try {
+        yield* super._streamChatModelEvents(
+          this.outbound(messages),
+          callOptions,
+          runManager,
+        );
+      } catch (error) {
+        throw normalizeOpenAIModelError(error);
+      }
     }
 
     override withConfig(config: Partial<this["ParsedCallOptions"]>) {
