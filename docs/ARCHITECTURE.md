@@ -183,14 +183,22 @@ in `core/src/protocol-types.ts`:
 - **Filesystem backend** is a `CompositeBackend`: checkpoint-scoped files remain
   in `StateBackend`, durable memory is routed to `/memories/`, and explicit
   backend-host folder grants are routed beneath `/local/<id>/`. Grants default
-  to read-only and may explicitly allow writes. Granted roots use
+  to read-only and may explicitly allow writes. Overlapping grants are additive,
+  so the API permits only a read-only ancestor with a writable descendant;
+  same-access overlaps and read-only descendants beneath writable roots are
+  rejected as redundant or misleading. Granted roots use
   `FilesystemBackend({ virtualMode: true })` plus canonical path and mutation
   parent checks that reject traversal and symlink/junction escapes. The backend
   reads the SQLite grant registry for every operation, so removal revokes access
-  from already-compiled graphs. Standalone directory browsing is a separate,
-  operator-configured capability: the API lists directories only beneath
-  canonical `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS` and never follows symlinks while
-  browsing.
+  from already-compiled graphs. Local-folder tool results percent-encode
+  non-ASCII and path-sensitive filename bytes into an ASCII-safe virtual path;
+  the backend reverses that encoding before using the granted filesystem root.
+  Read-only lookups may recover a uniquely NFKC-equivalent on-disk path when a
+  model changes a compatibility character; mutations always require the exact
+  virtual path.
+  Standalone directory browsing is a separate, operator-configured capability:
+  the API lists directories only beneath canonical
+  `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS` and never follows symlinks while browsing.
 - **Model context limits** are resolved by each inference-provider adapter from
   effective local configuration or provider metadata, with models.dev filling
   missing catalog fields. The adapter publishes the same available limit as
@@ -230,8 +238,8 @@ Two systems, injected as `RuntimeDeps` (`packages/storage`):
   long-term memory; durable analog to the in-memory store).
 
 Everything the platform itself owns — thread metadata, triggers, terminal run
-activity, capability enablement preferences, the FTS message index, and
-attachment metadata — lives in one
+activity, capability enablement preferences, local-folder grants, the FTS
+message index, and attachment metadata — lives in one
 `app.sqlite`, opened once via `openAppDatabase()`: a **single**
 `better-sqlite3` handle (one WAL lock) shared by the stores, rather than one
 handle per store on the same file. The data-root layout
@@ -557,6 +565,9 @@ endpoints and `x-api-key` versus bearer authentication. OpenAI-compatible
 Responses models receive native `input_image` blocks because the upstream
 converter otherwise emits Chat Completions image content inside the Responses
 payload.
+The Ollama adapter reads daemon capabilities per model. For vision models it
+projects tool-returned images into Ollama's supported user-image representation;
+for other models it replaces the binary payload with a capability notice.
 
 Skill workers mark terminal responses whose provider metadata reports an
 output-token limit with an `OUTPUT_TRUNCATED` notice. DeepAgents carries that

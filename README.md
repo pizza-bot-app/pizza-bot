@@ -27,9 +27,8 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 - **Keep control of consequential actions.** Human-in-the-loop approvals,
   long-term memory, file attachments, and desktop notifications are built into
   the workflow.
-- **Grant local access explicitly.** Add individual folders under **Settings >
-  Files** without exposing your home directory by default. Grants start
-  read-only and can explicitly allow writes.
+- **Grant local access explicitly.** Add individual read-only or writable folders
+  under **Settings > Files**; Pizza Bot receives no default home-directory access.
 
 ## Quick start
 
@@ -126,6 +125,9 @@ bindings.
   attachments, and logs live under `<PIZZA_DATA_ROOT>`
   (`~/.pizza-bot-oss` by default). Model and tool requests go to the providers
   and endpoints you configure.
+- **Local folders require an explicit grant.** Each folder added under
+  **Settings > Files** is read-only unless you allow writes. Remote grants name
+  paths on the backend host.
 - **MCP servers and plugins are trusted.** Their commands and materializers can
   execute with your user account's permissions. Install only sources you trust.
 
