@@ -8,9 +8,10 @@ import { resolveNpmCli } from "./npm-cli.mjs";
 
 const forgeCommand = process.argv[2];
 if (!forgeCommand) {
-  console.error("usage: desktop-forge.mjs <package|make>");
+  console.error("usage: desktop-forge.mjs <package|make> [forge options]");
   process.exit(1);
 }
+const forgeArgs = process.argv.slice(3);
 
 const brewNodeBin = "/opt/homebrew/opt/node@24/bin";
 const env = { ...process.env };
@@ -50,7 +51,14 @@ if (process.platform === "darwin") {
 
 const result = spawnSync(
   nodeExecPath,
-  [resolveNpmCli(), "run", forgeCommand, "-w", "@pizza-bot/desktop-shell"],
+  [
+    resolveNpmCli(),
+    "run",
+    forgeCommand,
+    "-w",
+    "@pizza-bot/desktop-shell",
+    ...(forgeArgs.length > 0 ? ["--", ...forgeArgs] : []),
+  ],
   { stdio: "inherit", env },
 );
 process.exit(result.status ?? 1);
