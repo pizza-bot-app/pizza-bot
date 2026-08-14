@@ -87,8 +87,9 @@ export class OllamaLangChainModelProvider implements ModelProvider {
   }
 
   configure(cfg: ResolvedProviderConfig): void {
-    const host = cfg.values.host?.trim();
-    if (host) this.host = normalizeHost(host);
+    this.host = normalizeHost(
+      cfg.values.host?.trim() || process.env.OLLAMA_HOST || DEFAULT_HOST,
+    );
     this.contextLength = positiveInteger(cfg.values.contextLength) ?? DEFAULT_CONTEXT_LENGTH;
     this.thinking = thinkingMode(cfg.values.thinking);
   }

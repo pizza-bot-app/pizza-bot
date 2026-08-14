@@ -82,6 +82,18 @@ function refreshAfter<A extends unknown[], R>(
   };
 }
 
+async function settleRefreshes(
+  tasks: Array<Promise<unknown> | undefined>,
+): Promise<void> {
+  const results = await Promise.allSettled(
+    tasks.filter((task): task is Promise<unknown> => task !== undefined),
+  );
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failure) throw failure.reason;
+}
+
 export function useSkillsAdmin(client: ApiClient, enabled = true) {
   const { data: skills, refresh } = useAdminData(
     useCallback(() => client.listSkills(), [client]),
@@ -185,9 +197,13 @@ export function useMcpServersAdmin(client: ApiClient, intervalMs = 5_000, enable
   };
 }
 
-// onModelsStale re-fetches the model catalog: configuring or removing a provider,
-// or changing the default, can change which models are available.
-export function useProvidersAdmin(client: ApiClient, onModelsStale?: () => Promise<unknown>) {
+// Provider changes can alter both model catalogs and live health, so callers
+// publish one authoritative refresh only after the related writes settle.
+export function useProvidersAdmin(
+  client: ApiClient,
+  onModelsStale?: () => Promise<unknown>,
+  onStatusStale?: () => Promise<unknown>,
+) {
   const { data: providers, loading, refresh } = useAdminData(
     useCallback(() => client.listProviders(), [client]),
     [] as ProviderView[],
@@ -197,28 +213,55 @@ export function useProvidersAdmin(client: ApiClient, onModelsStale?: () => Promi
     null as string | null,
   );
 
-  const refreshProviders = useCallback(
-    () => Promise.all([refresh(), onModelsStale?.()]),
-    [refresh, onModelsStale],
+  const refreshAuthoritative = useCallback(
+    () =>
+      settleRefreshes([
+        refresh(),
+        onModelsStale?.(),
+        onStatusStale?.(),
+      ]),
+    [refresh, onModelsStale, onStatusStale],
   );
   const refreshDefaultAndModels = useCallback(
-    () => Promise.all([refreshDefault(), onModelsStale?.()]),
-    [refreshDefault, onModelsStale],
+    () =>
+      settleRefreshes([
+        refreshDefault(),
+        onModelsStale?.(),
+        onStatusStale?.(),
+      ]),
+    [refreshDefault, onModelsStale, onStatusStale],
   );
 
-  const update = refreshAfter(
-    (id: string, config: { method: string; values: Record<string, string> }) => client.updateProvider(id, config),
-    refreshProviders,
+  const save = useCallback(async (
+    id: string,
+    config: { method: string; values: Record<string, string> },
+    preferences: import("@/api-client").ProviderModelPreferences,
+  ) => {
+    let mutationFailed = false;
+    let mutationError: unknown;
+    try {
+      await client.updateProvider(id, config);
+      await client.updateProviderModels(id, preferences);
+    } catch (cause) {
+      mutationFailed = true;
+      mutationError = cause;
+    }
+
+    try {
+      await refreshAuthoritative();
+    } catch (refreshError) {
+      if (!mutationFailed) throw refreshError;
+    }
+    if (mutationFailed) throw mutationError;
+  }, [client, refreshAuthoritative]);
+
+  const remove = refreshAfter(
+    (id: string) => client.deleteProvider(id),
+    refreshAuthoritative,
   );
-  const remove = refreshAfter((id: string) => client.deleteProvider(id), refreshProviders);
   const setDefault = refreshAfter((model: string | null) => client.setDefaultModel(model), refreshDefaultAndModels);
-  const setModels = refreshAfter(
-    (id: string, preferences: import("@/api-client").ProviderModelPreferences) =>
-      client.updateProviderModels(id, preferences),
-    refreshProviders,
-  );
 
-  return { providers, loading, defaultModel, refresh, update, remove, setDefault, setModels };
+  return { providers, loading, defaultModel, refresh, save, remove, setDefault };
 }
 
 export function useModels(
@@ -271,40 +314,75 @@ export interface ServerStatus {
   reachable: boolean | undefined;
 }
 
+export interface ServerStatusAdmin extends ServerStatus {
+  refresh: () => Promise<StatusInfo | undefined>;
+}
+
 export function useStatus(
   client: ApiClient,
   intervalMs = 15_000,
   loadingIntervalMs = 1_000,
-): ServerStatus {
+): ServerStatusAdmin {
   const [state, setState] = useState<ServerStatus>({ status: undefined, reachable: undefined });
+  const latestRequest = useRef(0);
+  const manualRefresh = useRef<() => Promise<StatusInfo | undefined>>(
+    () => Promise.resolve(undefined),
+  );
+
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const delayFor = (status: StatusInfo | undefined) => {
+      const mcpLoading =
+        status === undefined ||
+        status.mcp.servers.some(
+          (server) => server.status === "loading" || server.status === "retrying",
+        );
+      return mcpLoading ? loadingIntervalMs : intervalMs;
+    };
     const schedule = (delay: number) => {
       if (alive) timer = setTimeout(() => void tick(), delay);
     };
-    const tick = async () => {
+    const load = async () => {
+      const request = ++latestRequest.current;
       try {
         const status = await client.getStatus();
-        if (!alive) return;
-        setState((prev) => ({ status: status ?? prev.status, reachable: true }));
-        const mcpLoading =
-          status === undefined ||
-          status.mcp.servers.some(
-            (server) => server.status === "loading" || server.status === "retrying",
-          );
-        schedule(mcpLoading ? loadingIntervalMs : intervalMs);
-      } catch {
-        if (!alive) return;
-        setState((prev) => ({ ...prev, reachable: false }));
-        schedule(intervalMs);
+        const current = alive && request === latestRequest.current;
+        if (current) {
+          setState((prev) => ({ status: status ?? prev.status, reachable: true }));
+        }
+        return { status, current };
+      } catch (error) {
+        const current = alive && request === latestRequest.current;
+        if (current) setState((prev) => ({ ...prev, reachable: false }));
+        return { error, current };
       }
     };
+
+    const tick = async () => {
+      const result = await load();
+      if (!result.current) return;
+      schedule("status" in result ? delayFor(result.status) : intervalMs);
+    };
+
+    manualRefresh.current = async () => {
+      if (timer !== undefined) clearTimeout(timer);
+      const result = await load();
+      if (result.current) {
+        schedule("status" in result ? delayFor(result.status) : intervalMs);
+      }
+      if ("error" in result) throw result.error;
+      return result.status;
+    };
+
     void tick();
     return () => {
       alive = false;
+      latestRequest.current += 1;
       if (timer !== undefined) clearTimeout(timer);
     };
   }, [client, intervalMs, loadingIntervalMs]);
-  return state;
+
+  const refresh = useCallback(() => manualRefresh.current(), []);
+  return { ...state, refresh };
 }

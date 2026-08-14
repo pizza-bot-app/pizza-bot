@@ -8,6 +8,7 @@ import { isChatModel, OpenAiLangChainModelProvider, retryOutputCap } from "./ope
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("OpenAI model discovery", () => {
@@ -89,6 +90,27 @@ describe("OpenAI model discovery", () => {
       }),
     ]);
     expect(modelsDevFetch).toHaveBeenCalledOnce();
+  });
+
+  it("replaces a cleared custom endpoint with the environment fallback", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "https://openai-fallback.example/v1");
+    const fetchFn = vi.fn(async () => Response.json({ data: [] }));
+    const provider = new OpenAiLangChainModelProvider({
+      apiKey: "test-key",
+      baseUrl: "https://openai-custom.example/v1",
+      fetch: fetchFn,
+    });
+
+    provider.configure({
+      method: "api-key",
+      values: { apiKey: "test-key" },
+    });
+    await provider.listModels();
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://openai-fallback.example/v1/models",
+      expect.any(Object),
+    );
   });
 });
 

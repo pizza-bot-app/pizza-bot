@@ -108,12 +108,20 @@ export function App() {
     () => Promise.all([refreshModels(), refreshAllModels()]),
     [refreshAllModels, refreshModels],
   );
-  const providersAdmin = useProvidersAdmin(client, refreshModelCatalogs);
+  const {
+    status: serverStatus,
+    reachable: serverReachable,
+    refresh: refreshStatus,
+  } = useStatus(client);
+  const providersAdmin = useProvidersAdmin(
+    client,
+    refreshModelCatalogs,
+    refreshStatus,
+  );
   const retryModelCatalogs = useCallback(
     () => Promise.all([retryModels(), retryAllModels()]),
     [retryAllModels, retryModels],
   );
-  const { status: serverStatus, reachable: serverReachable } = useStatus(client);
   const selectableModels = useMemo(
     () =>
       availableModels(
@@ -457,9 +465,8 @@ export function App() {
                 models={selectableModels}
                 allModels={allModels}
                 defaultModel={providersAdmin.defaultModel}
-                onProviderUpdate={providersAdmin.update}
+                onProviderSave={providersAdmin.save}
                 onProviderRemove={providersAdmin.remove}
-                onProviderModelsChange={providersAdmin.setModels}
                 onRetryModels={retryModelCatalogs}
                 onSetDefaultModel={providersAdmin.setDefault}
                 providerStatuses={serverStatus?.inference.providers}
