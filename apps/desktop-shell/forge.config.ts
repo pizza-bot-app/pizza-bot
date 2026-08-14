@@ -17,9 +17,9 @@ const repoRoot = path.resolve(shellRoot, "..", "..");
 
 // Signing credentials come from the repo-root `.env`, which no other build step
 // reads: the api-server's own loader runs in the sidecar at runtime, long after
-// packaging. Without this, an `APPLE_*`-only-in-`.env` setup silently produces
-// unsigned artifacts. `loadEnvFile` never overwrites an exported var, so a shell
-// export or CI secret still wins.
+// packaging. Without this, signing variables stored only in `.env` silently
+// produce unsigned artifacts. `loadEnvFile` never overwrites an exported var, so
+// a shell export or CI secret still wins.
 for (const name of [".env", ".env.local"]) {
   try {
     process.loadEnvFile(path.join(repoRoot, name));
@@ -37,8 +37,26 @@ const isSigning = Boolean(signingIdentity);
 const isNotarizing = Boolean(
   process.env.APPLE_ID && process.env.APPLE_ID_PASSWORD && process.env.APPLE_TEAM_ID,
 );
+const windowsCertificateFile = process.env.WINDOWS_CERTIFICATE_FILE;
+const windowsCertificatePassword = process.env.WINDOWS_CERTIFICATE_PASSWORD;
+if (Boolean(windowsCertificateFile) !== Boolean(windowsCertificatePassword)) {
+  throw new Error(
+    "Windows signing requires WINDOWS_CERTIFICATE_FILE and WINDOWS_CERTIFICATE_PASSWORD",
+  );
+}
+const isWindowsSigning = Boolean(windowsCertificateFile && windowsCertificatePassword);
+const windowsSign = isWindowsSigning
+  ? {
+      certificateFile: windowsCertificateFile,
+      certificatePassword: windowsCertificatePassword,
+      hashes: ["sha256" as const],
+      timestampServer: "http://timestamp.digicert.com",
+      description: "Pizza Bot OSS",
+      website: "https://github.com/pizza-bot-app/pizza-bot",
+    }
+  : undefined;
 
-// Both steps are env-gated and fail open to an unsigned build, so state the
+// The macOS steps are env-gated and fail open to an unsigned build, so state the
 // outcome up front rather than letting it surface as a Gatekeeper error later.
 if (process.platform === "darwin") {
   console.log(
@@ -48,6 +66,11 @@ if (process.platform === "darwin") {
     isNotarizing
       ? `[forge] notarizing as: ${process.env.APPLE_ID}`
       : "[forge] notarization DISABLED",
+  );
+}
+if (process.platform === "win32") {
+  console.log(
+    isWindowsSigning ? "[forge] Windows signing enabled" : "[forge] Windows signing DISABLED",
   );
 }
 
@@ -98,6 +121,7 @@ const config: ForgeConfig = {
         teamId: process.env.APPLE_TEAM_ID!,
       },
     }),
+    ...(windowsSign && { windowsSign }),
   },
 
   makers: [
@@ -121,6 +145,7 @@ const config: ForgeConfig = {
       // nuspec, so override it with a public URL if that leak matters.
       iconUrl:
         process.env.PIZZA_ICON_URL ?? pathToFileURL(path.join(iconsDir, "icon.ico")).href,
+      ...(windowsSign && { windowsSign }),
     }),
     new MakerZIP({}, ["darwin"]),
     new MakerDMG({ format: "ULFO", icon: path.join(iconsDir, "icon-mac.icns") }, ["darwin"]),
@@ -154,7 +179,11 @@ const config: ForgeConfig = {
         process.execPath,
         [
           path.join(repoRoot, "scripts", "third-party-licenses.mjs"),
+          "--artifact",
+          "desktop",
           path.join(repoRoot, "dist", "THIRD_PARTY_LICENSES.txt"),
+          "--plugin-node-modules",
+          path.join(shellRoot, "dist-plugins", "plugins", "node_modules"),
         ],
         { stdio: "inherit", cwd: repoRoot },
       );

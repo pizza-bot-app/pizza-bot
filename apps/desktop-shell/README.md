@@ -115,6 +115,8 @@ When launching only this workspace, run `npm run dev -w @pizza-bot/web` (Vite on
    - macOS signing: `APPLE_SIGNING_IDENTITY` **or** `APPLE_DEVELOPER_NAME` + `APPLE_TEAM_ID`
    - macOS notarization: `APPLE_ID`, `APPLE_ID_PASSWORD` (an app-specific
      password), `APPLE_TEAM_ID`
+   - Windows signing: `WINDOWS_CERTIFICATE_FILE` (a PFX path) and
+     `WINDOWS_CERTIFICATE_PASSWORD`
 2. Bump the workspace versions together (for example,
    `npm version 1.0.1 --workspaces --include-workspace-root --no-git-tag-version`).
 3. Run `npm run desktop:make` from the repository root on each target OS.
@@ -128,9 +130,12 @@ ticket to the `.app` before the makers run, so the DMG and ZIP carry it too;
 verify the result with `spctl -a -vvv --type install <path>.app` (expect
 `source=Notarized Developer ID`).
 
-Release publishing and automatic updates are not configured. Add and verify both
-before presenting installers as self-updating. Windows installers are unsigned,
-so SmartScreen warns on download.
+Tag-driven draft release publishing is configured in
+[`release.yml`](../../.github/workflows/release.yml); see
+[Contributing](../../CONTRIBUTING.md#releases) for signing secrets and the
+release process. Automatic updates are not configured, so installers must not be
+presented as self-updating. Automated releases require Authenticode signing and
+verify the installer signature and timestamp before uploading it.
 
 ## Windows installer lifecycle
 
