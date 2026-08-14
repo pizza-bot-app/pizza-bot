@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mcp-status": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/src/server.js"]
+    }
+  }
+}

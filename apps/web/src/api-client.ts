@@ -745,7 +745,8 @@ export interface SkillSiblingFile {
 
 /**
  * Name, description, body, and declared tools compose `SKILL.md`; `files`
- * contains sibling resources. Only user-sourced bundles are editable.
+ * contains sibling resources. Editing a built-in or plugin bundle creates a
+ * user override.
  */
 export interface SkillBundle {
   id: string;

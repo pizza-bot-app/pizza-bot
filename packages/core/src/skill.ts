@@ -112,7 +112,13 @@ export function composeSkillMd(
   const fm =
     `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n` +
     `${metadataBlock}${toolsBlock}${interruptBlock}---\n`;
-  const trimmed = body.replace(/^\r?\n+/, "").replace(/\s+$/, "");
+  let bodyStart = 0;
+  for (;;) {
+    if (body.startsWith("\r\n", bodyStart)) bodyStart += 2;
+    else if (body.charCodeAt(bodyStart) === 0x0a) bodyStart += 1;
+    else break;
+  }
+  const trimmed = body.slice(bodyStart).trimEnd();
   return trimmed.length > 0 ? `${fm}\n${trimmed}\n` : fm;
 }
 

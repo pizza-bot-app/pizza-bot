@@ -31,8 +31,43 @@ declarative bundles that contribute two resource kinds:
 A manifest lives at `<plugin>/.claude-plugin/plugin.json`. Unsupported fields
 (such as `commands` or a `pizzaBot.ui` block) are parsed and dropped rather than
 rejected, so a Claude Code plugin that carries them still loads — but the host
-executes no plugin-supplied web components. The shipped `example-mcp-status`
-plugin is the reference bundle.
+executes no plugin-supplied web components.
+
+The complete [MCP status example](../examples/plugins/mcp-status) is a small,
+self-contained reference plugin with a manifest, MCP server, and matching
+skill. It has no install step or external dependencies, so it can be copied or
+zipped as-is when starting a plugin.
+
+## Bundled Plugins
+
+`playwright-mcp` provides browser automation through a locked
+`@playwright/mcp` dependency and a matching `browser-automation` Agent Skill.
+The skill uses accessibility snapshots for interaction and omits Playwright
+MCP's RCE-equivalent unsafe-code tool.
+
+The launcher uses an installed Chrome, Edge, or Chromium when it finds one.
+When running from source, it falls back to the exact Chrome for Testing revision
+downloaded for the locked Playwright dependency:
+
+```bash
+npm run browser:install
+```
+
+`npm run dev` runs that command automatically before starting the application.
+It returns immediately when the exact executable is already cached. On a cold
+cache it invokes Playwright's installer, downloads the browser, and requires
+network access.
+
+Pizza Bot installers do not include Chrome for Testing or another browser. A
+packaged app uses Chrome, Edge, or Chromium already installed on the machine
+(or the matching Chrome for Testing revision if it already exists in
+Playwright's cache). If none is available, install one of those supported
+browsers and reconnect the Playwright MCP server.
+
+Playwright's npm packages do not download browsers from an install or
+postinstall script. The root `allowScripts` policy and the packager's
+`--ignore-scripts` option therefore do not control browser installation;
+`npm run browser:install` is the explicit, repository-owned download.
 
 ## Materialized plugins
 

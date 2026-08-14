@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -41,8 +42,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # turbo run test --concurrency=2 — the cap keeps the parallel vitest
-      # workers from exhausting CI resources (see package.json).
+      # Includes license-generator tests before the capped Turbo suite; the cap
+      # keeps parallel vitest workers from exhausting CI resources.
       - name: Test
         run: npm test
 

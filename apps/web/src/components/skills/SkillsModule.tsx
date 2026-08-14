@@ -2,7 +2,6 @@ import type { SkillCatalogInfo, SkillBundle, SkillDraft, ToolCatalogInfo } from 
 import { useRef, useState, type ChangeEvent } from "react";
 import { BookOpen, LoaderCircle, Upload } from "lucide-react";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
-import { SkillCard } from "./SkillCard.js";
 import { SkillEditor } from "./SkillEditor.js";
 import { ResourceModule } from "../ResourceModule.js";
 import { ResourceList } from "../ResourceList.js";
@@ -115,12 +114,11 @@ export function SkillsModule({
           )}
         />
       )}
-      renderDetail={({ selection, selected, setSelection, backToList, confirmAction }) => (
+      renderDetail={({ selection, selected, setSelection, confirmAction }) => (
         <SkillDetail
           selection={selection}
           selected={selected}
           setSelection={setSelection}
-          backToList={backToList}
           confirmAction={confirmAction}
           tools={tools}
           onCreate={onCreate}
@@ -195,7 +193,6 @@ function SkillDetail({
   selection,
   selected,
   setSelection,
-  backToList,
   confirmAction,
   tools,
   onCreate,
@@ -208,7 +205,6 @@ function SkillDetail({
   selection: import("../ResourceModule.js").ResourceSelection;
   selected: SkillEntry | null;
   setSelection: (next: import("../ResourceModule.js").ResourceSelection) => void;
-  backToList?: () => void;
   confirmAction: (
     message: string,
     action: () => Promise<unknown>,
@@ -220,8 +216,6 @@ function SkillDetail({
     },
   ) => Promise<void>;
 } & Pick<SkillsModuleProps, "tools" | "onCreate" | "onUpdate" | "onSetEnabled" | "onDelete" | "onGetBundle" | "onGenerate">) {
-  const isUser = selected?.source === "user";
-  const isEditable = isUser || selected?.source === "builtin";
   const bundle = useKeyedDoc(
     selection?.mode === "view" && selected ? selected.id : null,
     onGetBundle,
@@ -278,7 +272,7 @@ function SkillDetail({
       />
     );
   }
-  if (selected && isEditable) {
+  if (selected) {
     if (!bundle) {
       return (
         <ResourceEditorSkeleton
@@ -290,7 +284,8 @@ function SkillDetail({
         </ResourceEditorSkeleton>
       );
     }
-    const removal = isUser ? skillRemovalPresentation(selected) : undefined;
+    const removal =
+      selected.source === "user" ? skillRemovalPresentation(selected) : undefined;
     return (
       <SkillEditor
         key={bundle.id}
@@ -320,11 +315,6 @@ function SkillDetail({
           : {})}
         onCancel={() => setSelection(null)}
       />
-    );
-  }
-  if (selected) {
-    return (
-      <SkillCard skill={selected} content={bundle} enablement={enablement} onBack={backToList} />
     );
   }
   return null;

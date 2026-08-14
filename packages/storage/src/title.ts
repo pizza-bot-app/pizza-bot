@@ -17,7 +17,11 @@ export function cleanTitle(raw: string | undefined | null): string | undefined {
   const quotes = /^["'“”‘’](.*)["'“”‘’]$/;
   const m = quotes.exec(t);
   if (m) t = m[1]!.trim();
-  t = t.replace(/[.!?,;:]+$/, "").trim();
+  let punctuationStart = t.length;
+  while (punctuationStart > 0 && ".!?,;:".includes(t[punctuationStart - 1]!)) {
+    punctuationStart--;
+  }
+  t = t.slice(0, punctuationStart).trim();
   if (!t) return undefined;
   return t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX).trimEnd()}…` : t;
 }

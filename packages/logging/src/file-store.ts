@@ -190,5 +190,10 @@ function listLogFiles(logsDir: string): Array<{ path: string; size: number; mtim
 }
 
 function safeSegment(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "app";
+  const normalized = value.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-");
+  let start = 0;
+  let end = normalized.length;
+  while (normalized[start] === "-") start++;
+  while (normalized[end - 1] === "-") end--;
+  return normalized.slice(start, end) || "app";
 }

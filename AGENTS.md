@@ -87,10 +87,10 @@ frontend consumes them through the `@langchain/langgraph-sdk`
 
 ## Testing
 
-- **`npm test` is the supported entrypoint** — it runs `turbo run test
-  --concurrency=2`; the cap is deliberate (uncapped, the parallel vitest+esbuild
-  workers can exhaust file descriptors / memory and fail en masse). CI runs the
-  same command.
+- **`npm test` is the supported entrypoint** — it runs the license-generator
+  tests, then `turbo run test --concurrency=2`; the cap is deliberate (uncapped,
+  the parallel vitest+esbuild workers can exhaust file descriptors / memory and
+  fail en masse). CI runs the same command.
 - For a tight iteration loop, run one workspace directly:
   `npx vitest run --dir packages/<pkg>` (or `--dir apps/web`).
 - Typecheck a package with `npx tsc --noEmit -p <path>/tsconfig.json`, or the

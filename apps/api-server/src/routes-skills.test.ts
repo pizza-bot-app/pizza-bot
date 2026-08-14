@@ -1,13 +1,26 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import {
+  ContributionRegistry,
+  FsPluginLoader,
+  loadSkillCatalog,
+  loadUserSkills,
+  mergeSkillCatalogs,
+} from "@pizza-bot/plugin-sdk";
 import type { AgentHost } from "./agent-host.js";
 import { skillRoutes } from "./routes-skills.js";
 import { storedZip } from "./test-utils/stored-zip.js";
 import { MAX_SKILL_ARCHIVE_BYTES } from "./skill-import.js";
 import { multipartRequestLimit } from "./request-limits.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PLUGIN_FIXTURE = resolve(
+  __dirname,
+  "../../../examples/plugins/mcp-status",
+);
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -23,6 +36,33 @@ async function fixture(
     skillsDirectory: async () => skillsDir,
     skillFor,
     reloadSkills: async () => {},
+    clearUserSkillPreference: () => {},
+  } as unknown as AgentHost;
+  return { app: skillRoutes(host), skillsDir };
+}
+
+async function realPluginFixture() {
+  const skillsDir = await mkdtemp(join(tmpdir(), "pizza-skill-routes-"));
+  roots.push(skillsDir);
+
+  const loader = new FsPluginLoader();
+  const registry = new ContributionRegistry();
+  const manifest = await loader.readManifest(
+    join(PLUGIN_FIXTURE, ".claude-plugin", "plugin.json"),
+  );
+  await loader.load(manifest, PLUGIN_FIXTURE, registry);
+  const pluginSkills = await loadSkillCatalog(registry);
+  let catalog = pluginSkills;
+
+  const host = {
+    skillsDirectory: async () => skillsDir,
+    skillFor: async (id: string) => catalog.get(id),
+    reloadSkills: async () => {
+      catalog = mergeSkillCatalogs(
+        pluginSkills,
+        await loadUserSkills(skillsDir),
+      );
+    },
     clearUserSkillPreference: () => {},
   } as unknown as AgentHost;
   return { app: skillRoutes(host), skillsDir };
@@ -146,13 +186,14 @@ describe("skill routes", () => {
   });
 
   it("creates a user override when patching a built-in skill", async () => {
+    const source = "builtin";
     const { app, skillsDir } = await fixture(async (id) =>
-      id === "builtin-reviewer"
+      id === `${source}-reviewer`
         ? {
             id,
-            name: "Built-in Reviewer",
-            description: "Built-in review.",
-            source: "builtin",
+            name: "Shipped Reviewer",
+            description: "Shipped review.",
+            source,
             files: [],
             declaredTools: [],
             interruptOn: {},
@@ -160,11 +201,11 @@ describe("skill routes", () => {
         : undefined,
     );
 
-    const response = await app.request("/skills/builtin-reviewer", {
+    const response = await app.request(`/skills/${source}-reviewer`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        name: "Built-in Reviewer",
+        name: "Shipped Reviewer",
         description: "Customized review.",
         body: "# Review",
       }),
@@ -173,37 +214,98 @@ describe("skill routes", () => {
     expect(response.status).toBe(200);
     expect(
       await readFile(
-        join(skillsDir, "builtin-reviewer", "SKILL.md"),
+        join(skillsDir, `${source}-reviewer`, "SKILL.md"),
         "utf8",
       ),
     ).toContain('description: "Customized review."');
   });
 
-  it("exposes the shipped source hidden by a user override", async () => {
-    const { app } = await fixture(async (id) =>
-      id === "builtin-reviewer"
-        ? {
-            id,
-            name: "Built-in Reviewer",
-            description: "Customized review.",
-            source: "user",
-            overrides: "builtin",
-            files: [],
-            declaredTools: [],
-            interruptOn: {},
-          }
-        : undefined,
-    );
+  it("reloads a patched plugin skill as a user override with plugin provenance", async () => {
+    const { app, skillsDir } = await realPluginFixture();
 
-    const response = await app.request("/skills/builtin-reviewer");
+    const response = await app.request("/skills/health-report", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Health Report",
+        description: "Customized health report.",
+        body: "# Customized Health Report",
+      }),
+    });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      id: "builtin-reviewer",
+      id: "health-report",
+      description: "Customized health report.",
       source: "user",
-      overrides: "builtin",
+      overrides: "plugin",
+    });
+    expect(
+      await readFile(join(skillsDir, "health-report", "SKILL.md"), "utf8"),
+    ).toContain('description: "Customized health report."');
+
+    const reloaded = await app.request("/skills/health-report");
+    expect(await reloaded.json()).toMatchObject({
+      id: "health-report",
+      source: "user",
+      overrides: "plugin",
     });
   });
+
+  it("continues to patch an existing standalone custom skill", async () => {
+    const { app, skillsDir } = await fixture();
+    const dir = join(skillsDir, "custom-reviewer");
+    await mkdir(dir);
+    await writeFile(
+      join(dir, "SKILL.md"),
+      "---\nname: custom-reviewer\ndescription: Original review.\n---\n",
+      "utf8",
+    );
+
+    const response = await app.request("/skills/custom-reviewer", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Custom Reviewer",
+        description: "Updated review.",
+        body: "# Review",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await readFile(join(dir, "SKILL.md"), "utf8")).toContain(
+      'description: "Updated review."',
+    );
+  });
+
+  it.each(["builtin", "plugin"] as const)(
+    "exposes the %s source hidden by a user override",
+    async (overrides) => {
+      const { app } = await fixture(async (id) =>
+        id === "customized-reviewer"
+          ? {
+              id,
+              name: "Customized Reviewer",
+              description: "Customized review.",
+              source: "user",
+              overrides,
+              files: [],
+              declaredTools: [],
+              interruptOn: {},
+            }
+          : undefined,
+      );
+
+      const response = await app.request("/skills/customized-reviewer");
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        id: "customized-reviewer",
+        source: "user",
+        overrides,
+      });
+    },
+  );
 
   it("writes a spec name, display metadata, and YAML-safe description", async () => {
     const { app, skillsDir } = await fixture();

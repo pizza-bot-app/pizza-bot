@@ -1,8 +1,8 @@
 # Built-in Agent Skills
 
-This directory is the source location for optional source-controlled **Agent
-Skills** shipped with the application. It may be empty; the example skills in
-this repository are bundled by plugins. Each built-in skill uses a `SKILL.md`
+This directory is the source location for source-controlled **Agent Skills**
+shipped with the application. Additional skills in this repository are bundled
+by plugins. Each built-in skill uses a `SKILL.md`
 ([Anthropic's convention](https://www.anthropic.com/news/skills)) plus optional
 sibling files.
 
@@ -17,12 +17,12 @@ remain available to the worker when its instructions call for them.
 **Three catalogs merge into one**, resolved at startup:
 
 1. **Built-in** — this directory, via `loadBuiltinSkills()`.
-2. **Plugin** — skills shipped by installed plugins, via `loadSkillCatalog()`
-   (read-only).
+2. **Plugin** — skills contributed by installed plugins, via
+   `loadSkillCatalog()` (the installed source remains read-only).
 3. **User** — `<data-root>/skills` (`~/.pizza-bot-oss/skills` by default), via
    `loadUserSkills()`.
 
-User skills win on an id collision, so editing a built-in or plugin skill creates
+User skills win on an id collision, so editing a Built-in or Plugin skill creates
 a user override. The runtime projects enabled, ready entries from the merged
 catalog into workers and seeds each bundle into run state so DeepAgents'
 StateBackend can serve it — see
@@ -48,8 +48,7 @@ server and tool is enabled and connected.
 User skills are editable through `POST/PATCH/DELETE /skills` (the **Skills**
 library UI, or the API directly) — a write is live on response: the server
 rewrites the bundle under `<data-root>/skills`, re-scans that directory, and
-rebuilds the agents so the change is seeded into the next run. Editing a built-in
-skill creates a user override; deleting the override reveals the built-in version
-again. Plugin-shipped skills are read-only. Override the user directory with
-`PIZZA_SKILLS_DIR` and this built-in directory with
-`PIZZA_BUILTIN_SKILLS_DIR`.
+rebuilds the agents so the change is seeded into the next run. Editing a
+Built-in or Plugin skill creates a user override; deleting the override reveals
+the original version again. Override the user directory with
+`PIZZA_SKILLS_DIR` and this built-in directory with `PIZZA_BUILTIN_SKILLS_DIR`.

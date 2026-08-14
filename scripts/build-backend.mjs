@@ -54,7 +54,12 @@ execFileSync(
 for (const name of ["LICENSE", "NOTICE"]) {
   cpSync(path.join(repoRoot, name), path.join(outputDir, name));
 }
-generateThirdPartyLicenses(path.join(outputDir, "THIRD_PARTY_LICENSES.txt"));
+generateThirdPartyLicenses(path.join(outputDir, "THIRD_PARTY_LICENSES.txt"), {
+  artifact: "backend",
+  pluginNodeModulesDirs: [
+    path.join(outputDir, "plugins", "node_modules"),
+  ],
+});
 
 const rootPackage = JSON.parse(
   readFileSync(path.join(repoRoot, "package.json"), "utf8"),

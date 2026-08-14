@@ -1,0 +1,12 @@
+{
+  "name": "playwright-mcp",
+  "version": "1.0.0",
+  "displayName": "Playwright Browser Automation",
+  "description": "Browser automation and inspection through Playwright MCP.",
+  "author": { "name": "Pizza Bot OSS" },
+  "homepage": "https://github.com/microsoft/playwright-mcp",
+  "license": "Apache-2.0",
+  "keywords": ["browser", "automation", "playwright", "testing"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}
