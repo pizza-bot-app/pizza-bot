@@ -100,6 +100,60 @@ describe("Bedrock Mantle discovery", () => {
 });
 
 describe("Bedrock Mantle invocation", () => {
+  it("streams xAI models through the OpenAI-namespaced Responses endpoint", async () => {
+    const requests: Array<{
+      url: string;
+      authorization: string | null;
+      hasTool: boolean;
+    }> = [];
+    const fetchFn = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/models")) {
+        return new Response(JSON.stringify({
+          data: [{ id: "xai.grok-4.3", display_name: "Grok 4.3" }],
+        }), { status: 200 });
+      }
+      requests.push({
+        url,
+        authorization: new Headers(init?.headers).get("authorization"),
+        hasTool: String(init?.body).includes("lookup"),
+      });
+      return new Response(JSON.stringify({
+        error: { message: "stop", type: "invalid_request_error" },
+      }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const provider = new BedrockLangChainModelProvider({
+      region: "us-west-2",
+      client: {
+        send: vi.fn(async (command: unknown) =>
+          command?.constructor.name === "ListInferenceProfilesCommand"
+            ? { inferenceProfileSummaries: [] }
+            : { modelSummaries: [] }),
+      },
+      fetch: fetchFn,
+      modelsDevFetch: vi.fn(async () =>
+        new Response(JSON.stringify({}), { status: 200 })),
+    });
+    provider.configure({
+      method: "bedrock-api-key",
+      values: { apiKey: "bedrock-key" },
+    });
+    await provider.listModels();
+
+    const model = await provider.buildModel("xai.grok-4.3");
+    await expect(collect(model.bindTools!([TEST_TOOL]).stream("hello")))
+      .rejects.toThrow("stop");
+
+    expect(requests).toEqual([{
+      url: "https://bedrock-mantle.us-west-2.api.aws/openai/v1/responses",
+      authorization: "Bearer bedrock-key",
+      hasTool: true,
+    }]);
+  });
+
   it("streams other model families through the regional Chat Completions endpoint", async () => {
     const requests: Array<{
       url: string;

@@ -549,6 +549,7 @@ function defaultProtocol(modelId: string): BedrockProtocol {
 }
 
 function mantleProtocol(modelId: string): BedrockProtocol {
+  if (modelId.toLowerCase().startsWith("xai.")) return "responses";
   const protocol = defaultProtocol(modelId);
   return protocol === "converse" ? "chat-completions" : protocol;
 }

@@ -535,11 +535,11 @@ adapter (`inference-providers/providers/bedrock`) owns the `maxTokens` default
 reasoning-replay shim. It also combines native Bedrock discovery with Mantle's
 regional `/v1/models` catalog and records the protocol supplied by each source:
 inference profiles and other native models use Converse, raw OpenAI model
-families use Responses, raw Anthropic model families use Messages, and other
-Mantle model families use Chat Completions. Mantle catalog entries retain the
-protocol family exposed by that catalog. The regional Mantle host and protocol
-paths are Bedrock concerns, and its HTTP transport supports both Bedrock API keys
-and SigV4 credentials. The OpenAI adapter
+families and xAI use Responses, raw Anthropic model families use Messages, and
+other Mantle model families use Chat Completions. Mantle catalog entries retain
+the protocol family exposed by that catalog. The regional Mantle host and
+protocol paths are Bedrock concerns, and its HTTP transport supports both Bedrock
+API keys and SigV4 credentials. The OpenAI adapter
 independently selects Automatic, Responses, or Chat Completions for custom
 compatible endpoints. The Anthropic adapter likewise owns custom Messages API
 endpoints and `x-api-key` versus bearer authentication.
