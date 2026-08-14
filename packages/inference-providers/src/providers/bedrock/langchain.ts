@@ -37,7 +37,7 @@ import { createAnthropicChatModel } from "../anthropic.js";
 import { createOpenAiChatModel } from "../openai.js";
 import { createSigV4Fetch, mantleEndpoint } from "./mantle.js";
 
-type BedrockProtocol = "converse" | "responses" | "messages";
+type BedrockProtocol = "converse" | "responses" | "chat-completions" | "messages";
 
 interface RoutedModel {
   descriptor: ModelDescriptor;
@@ -274,7 +274,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     }
     const descriptor = this.descriptors.get(modelId);
     const protocol = this.protocols.get(modelId) ?? defaultProtocol(modelId);
-    if (protocol === "responses") {
+    if (protocol === "responses" || protocol === "chat-completions") {
       const configuredMax = Math.min(
         this.maxTokens,
         descriptor?.maxOutputTokens ?? Number.POSITIVE_INFINITY,
@@ -286,8 +286,10 @@ export class BedrockLangChainModelProvider implements ModelProvider {
           configuredMax,
           this.learnedMaxTokens.get(modelId) ?? Number.POSITIVE_INFINITY,
         ),
-        apiMode: "responses",
-        baseUrl: `${mantleEndpoint(this.region)}/openai/v1`,
+        apiMode: protocol,
+        baseUrl: protocol === "responses"
+          ? `${mantleEndpoint(this.region)}/openai/v1`
+          : `${mantleEndpoint(this.region)}/v1`,
         fetch: await this.mantleFetch(),
         learnedMaxTokens: this.learnedMaxTokens,
         ...(descriptor ? { descriptor } : {}),
@@ -407,9 +409,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
           displayName: `${model.display_name ?? model.id} (Bedrock)`,
           supportsTools: true,
         },
-        protocol: model.id.toLowerCase().startsWith("anthropic.")
-          ? "messages"
-          : "responses",
+        protocol: mantleProtocol(model.id),
       }];
     });
   }
@@ -546,6 +546,11 @@ function defaultProtocol(modelId: string): BedrockProtocol {
   if (id.startsWith("openai.")) return "responses";
   if (id.startsWith("anthropic.")) return "messages";
   return "converse";
+}
+
+function mantleProtocol(modelId: string): BedrockProtocol {
+  const protocol = defaultProtocol(modelId);
+  return protocol === "converse" ? "chat-completions" : protocol;
 }
 
 function protocolDisplayName(
