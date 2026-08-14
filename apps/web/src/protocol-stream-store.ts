@@ -349,9 +349,7 @@ export class ProtocolStreamStore {
       };
     }
 
-    // Cancellation has no error payload and intentionally resolves to idle.
-    // Temporary SDK compatibility path. Exit criteria: remove when a successful
-    // StreamController hydration clears the preceding root error.
+    // A successful hydration can briefly retain the error that triggered it.
     const rootError =
       root.error && root.error !== e.resolvedHydrationError ? root.error : undefined;
     const status: StreamStatus = e.hydrationStatus === "error" || rootError

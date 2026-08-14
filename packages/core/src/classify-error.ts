@@ -57,6 +57,7 @@ export function classifyError(err: unknown): ErrorCode {
   if (
     m.includes("context length") ||
     m.includes("context window") ||
+    (m.includes("context size") && m.includes("exceed")) ||
     m.includes("prompt is too long") ||
     m.includes("input is too long") ||
     m.includes("too many tokens") ||

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ContextOverflowError } from "@langchain/core/errors";
 import { HumanMessage } from "@langchain/core/messages";
 import {
   convertMessagesToCompletionsMessageParams,
@@ -139,20 +140,57 @@ describe("OpenAI model construction", () => {
     await expect(provider.buildModel("private-deployment")).resolves.toBeDefined();
   });
 
-  it("projects catalog context into the model profile", async () => {
+  it("keeps catalog context windows model-specific", async () => {
     const provider = new OpenAiLangChainModelProvider({
       apiKey: "test-key",
+      models: [
+        {
+          id: "custom-chat-model",
+          provider: "openai",
+          displayName: "Custom Chat Model",
+          contextWindow: 40_960,
+        },
+        {
+          id: "small-chat-model",
+          provider: "openai",
+          displayName: "Small Chat Model",
+          contextWindow: 16_384,
+        },
+      ],
+    });
+
+    const [custom, small] = await Promise.all([
+      provider.buildModel("custom-chat-model"),
+      provider.buildModel("small-chat-model"),
+    ]);
+
+    expect(custom.profile.maxInputTokens).toBe(40_960);
+    expect(small.profile.maxInputTokens).toBe(16_384);
+  });
+
+  it("normalizes compatible endpoint context errors for summarization recovery", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      openAiError(
+        "request (43448 tokens) exceeds the available context size (32768 tokens)",
+      ),
+    ));
+    const provider = new OpenAiLangChainModelProvider({
+      apiKey: "test-key",
+      baseUrl: "https://proxy.example/v1",
+      apiMode: "chat-completions",
       models: [{
         id: "custom-chat-model",
         provider: "openai",
         displayName: "Custom Chat Model",
-        contextWindow: 40_960,
       }],
     });
 
     const model = await provider.buildModel("custom-chat-model");
+    const failure = consume(model.stream("hello")).catch((error: unknown) => error);
 
-    expect(model.profile.maxInputTokens).toBe(40_960);
+    await expect(failure).resolves.toSatisfy((error: unknown) =>
+      ContextOverflowError.isInstance(error),
+    );
   });
 
   it("uses Responses for the configured API mode, including output-cap retries", async () => {

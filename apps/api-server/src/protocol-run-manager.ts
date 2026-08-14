@@ -362,7 +362,7 @@ export class ProtocolRunManager {
           state,
           this.stamp(
             makeLifecycleFrame("failed", {
-              message: err instanceof Error ? err.message : String(err),
+              error: err instanceof Error ? err.message : String(err),
               code: classifyError(err),
             }),
             state.runId,
@@ -382,13 +382,12 @@ export class ProtocolRunManager {
       failed,
     });
     if (synthesize === "cancelled") {
-      // The SDK has no cancelled lifecycle and only clears loading on a terminal
-      // completed/failed frame. The CANCELLED code preserves the actual outcome.
+      // The protocol has no cancelled lifecycle; a requested stop is successful
+      // for clients while the run registry retains the cancelled outcome.
       this.append(
         state,
         this.stamp(
-          makeLifecycleFrame("failed", {
-            message: "Run cancelled",
+          makeLifecycleFrame("completed", {
             code: "CANCELLED",
           }),
           state.runId,

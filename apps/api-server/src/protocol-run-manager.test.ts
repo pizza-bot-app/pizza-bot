@@ -395,8 +395,8 @@ describe("ProtocolRunManager", () => {
       (e) => e.method === "lifecycle" && e.params.namespace.length === 0 && (e.params.data as { event?: string }).event === "failed",
     );
     expect(failed).toBeDefined();
-    const data = failed!.params.data as { message?: string; code?: string };
-    expect(data.message).toContain("rate limit");
+    const data = failed!.params.data as { error?: string; code?: string };
+    expect(data.error).toContain("rate limit");
     expect(data.code).toBe("RATE_LIMIT");
   });
 
@@ -419,9 +419,9 @@ describe("ProtocolRunManager", () => {
       (e) => e.method === "lifecycle" && e.params.namespace.length === 0 && (e.params.data as { event?: string }).event === "failed",
     );
     expect(failed).toBeDefined();
-    const data = failed!.params.data as { message?: string; code?: string };
+    const data = failed!.params.data as { error?: string; code?: string };
     expect(data.code).toBe("MODEL_UNAVAILABLE");
-    expect(data.message).toContain("could not be built");
+    expect(data.error).toContain("could not be built");
   });
 
   it("onEnd reports status=cancelled when a run is superseded/cancelled", async () => {
@@ -597,7 +597,7 @@ describe("ProtocolRunManager", () => {
     release();
   });
 
-  it("an explicit cancel emits a terminal root lifecycle:failed(CANCELLED) frame", async () => {
+  it("an explicit cancel emits a completed terminal without surfacing an SDK error", async () => {
     const streamFn = (_i: RunInput, opts: RunOptions): AsyncIterable<ProtocolEvent> => ({
       async *[Symbol.asyncIterator]() {
         yield frame("messages", []);
@@ -616,7 +616,7 @@ describe("ProtocolRunManager", () => {
     await tick();
     const frames = await drainAll((sig) => mgr.observe("t8b", { channels: ["lifecycle"] }, sig));
     const terminal = frames.find(
-      (e) => e.method === "lifecycle" && e.params.namespace.length === 0 && (e.params.data as { event?: string }).event === "failed",
+      (e) => e.method === "lifecycle" && e.params.namespace.length === 0 && (e.params.data as { event?: string }).event === "completed",
     );
     expect(terminal).toBeDefined();
     expect((terminal!.params.data as { code?: string }).code).toBe("CANCELLED");
