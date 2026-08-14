@@ -33,6 +33,7 @@ import { protocolStreamStore } from "../protocol-stream-store.js";
 import { createConversationSearch } from "../conversation-search.js";
 import { ConfirmationDialog } from "./ConfirmationDialog.js";
 import { useAppToast } from "./AppToast.js";
+import { SwipeToDelete } from "./SwipeToDelete.js";
 
 export interface SidebarProps {
   client: ApiClient;
@@ -77,6 +78,7 @@ export function Sidebar({
     () => new Set<string>(["Last Week", "This Month", "Older"]),
   );
   const [confirmDelete, setConfirmDelete] = useState<ThreadInfo | null>(null);
+  const [swipedThreadId, setSwipedThreadId] = useState<string | null>(null);
   const threadListRef = useRef<HTMLDivElement | null>(null);
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null);
   const deleteDialogWasOpen = useRef(false);
@@ -488,56 +490,65 @@ export function Sidebar({
                             aria-selected={t.threadId === activeThreadId}
                             onClick={() => listNavigation.selectItem(t.threadId)}
                           >
-                            {/* A div permits sibling pin/delete buttons without invalid button nesting. */}
-                            <div
-                              className={`thread-row${t.threadId === activeThreadId ? " active" : ""}${unread ? " unread" : ""}`}
+                            <SwipeToDelete
+                              open={swipedThreadId === t.threadId}
+                              label={t.title}
+                              onOpenChange={(open) =>
+                                setSwipedThreadId(open ? t.threadId : null)
+                              }
+                              onDelete={() => setConfirmDelete(t)}
                             >
-                              <span className="thread-main">
-                                <span className="thread-line1">
-                                  {running && <Pen size={13} className="thread-running-icon" />}
-                                  {unread && !running && (
-                                    <span className="thread-unread-dot" aria-label="Unread" />
-                                  )}
-                                  <span className="thread-title">{t.title}</span>
-                                  <span className="thread-time">
-                                    {running ? "now" : relativeTime(t.lastActivityAt)}
+                              {/* A div permits sibling pin/delete buttons without invalid button nesting. */}
+                              <div
+                                className={`thread-row${t.threadId === activeThreadId ? " active" : ""}${unread ? " unread" : ""}`}
+                              >
+                                <span className="thread-main">
+                                  <span className="thread-line1">
+                                    {running && <Pen size={13} className="thread-running-icon" />}
+                                    {unread && !running && (
+                                      <span className="thread-unread-dot" aria-label="Unread" />
+                                    )}
+                                    <span className="thread-title">{t.title}</span>
+                                    <span className="thread-time">
+                                      {running ? "now" : relativeTime(t.lastActivityAt)}
+                                    </span>
                                   </span>
+                                  {t.lastMessage && (
+                                    <span className="thread-preview">{t.lastMessage}</span>
+                                  )}
                                 </span>
-                                {t.lastMessage && (
-                                  <span className="thread-preview">{t.lastMessage}</span>
+                                {needsAction && (
+                                  <span className="thread-action-pill" title="Awaiting your response">
+                                    Action
+                                  </span>
                                 )}
-                              </span>
-                              {needsAction && (
-                                <span className="thread-action-pill" title="Awaiting your response">
-                                  Action
+                                {t.source === "fork" && <span className="thread-badge">⑂</span>}
+                                <span className="thread-actions">
+                                  <button
+                                    className={`thread-action${t.pinned ? " pinned" : ""}`}
+                                    aria-label={t.pinned ? "Unpin conversation" : "Pin conversation"}
+                                    title={t.pinned ? "Unpin" : "Pin"}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void onPinToggle(t);
+                                    }}
+                                  >
+                                    {t.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+                                  </button>
+                                  <button
+                                    className="thread-action danger"
+                                    aria-label="Delete conversation"
+                                    title="Delete"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setConfirmDelete(t);
+                                    }}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
                                 </span>
-                              )}
-                              {t.source === "fork" && <span className="thread-badge">⑂</span>}
-                              <span className="thread-actions">
-                                <button
-                                  className={`thread-action${t.pinned ? " pinned" : ""}`}
-                                  aria-label={t.pinned ? "Unpin conversation" : "Pin conversation"}
-                                  title={t.pinned ? "Unpin" : "Pin"}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void onPinToggle(t);
-                                  }}
-                                >
-                                  {t.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-                                </button>
-                                <button
-                                  className="thread-action danger"
-                                  aria-label="Delete conversation"
-                                  title="Delete"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setConfirmDelete(t);
-                                  }}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </span>
-                            </div>
+                              </div>
+                            </SwipeToDelete>
                           </li>
                         );
                       })}
