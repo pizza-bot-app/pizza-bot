@@ -63,18 +63,22 @@ access keys, or a Bedrock API key, with an optional region override; otherwise
 the regional Mantle catalog and routes models through Converse, OpenAI
 Responses or Chat Completions, or Anthropic Messages according to their
 advertised API family.
-OpenAI and Anthropic also accept custom Base URLs for compatible endpoints;
+OpenAI and Anthropic also accept custom base URLs for compatible endpoints;
 OpenAI can explicitly select Responses or Chat Completions, and Anthropic
 supports `x-api-key` or bearer authentication. Select a model with
-`PIZZA_MODEL=<provider>:<id>`. Desktop-entered secrets go to the OS keychain;
-server configuration persists only environment-variable references.
+`PIZZA_MODEL=<provider>:<id>`. The desktop protects entered secrets with
+Electron `safeStorage`; server configuration persists only environment-variable
+references.
 
 ## Extend it
 
 Add MCP servers from the UI or `<PIZZA_DATA_ROOT>/.mcp.json`. Add Agent Skills
 under `<PIZZA_DATA_ROOT>/skills`, or install plugins that package MCP servers and
 skills together. Skills become available after their declared tools are enabled
-and connected.
+and connected. A custom skill can replace a Built-in or Plugin skill with the
+same id without modifying the original; removing the customization reveals the
+Built-in or Plugin version again. The Built-in **Pizza Bot Guide** can explain
+features, suggest workflows, help with setup, and point to project documentation.
 
 See [Extending Pizza Bot](docs/EXTENDING.md) for configuration, environment
 references, skill authoring, approval gates, and plugin installation.
@@ -84,8 +88,8 @@ references, skill authoring, approval gates, and plugin installation.
 ```text
 apps/        api-server (Hono) | cli | desktop-shell (Electron) | web (React)
 packages/    core | runtime-langgraph | inference-providers | plugin-sdk | storage | logging
-plugins/     shipped plugin bundles
-skills/      optional built-in Agent Skills
+plugins/     bundled Plugin packages and their packaging workspace
+skills/      optional Built-in Agent Skills
 tests/       LangGraph compatibility and protocol conformance
 ```
 
@@ -102,10 +106,14 @@ bindings.
 - **[Standalone backend](docs/STANDALONE_BACKEND.md)** - authentication, remote
   Electron, static browser deployment, Docker, systemd, and Caddy.
 - **[Contributing](CONTRIBUTING.md)** - development setup, CI checks, worktrees,
-  and layering rules.
+  releases, and layering rules.
 - **[Security](SECURITY.md)** - network defaults, credentials, local data, and
   plugin trust.
 - **[Logging](docs/LOGGING.md)** - diagnostics, retention, viewing, and redaction.
+- **[Roadmap](ROADMAP.md)** - exploratory directions and the principles used to
+  evaluate them.
+- **[Code of Conduct](CODE_OF_CONDUCT.md)** - community participation
+  expectations.
 
 ## Security and data
 
@@ -145,4 +153,4 @@ Thank you to everyone who contributed.
 
 ## License
 
-[Apache-2.0](LICENSE).
+[Apache-2.0](LICENSE). See [NOTICE](NOTICE) for attribution notices.

@@ -35,11 +35,11 @@ npm run backend:bundle
 npm run backend:smoke
 ```
 
-The artifact contains the bundled API server, shipped skills and plugins,
-deduplicated plugin runtime dependencies, Linux and build-host
-`better-sqlite3` prebuilds, project and third-party license inventories, and a
-`start.mjs` launcher. The smoke command starts that launcher on an ephemeral
-port and exercises authenticated HTTP and SSE requests.
+The artifact contains the bundled API server, **Built-in** skills, bundled
+**Plugin** packages, deduplicated plugin runtime dependencies, Linux and
+build-host `better-sqlite3` prebuilds, project and third-party license
+inventories, and a `start.mjs` launcher. The smoke command starts that launcher
+on an ephemeral port and exercises authenticated HTTP and SSE requests.
 
 Run it directly with:
 
@@ -101,7 +101,7 @@ Electron remembers the selection. On the next launch it connects to the remote
 backend without starting the embedded backend or its child services. Switching
 back to **Embedded** starts the local backend immediately.
 
-The saved remote token is encrypted with Electron `safeStorage`. The backend
+The saved remote token is protected with Electron `safeStorage`. The backend
 still treats it as one shared bearer token with full API access.
 
 ### Verify the backend directly
@@ -150,7 +150,14 @@ The Vite proxy does not inject authentication.
 
 ### Static browser deployment
 
-Build the web workspace and replace `dist/pizza-config.js` at deploy time:
+Build the web workspace from the repository root:
+
+```bash
+npm run build -w @pizza-bot/web
+```
+
+Deploy the contents of `apps/web/dist`, replacing
+`apps/web/dist/pizza-config.js` at deploy time:
 
 ```js
 window.__PIZZA_CONFIG__ = {
@@ -162,8 +169,9 @@ window.__PIZZA_CONFIG__ = {
 Set `PIZZA_ALLOWED_ORIGINS` on the API server to the browser application's exact
 origin. Serve both endpoints over TLS and configure `pizza-config.js` with
 `Cache-Control: no-store`. The shared bearer token is visible to anyone who can
-load the application, so access to the static app must be restricted.
-Credentials are never accepted through URL query parameters.
+load the application and to scripts running in that origin, so access to the
+static app must be restricted. Credentials are never accepted through URL query
+parameters.
 
 ## Configure the backend
 
@@ -178,12 +186,12 @@ desktop settings do not appear automatically.
 - MCP servers are configured in `<PIZZA_DATA_ROOT>/.mcp.json`. Environment
   references in that file expand from the backend process environment.
 - User plugins, skills, attachments, conversations, and logs belong to the
-  selected server data root. Shipped plugins and skills are included in the
-  artifact.
+  selected server data root. Bundled **Plugin** packages and **Built-in** skills
+  are included in the artifact.
 
-Electron's provider keychain belongs to the client machine and is passed only
-to its embedded backend. When Electron connects to a remote backend, configure
-provider secrets on that backend.
+Electron's provider secret store belongs to the client machine and is passed
+only to its embedded backend. When Electron connects to a remote backend,
+configure provider secrets on that backend.
 
 For example, this stores an Anthropic environment reference without sending the
 secret over the API:

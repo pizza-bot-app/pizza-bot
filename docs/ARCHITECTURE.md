@@ -33,7 +33,7 @@ The spine is a nearly-pure core package plus a set of composition-root apps:
 apps/        api-server (Hono) · cli · desktop-shell (Electron) · web (React)
 packages/    core · runtime-langgraph · inference-providers
              · plugin-sdk · storage · logging
-plugins/     example-mcp-status
+plugins/     shipped plugin bundles and their packaging workspace
 skills/      SKILL.md capabilities the orchestrator equips + delegates to
 tests/       langgraph-compat
 ```
@@ -46,8 +46,8 @@ is one package. The `tests/langgraph-compat` workspace imports DeepAgents only t
 pin its public exports. In production, storage may import LangGraph
 checkpoint/store primitives and the api-server may import protocol event types;
 the conformance workspace may import upstream types for tests. `apps/web` imports
-no runtime and no model binding; it speaks the pure `core` types + AI Elements
-shapes. The frontend MAY import the transport SDK
+no graph runtime and no model binding; it speaks the pure `core` types, transport
+SDK projections, and AI Elements shapes. The frontend MAY import the transport SDK
 (`@langchain/langgraph-sdk`) but never the graph engine. An eslint layering rule
 enforces this split.
 
@@ -139,8 +139,8 @@ SDK.
 The projection helpers map the SDK's decoded message projections **out** to AI
 Elements `UIMessage.parts` (`messagesToUI` / `overlayInterrupt` in
 `apps/web/src/projection/messages.ts`; `ThreadSlice`/`StreamStatus` in
-`thread-slice.ts`). The frontend never imports a runtime SDK or a model binding,
-and embedded and remote backends render through the same HTTP/SSE path.
+`thread-slice.ts`). The frontend never imports the graph runtime or a model
+binding, and embedded and remote backends render through the same HTTP/SSE path.
 
 The **pure data contract** the platform reads off checkpoints and the wire lives
 in `core/src/protocol-types.ts`:
@@ -367,9 +367,9 @@ using a supported subset of the Claude Code plugin format:
   plugin-shipped skills (`loadSkillCatalog`), and **user-authored** skills under
   `<data-root>/skills` (`loadUserSkills`), merged with the user winning on an id
   collision. User skills are editable via `POST/PATCH/DELETE /skills` →
-  `host.reloadSkills()` (live on response, no restart); editing a built-in skill
-  creates a user override. The **Skills** library UI keeps plugin skills
-  read-only.
+  `host.reloadSkills()` (live on response, no restart); editing a built-in or
+  plugin-provided skill creates a user override, and deleting that override
+  reveals the original source again.
 
 Capability enablement is an installation-owned overlay in `app.sqlite`, keyed
 by resource kind, source identity, and id. It applies uniformly to user,
@@ -492,23 +492,17 @@ decoded SDK projections rather than raw LangGraph internals.
 
 ### Why the protocol is not the LangGraph Agent Server API
 
-The `api-server` intentionally owns a smaller, thread-centric protocol. A fair
-question is "why not self-host LangChain's Agent Server?" It is the wrong shape
-for this product:
+The `api-server` intentionally owns a smaller, thread-centric protocol. The
+standard Agent Server surface includes broader assistant, run, store, and cron
+contracts plus deployment infrastructure that this local-first application does
+not need. Pizza Bot instead requires a lightweight Node process that can run
+inside an Electron sidecar while preserving background runs and reconnect
+replay.
 
-- **Licensed, not free** — requires a LangSmith license + API key and reports
-  usage to `beacon.langchain.com` outside air-gapped mode.
-- **Heavy infrastructure** — Postgres (required) + Redis (required, run pub-sub) +
-  Docker/Kubernetes; explicitly not for serverless.
-- **Container-only** — packaged as a Docker image via `langgraph build`; there is
-  no in-process Node mode.
-
-This product is a lightweight, embeddable Node harness that ships **inside an
-Electron sidecar**. You cannot fork a Postgres+Redis+Docker licensed service into
-a desktop app. Our api-server / `ProtocolRunManager` / trigger-service are the
-deliberately-lightweight alternative. We reuse native LangGraph
-`ProtocolEvent` frames and checkpoint-shaped state values, but do not claim
-Agent Server route or standard-client compatibility.
+The api-server, `ProtocolRunManager`, and trigger service provide that narrower
+host. Pizza Bot reuses native LangGraph `ProtocolEvent` frames and
+checkpoint-shaped state values, but does not claim Agent Server route or
+standard-client compatibility.
 
 ### External plugin contributions are declarative
 
@@ -527,10 +521,12 @@ providers (`agent-host.ts` registers them through `registerBuiltinProviders`) an
 each turn carries its model as `configurable.model`. Amazon Bedrock, Anthropic,
 Google Gemini, OpenAI, OpenRouter, and Ollama are peer `ModelProvider` adapters;
 another provider can follow the same pattern without changing the runtime,
-transport, or frontend. Each adapter is a peer submodule
-under `inference-providers/providers/<id>` (Bedrock keeps its own subdirectory for
-the shim's multiple files). Provider quirks stay provider-local: the Bedrock
-adapter (`inference-providers/providers/bedrock`) owns the `maxTokens` default
+transport, or frontend. Each adapter is a peer submodule under
+`packages/inference-providers/src/providers/<id>` (Bedrock keeps its own
+subdirectory for the shim's multiple files). Provider quirks stay
+provider-local: the Bedrock adapter
+(`packages/inference-providers/src/providers/bedrock`) owns the `maxTokens`
+default
 (8192, so Sonnet-5 adaptive thinking can't blank a turn) and a temporary
 reasoning-replay shim. It also combines native Bedrock discovery with Mantle's
 regional `/v1/models` catalog and records the protocol supplied by each source:
@@ -571,10 +567,11 @@ not that path. Its limitations are explicit:
 
 A provider-configuration UI ships in Settings (`ProvidersSettings.tsx`): a
 declarative auth-field schema per provider renders a generic config form, and
-secrets go to the OS keychain via the desktop shell's `safeStorage` bridge —
-**never** plaintext on disk or HTTP and never sent back to the browser. The
-desktop main process updates the embedded sidecar's environment over its private
-child-process IPC channel.
+secrets pass through the desktop shell's `safeStorage` bridge and are never sent
+back to the browser after storage. On Linux, `safeStorage` can fall back to
+`basic_text` when no compatible secret store is available; see
+[Security](../SECURITY.md). The desktop main process updates the embedded
+sidecar's environment over its private child-process IPC channel.
 
 ---
 

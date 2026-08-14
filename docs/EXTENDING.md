@@ -30,8 +30,11 @@ entry to `<PIZZA_DATA_ROOT>/.mcp.json`. The default data root is
 
 Keep secrets out of `.mcp.json`. Put them in `<PIZZA_DATA_ROOT>/.env` or
 `.env.local` and reference them as `${ENV_VAR}`. The api-server loads these
-files without overriding variables exported by its parent process. Restart
-Pizza Bot or the standalone api-server after changing an environment file.
+files without overriding values it already found. Precedence is: exported
+process environment, then the data root, current working directory, and
+repository root; within each directory `.env` is read before `.env.local`.
+Restart Pizza Bot or the standalone api-server after changing an environment
+file.
 
 String fields expand environment references when the server connects. Set
 `"enabled": false` to retain a server without launching it. Failed servers can
@@ -49,8 +52,10 @@ tool-scoped worker that Pizza Bot can invoke through the `task` tool. The skill'
 name and description guide routing, its `SKILL.md` body supplies the worker
 instructions, and its declared tools define the complete tool surface.
 
-User skills live under `<PIZZA_DATA_ROOT>/skills/<id>/SKILL.md`. They override
-built-in or plugin skills with the same id. A minimal MCP-backed skill looks like:
+User skills live under `<PIZZA_DATA_ROOT>/skills/<id>/SKILL.md`. They can
+override a Built-in or Plugin skill with the same id without modifying the
+original. Deleting an override reveals the Built-in or Plugin skill again. A
+minimal MCP-backed skill looks like:
 
 ```markdown
 ---
@@ -82,16 +87,18 @@ interruptOn:
       - reject
 ```
 
-See the [skills guide](../skills/README.md) for catalog precedence, built-in
-skills, sibling resources, and editing behavior.
+See the [skills guide](../skills/README.md) for catalog precedence, Built-in
+skills, Plugin skills, sibling resources, and editing behavior.
 
 ## Plugins
 
 The **Plugins** screen installs ZIP bundles containing
 `.claude-plugin/plugin.json`. Plugins may contribute MCP servers and skills;
 their MCP commands and optional materializers execute with the current user's
-permissions. Install only sources you trust.
+permissions. A custom skill can replace a plugin-provided skill with the same
+id; removing the customization restores the plugin skill. Plugin MCP server
+definitions remain part of the installed bundle. Install only sources you
+trust.
 
 See the [plugins guide](../plugins/README.md) for the supported manifest subset,
 resource paths, materializers, and packaging shipped plugin dependencies.
-

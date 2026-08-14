@@ -1,7 +1,7 @@
 # Running from source
 
-Pizza Bot requires Node.js 24 or newer. Install and build the workspace before
-starting an application entrypoint:
+Pizza Bot requires Node.js 24 or newer. Run these commands from the repository
+root before starting an application entrypoint:
 
 ```bash
 npm install
@@ -10,9 +10,9 @@ npm run build
 
 A running backend needs access to at least one model provider. Configure Amazon
 Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter, or Ollama under
-**Settings > Providers**. Desktop-managed secrets are encrypted with the OS
-keychain; a standalone server stores environment-variable references rather than
-secret values.
+**Settings > Providers**. Desktop-managed secrets are protected with Electron
+`safeStorage`; a standalone server stores environment-variable references
+rather than secret values.
 
 ## Desktop development
 
@@ -24,12 +24,20 @@ application's process model:
 npm run dev
 ```
 
+The `predev` hook runs `npm run browser:install` so the bundled Playwright
+Plugin has its exact Chrome for Testing revision when no supported system
+browser is installed. The command is idempotent, but a cold cache downloads the
+browser and requires network access. Use the workspace-specific commands below
+when working without the desktop or browser-automation plugin.
+
 Set `PIZZA_WEB_PORT` to use another Vite port. Use a separate data directory
 while testing changes that should not touch normal application state:
 
 ```bash
 PIZZA_DATA_ROOT=/tmp/pizza-bot-dev npm run dev
 ```
+
+Use an operating-system-appropriate temporary path on Windows.
 
 ## CLI
 
@@ -97,4 +105,3 @@ The production backend bundle can serve the CLI, browser, or an Electron client
 on another machine. See [Running a standalone backend](STANDALONE_BACKEND.md)
 for authentication, remote Electron setup, static browser deployment, Docker,
 systemd, Caddy, backups, and troubleshooting.
-

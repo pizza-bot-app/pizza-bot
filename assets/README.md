@@ -11,7 +11,7 @@ under the Apache License, Version 2.0 with the rest of this project — see
 | `icons/icon.ico` | Windows executable and Squirrel installer icon |
 | `icons/icon-mac.icns` | macOS app + DMG volume icon |
 | `icons/icon-mac.png` | Source master for the macOS variant |
-| `logo.png`, `logo-light.png` | Docs and in-app artwork |
+| `logo.png`, `logo-light.png` | Alternate branding artwork |
 
 The macOS variants carry extra transparent padding so the artwork sits correctly
 inside the rounded-rect mask macOS applies; using the unpadded `icon` on macOS
