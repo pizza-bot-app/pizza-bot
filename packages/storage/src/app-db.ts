@@ -10,12 +10,14 @@ import { AttachmentStore } from "./attachments.js";
 import { ThreadActivityStore } from "./thread-activity.js";
 import { CapabilityPreferencesStore } from "./capability-preferences.js";
 import { ensurePrivateDirectory, ensurePrivateFile } from "./private-files.js";
+import { FolderStore } from "./folders.js";
 
 /** `close()` is the sole owner of the shared handle's lifecycle. */
 export interface AppDatabase {
   db: Database.Database;
   triggers: TriggerStore;
   threadStore: ThreadStore;
+  folders: FolderStore;
   search: SearchStore;
   settings: SettingsStore;
   providerConfigs: ProviderConfigStore;
@@ -38,8 +40,10 @@ export function openAppDatabase(dbPath: string, attachmentsDir?: string): AppDat
   if (!isMemory) ensurePrivateFile(dbPath);
   // Configure WAL once on the shared handle.
   db.pragma("journal_mode = WAL");
+  const folders = new FolderStore(db);
   return {
     db,
+    folders,
     triggers: new TriggerStore(db),
     threadStore: new ThreadStore(db),
     search: new SearchStore(db),

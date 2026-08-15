@@ -106,6 +106,81 @@ body {
   color: var(--brand);
 }
 
+.sidebar-filter-more {
+  width: 32px; height: 32px; flex: 0 0 32px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel-2); color: var(--dim); cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.sidebar-filter-more:hover {
+  background: var(--panel-3, var(--border)); color: var(--text);
+}
+.sidebar-filter-more.active {
+  border-color: color-mix(in oklch, var(--brand) 45%, var(--border));
+  background: color-mix(in oklch, var(--brand) 12%, var(--panel-2));
+  color: var(--brand);
+}
+
+.sidebar-folders {
+  flex: 0 1 auto; max-height: 190px; padding: 8px 8px 10px;
+  border-bottom: 1px solid var(--border); overflow-y: auto;
+}
+.sidebar-folders-head {
+  height: 28px; padding: 0 6px 0 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  color: var(--dim); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.sidebar-folder-add,
+.sidebar-folder-actions {
+  width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--dim); cursor: pointer;
+}
+.sidebar-folder-add:hover,
+.sidebar-folder-actions:hover { background: var(--panel-2); color: var(--text); }
+.sidebar-folder-list { display: flex; flex-direction: column; gap: 2px; }
+.sidebar-folder-row {
+  position: relative;
+  width: 100%; min-width: 0; height: 32px; padding: 0 8px 0 10px;
+  display: flex; align-items: center; gap: 8px;
+  border: 0; border-radius: 7px;
+  background: transparent; color: var(--dim);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+button.sidebar-folder-row:hover,
+.sidebar-folder-row:has(.sidebar-folder-select:hover) {
+  background: var(--panel-2); color: var(--text);
+}
+.sidebar-folder-row.active {
+  background: color-mix(in oklch, var(--brand) 12%, transparent);
+  color: var(--text);
+}
+.sidebar-folder-select {
+  flex: 1; min-width: 0; height: 100%; padding: 0;
+  display: flex; align-items: center; gap: 8px;
+  border: 0; background: transparent; color: inherit;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.sidebar-folder-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sidebar-folder-count {
+  flex: 0 0 24px; width: 24px; color: var(--dim);
+  font-size: 11px; text-align: right;
+}
+.sidebar-folder-actions {
+  position: absolute; right: 5px; flex: 0 0 auto;
+  opacity: 0; background: var(--panel-2);
+}
+.sidebar-folder-row:hover .sidebar-folder-actions,
+.sidebar-folder-actions:focus { opacity: 1; }
+.sidebar-folder-row:has(.sidebar-folder-actions):hover .sidebar-folder-count,
+.sidebar-folder-row:has(.sidebar-folder-actions:focus) .sidebar-folder-count {
+  opacity: 0;
+}
+
 .thread-action-pill {
   flex: 0 0 auto; align-self: center;
   padding: 2px 8px; border-radius: 999px;
@@ -210,6 +285,12 @@ body {
 .thread-action:hover { background: var(--panel-3, var(--border)); color: var(--text); }
 .thread-action.pinned { color: var(--brand); }
 .thread-action.danger:hover { color: var(--danger, #e5484d); }
+.thread-folder-menu {
+  min-width: 180px; padding: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel); color: var(--text);
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 30%, transparent);
+}
 
 .sidebar-modal-backdrop {
   position: fixed; inset: 0; z-index: 50;
@@ -229,6 +310,12 @@ body {
 .sidebar-modal-error {
   margin-top: 12px; color: var(--danger, #e5484d); font-size: 12.5px; line-height: 1.4;
 }
+.sidebar-modal-input {
+  width: 100%; height: 38px; margin-top: 8px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 7px;
+  background: var(--panel-2); color: var(--text); font: inherit;
+}
+.sidebar-modal-input:focus { outline: none; border-color: var(--brand); }
 .sidebar-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .sidebar-modal-btn {
   padding: 7px 14px; border: 1px solid var(--border); border-radius: 8px;

@@ -223,6 +223,68 @@ describe("ApiClient", () => {
     expect(captured.body).toEqual({ title: "A better title" });
   });
 
+  it("creates a thread in a folder through protocol metadata", async () => {
+    const captured: { url?: string; method?: string; body?: unknown } = {};
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (url: string, init?: RequestInit) => {
+        captured.url = url;
+        captured.method = init?.method;
+        captured.body = init?.body ? JSON.parse(init.body as string) : undefined;
+        return new Response(
+          JSON.stringify({
+            thread_id: "thread-1",
+            status: "idle",
+            metadata: { folder_id: "projects" },
+          }),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch,
+    });
+
+    await client.createThread("thread-1", "projects");
+    expect(captured).toMatchObject({
+      url: "http://x/threads",
+      method: "POST",
+      body: {
+        thread_id: "thread-1",
+        metadata: { folder_id: "projects" },
+      },
+    });
+  });
+
+  it("moves a thread back to Unfiled with an explicit null folder", async () => {
+    const captured: { url?: string; method?: string; body?: unknown } = {};
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (url: string, init?: RequestInit) => {
+        captured.url = url;
+        captured.method = init?.method;
+        captured.body = init?.body ? JSON.parse(init.body as string) : undefined;
+        return new Response(
+          JSON.stringify({
+            threadId: "thread-1",
+            title: "First",
+            source: "user",
+            pinned: false,
+            unread: false,
+            awaitingAction: false,
+            createdAt: "",
+            lastActivityAt: "",
+          }),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch,
+    });
+
+    await client.setThreadFolder("thread-1", null);
+    expect(captured).toMatchObject({
+      url: "http://x/threads/thread-1",
+      method: "PATCH",
+      body: { folderId: null },
+    });
+  });
+
   it("markThreadRead PATCHes unread:false and returns the updated ThreadInfo", async () => {
     const captured: { url?: string; method?: string | undefined; body?: unknown } = {};
     const client = new ApiClient({
