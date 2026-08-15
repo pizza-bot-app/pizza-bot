@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import type { PluginLoadStatus } from "@pizza-bot/plugin-api";
+import { createHash } from "node:crypto";
 import type { AgentHost } from "./agent-host.js";
 import {
   MAX_PLUGIN_ARCHIVE_BYTES,
@@ -9,12 +11,21 @@ import { limitMultipartBody } from "./request-limits.js";
 
 export interface PluginsResponse {
   plugins: Array<{
+    id: string;
     name: string;
+    apiVersion: string;
     version?: string;
     displayName?: string;
     description?: string;
     author?: string;
     homepage?: string;
+    status: PluginLoadStatus;
+    detail?: string;
+    engine?: string;
+    capabilities?: {
+      required: string[];
+      optional: string[];
+    };
     // True only for plugins installed into the writable install dir (deletable through this API).
     removable: boolean;
     contributions: {
@@ -28,6 +39,14 @@ export interface PluginsResponse {
       detail?: string;
     };
   }>;
+}
+
+function pluginReportId(root: string): string {
+  const digest = createHash("sha256")
+    .update(root)
+    .digest("base64url")
+    .slice(0, 16);
+  return `plugin_${digest}`;
 }
 
 export function pluginRoutes(host: AgentHost): Hono {
@@ -102,23 +121,32 @@ export function pluginRoutes(host: AgentHost): Hono {
     if (!loaded) return c.json(resp);
 
     resp.plugins = await Promise.all(
-      loaded.manifests.map(async (m) => {
+      loaded.pluginReports.map(async (report) => {
+        const m = report.manifest;
         const count = (entries: Iterable<{ pluginName: string }>) =>
-          [...entries].filter((entry) => entry.pluginName === m.name).length;
+          report.status === "loaded"
+            ? [...entries].filter((entry) => entry.pluginName === report.name).length
+            : 0;
         return {
-          name: m.name,
-          ...(m.version ? { version: m.version } : {}),
-          ...(m.displayName ? { displayName: m.displayName } : {}),
-          ...(m.description ? { description: m.description } : {}),
-          ...(m.author?.name ? { author: m.author.name } : {}),
-          ...(m.homepage ? { homepage: m.homepage } : {}),
-          removable: await host.pluginIsInstalled(m.name),
+          id: pluginReportId(report.root),
+          name: report.name,
+          apiVersion: report.apiVersion,
+          status: report.status,
+          ...(report.detail ? { detail: report.detail } : {}),
+          ...(m?.version ? { version: m.version } : {}),
+          ...(m?.displayName ? { displayName: m.displayName } : {}),
+          ...(m?.description ? { description: m.description } : {}),
+          ...(m?.author?.name ? { author: m.author.name } : {}),
+          ...(m?.homepage ? { homepage: m.homepage } : {}),
+          ...(m?.engines?.pizzaBot ? { engine: m.engines.pizzaBot } : {}),
+          ...(m?.capabilities ? { capabilities: m.capabilities } : {}),
+          removable: await host.pluginIsInstalled(report.name),
           contributions: {
             skills: count(loaded.registry.skills.values()),
             mcpServers: count(loaded.registry.mcpServers.values()),
           },
-          ...(loaded.materializations[m.name]
-            ? { materialization: loaded.materializations[m.name] }
+          ...(loaded.materializations[report.name]
+            ? { materialization: loaded.materializations[report.name] }
             : {}),
         };
       }),

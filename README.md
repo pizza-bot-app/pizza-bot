@@ -89,7 +89,7 @@ references, skill authoring, approval gates, and plugin installation.
 
 ```text
 apps/        api-server (Hono) | cli | desktop-shell (Electron) | web (React)
-packages/    core | runtime-langgraph | inference-providers | plugin-sdk | storage | logging
+packages/    core | runtime-langgraph | inference-providers | plugin-api | plugin-sdk | storage | logging
 plugins/     bundled Plugin packages and their packaging workspace
 skills/      optional Built-in Agent Skills
 tests/       LangGraph compatibility and protocol conformance

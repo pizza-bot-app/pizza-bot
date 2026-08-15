@@ -1,6 +1,11 @@
 {
+  "apiVersion": "pizza-bot/v1",
   "name": "mcp-status",
   "version": "1.0.0",
+  "engines": { "pizzaBot": ">=1.0.0 <2.0.0" },
+  "capabilities": {
+    "required": ["mcp-servers/v1", "skills/v1"]
+  },
   "displayName": "MCP Status",
   "description": "Reference plugin bundling a skill and an MCP server.",
   "author": { "name": "Pizza Bot OSS" },

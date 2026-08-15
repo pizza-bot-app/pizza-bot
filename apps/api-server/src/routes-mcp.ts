@@ -2,9 +2,11 @@ import { Hono } from "hono";
 import {
   loadUserMcpServers,
   writeUserMcpServers,
+} from "@pizza-bot/plugin-sdk";
+import {
   mcpServerEntrySchema,
   type McpServerEntry,
-} from "@pizza-bot/plugin-sdk";
+} from "@pizza-bot/plugin-api";
 import { CapabilityDependencyError, type AgentHost } from "./agent-host.js";
 import { fileResourceRoutes, type ParseResult } from "./resource-crud.js";
 

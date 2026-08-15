@@ -23,7 +23,7 @@ import type {
   PluginManifest,
   PluginMaterializer,
   PluginMaterializerReason,
-} from "./manifest.js";
+} from "@pizza-bot/plugin-api";
 import { FsPluginLoader } from "./loader.js";
 import { ContributionRegistry } from "./registry.js";
 import { loadSkillCatalog } from "./skill-catalog.js";

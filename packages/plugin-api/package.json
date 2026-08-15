@@ -1,0 +1,26 @@
+{
+  "name": "@pizza-bot/plugin-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Public, browser-safe Pizza Bot plugin manifest schemas and contract types.",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "source": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  }
+}

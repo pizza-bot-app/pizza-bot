@@ -33,6 +33,43 @@ A manifest lives at `<plugin>/.claude-plugin/plugin.json`. Unsupported fields
 rejected, so a Claude Code plugin that carries them still loads — but the host
 executes no plugin-supplied web components.
 
+### Manifest compatibility
+
+Pizza Bot distinguishes four independent compatibility facts:
+
+- `apiVersion` selects the manifest schema. The current value is
+  `pizza-bot/v1`; omitted values are accepted as v1 for Claude Code and older
+  Pizza Bot bundles.
+- `version` is the plugin's own release version. It does not select a manifest
+  schema or guarantee host compatibility.
+- `engines.pizzaBot` is a semver range for compatible Pizza Bot host releases.
+- `capabilities.required` lists versioned host features needed for activation.
+  Unknown required capabilities make the plugin incompatible; unknown entries
+  under `capabilities.optional` are ignored.
+
+Set top-level `enabled` to `false` to install a bundle without activating its
+contributions. The Plugins page and `GET /plugins` retain disabled,
+incompatible, and failed entries with diagnostic status instead of dropping
+them.
+
+```json
+{
+  "apiVersion": "pizza-bot/v1",
+  "name": "example-tools",
+  "version": "1.2.0",
+  "engines": { "pizzaBot": ">=1.0.0 <2.0.0" },
+  "capabilities": {
+    "required": ["mcp-servers/v1", "skills/v1"],
+    "optional": ["mcp-apps/v1"]
+  }
+}
+```
+
+Skill and MCP server references retain their existing local identifiers for
+configuration compatibility. Every registered contribution also has a
+`<plugin-name>/<local-id>` identity; new contribution kinds must use that
+plugin-qualified identity as their canonical key.
+
 The complete [MCP status example](../examples/plugins/mcp-status) is a small,
 self-contained reference plugin with a manifest, MCP server, and matching
 skill. It has no install step or external dependencies, so it can be copied or
@@ -86,7 +123,13 @@ by declaring the `dev.pizzabot.materializer` extension:
 
 ```json
 {
+  "apiVersion": "pizza-bot/v1",
   "name": "generated-tools",
+  "version": "1.0.0",
+  "engines": { "pizzaBot": ">=1.0.0 <2.0.0" },
+  "capabilities": {
+    "required": ["materializer/v1"]
+  },
   "extensions": {
     "dev.pizzabot.materializer": {
       "entrypoint": "./dist/materialize.mjs",

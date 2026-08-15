@@ -2,7 +2,10 @@
 import { chmod, readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
-import { mcpServerEntrySchema, type McpServerEntry } from "./manifest.js";
+import {
+  mcpServerEntrySchema,
+  type McpServerEntry,
+} from "@pizza-bot/plugin-api";
 
 /**
  * Entries remain unknown here so each can be validated independently without one

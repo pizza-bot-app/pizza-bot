@@ -32,7 +32,7 @@ The spine is a nearly-pure core package plus a set of composition-root apps:
 ```
 apps/        api-server (Hono) · cli · desktop-shell (Electron) · web (React)
 packages/    core · runtime-langgraph · inference-providers
-             · plugin-sdk · storage · logging
+             · plugin-api · plugin-sdk · storage · logging
 plugins/     shipped plugin bundles and their packaging workspace
 skills/      SKILL.md capabilities the orchestrator equips + delegates to
 tests/       langgraph-compat
@@ -335,7 +335,9 @@ recovering occurrences, so recovered runs receive the settled skill projection.
 
 ## 8. Plugins
 
-A plugin contributes declarative resource types (`packages/plugin-sdk`),
+A plugin declares its browser-safe contract through `packages/plugin-api`;
+the Node-bound loader and host live in `packages/plugin-sdk`. Plugins contribute
+declarative resource types,
 using a supported subset of the Claude Code plugin format:
 
 - **MCP servers** — connected via `@langchain/mcp-adapters`
@@ -392,11 +394,12 @@ atomically activating a versioned snapshot under
 `<data-root>/plugin-materializations`; a failed later run retains the last good
 snapshot and reports stale status. There is no source watcher.
 
-`GET /plugins` (`routes-plugins.ts`) reports each manifest's name/metadata,
-skill + MCP-server counts, and materialization status. Unsupported manifest
-fields (`commands`, the `pizzaBot.ui` slot/tool-view block) are parsed and
-dropped rather than rejected, so a Claude Code plugin that carries them still
-loads.
+`GET /plugins` (`routes-plugins.ts`) reports every discovered plugin, including
+its loaded, disabled, incompatible, or failed status and diagnostic detail.
+Loaded entries also report manifest metadata, skill + MCP-server counts, and
+materialization status. Unsupported manifest fields (`commands`, the
+`pizzaBot.ui` slot/tool-view block) are parsed and dropped rather than rejected,
+so a Claude Code plugin that carries them still loads.
 
 **Security boundary:** plugin-shipped skills may not declare `hooks`,
 `mcpServers`, or `permissionMode` (mirrors the Claude Code rule). Configured

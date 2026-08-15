@@ -5,6 +5,10 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "references": [{ "path": "../core" }, { "path": "../logging" }],
+  "references": [
+    { "path": "../core" },
+    { "path": "../logging" },
+    { "path": "../plugin-api" }
+  ],
   "include": ["src"]
 }

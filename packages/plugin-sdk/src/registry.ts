@@ -1,8 +1,13 @@
 /** Registries for validated plugin contributions. */
-import type { PluginManifest, McpServerEntry } from "./manifest.js";
+import {
+  qualifyPluginContributionId,
+  type McpServerEntry,
+  type PluginManifest,
+  type PluginQualifiedId,
+} from "@pizza-bot/plugin-api";
 
 export interface PluginContribution<T> {
-  qualifiedId: string;
+  qualifiedId: PluginQualifiedId;
   pluginName: string;
   root: string;
   value: T;
@@ -24,10 +29,6 @@ export class PluginContributionCollisionError extends Error {
     );
     this.name = "PluginContributionCollisionError";
   }
-}
-
-export function qualifyContributionId(pluginName: string, localId: string): string {
-  return `${pluginName}/${localId}`;
 }
 
 export class ContributionRegistry {
@@ -100,7 +101,7 @@ export class ContributionRegistry {
       );
     }
     registry.set(id, {
-      qualifiedId: qualifyContributionId(pluginName, id),
+      qualifiedId: qualifyPluginContributionId(pluginName, id),
       pluginName,
       root,
       value,

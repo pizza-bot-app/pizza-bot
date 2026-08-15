@@ -1,17 +1,51 @@
-import { describe, it, expect } from "vitest";
-import { PLUGIN_API_VERSION, pluginManifestSchema } from "./manifest.js";
+import { describe, expect, it } from "vitest";
+import {
+  PLUGIN_API_VERSION,
+  pluginManifestSchema,
+} from "./manifest.js";
 
-describe("plugin manifest (Claude-plugin superset)", () => {
-  it("accepts the supported fields from a Claude Code plugin manifest", () => {
-    const stock = {
+describe("plugin manifest contract", () => {
+  it("accepts the supported fields from a stock Claude Code manifest", () => {
+    const parsed = pluginManifestSchema.parse({
       name: "mcp-status",
       version: "1.2.0",
       skills: "./skills/",
       mcpServers: "./.mcp.json",
-    };
-    const parsed = pluginManifestSchema.parse(stock);
-    expect(parsed.name).toBe("mcp-status");
-    expect(parsed.apiVersion).toBe(PLUGIN_API_VERSION);
+    });
+
+    expect(parsed).toMatchObject({
+      name: "mcp-status",
+      apiVersion: PLUGIN_API_VERSION,
+    });
+  });
+
+  it("treats pre-versioned manifests as enabled v1 plugins", () => {
+    const parsed = pluginManifestSchema.parse({ name: "mcp-status" });
+
+    expect(parsed).toMatchObject({
+      apiVersion: PLUGIN_API_VERSION,
+      enabled: true,
+    });
+  });
+
+  it("separates plugin release, manifest API, engine, and capabilities", () => {
+    const parsed = pluginManifestSchema.parse({
+      apiVersion: PLUGIN_API_VERSION,
+      name: "interactive-tools",
+      version: "2.3.0",
+      engines: { pizzaBot: ">=1.0.0 <2.0.0" },
+      capabilities: {
+        required: ["mcp-servers/v1"],
+        optional: ["mcp-apps/v1"],
+      },
+    });
+
+    expect(parsed.version).toBe("2.3.0");
+    expect(parsed.engines?.pizzaBot).toBe(">=1.0.0 <2.0.0");
+    expect(parsed.capabilities).toEqual({
+      required: ["mcp-servers/v1"],
+      optional: ["mcp-apps/v1"],
+    });
   });
 
   it("accepts the current API version and rejects unsupported versions", () => {
@@ -29,20 +63,30 @@ describe("plugin manifest (Claude-plugin superset)", () => {
     ).toThrow();
   });
 
-  it("ignores unsupported manifest fields instead of failing", () => {
-    const withExtras = {
-      name: "mcp-status",
-      commands: ["./commands/status.md"],
-      pizzaBot: { ui: { slots: { "sidebar-panels": ["./ui/Panel.tsx"] } } },
-    };
-    const parsed = pluginManifestSchema.parse(withExtras);
-    expect(parsed.name).toBe("mcp-status");
-    expect(parsed).not.toHaveProperty("pizzaBot");
-    expect(parsed).not.toHaveProperty("commands");
+  it("rejects malformed capability identifiers", () => {
+    expect(() =>
+      pluginManifestSchema.parse({
+        name: "bad-capability",
+        capabilities: { required: ["mcp apps"] },
+      }),
+    ).toThrow();
   });
 
-  it("rejects a non-kebab-case name", () => {
-    expect(() => pluginManifestSchema.parse({ name: "MCP Status" })).toThrow();
+  it("rejects a non-kebab-case plugin name", () => {
+    expect(() =>
+      pluginManifestSchema.parse({ name: "MCP Status" }),
+    ).toThrow();
+  });
+
+  it("ignores unsupported top-level manifest fields", () => {
+    const parsed = pluginManifestSchema.parse({
+      name: "mcp-status",
+      commands: ["./commands/status.md"],
+      pizzaBot: { ui: { slots: ["./ui/Panel.tsx"] } },
+    });
+
+    expect(parsed).not.toHaveProperty("pizzaBot");
+    expect(parsed).not.toHaveProperty("commands");
   });
 
   it("accepts disabled stdio and remote MCP entries", () => {
@@ -53,6 +97,7 @@ describe("plugin manifest (Claude-plugin superset)", () => {
         remote: { url: "https://example.com/mcp", enabled: false },
       },
     });
+
     expect(parsed.mcpServers).toMatchObject({
       local: { enabled: false },
       remote: { enabled: false },
@@ -70,7 +115,7 @@ describe("plugin manifest (Claude-plugin superset)", () => {
     ).toThrow();
   });
 
-  it("accepts a namespaced materializer extension with lifecycle defaults", () => {
+  it("preserves namespaced extension metadata", () => {
     const parsed = pluginManifestSchema.parse({
       name: "generated-tools",
       extensions: {
@@ -82,16 +127,14 @@ describe("plugin manifest (Claude-plugin superset)", () => {
       },
     });
 
-    expect(
-      parsed.extensions?.["dev.pizzabot.materializer"],
-    ).toEqual({
-      entrypoint: "./dist/materialize.mjs",
-      sourceRoots: ["~/.pizza-bot/addons"],
-      sync: ["install", "startup", "manual"],
-      timeoutMs: 30_000,
-    });
     expect(parsed.extensions?.["example.com/metadata"]).toEqual({
       channel: "stable",
+    });
+    expect(
+      parsed.extensions?.["dev.pizzabot.materializer"],
+    ).toMatchObject({
+      sync: ["install", "startup", "manual"],
+      timeoutMs: 30_000,
     });
   });
 

@@ -4,6 +4,7 @@
   "references": [
     { "path": "packages/core" },
     { "path": "packages/logging" },
+    { "path": "packages/plugin-api" },
     { "path": "packages/plugin-sdk" },
     { "path": "packages/storage" },
     { "path": "packages/inference-providers" },

@@ -8,7 +8,7 @@ import {
   PluginContributionCollisionError,
 } from "./registry.js";
 import { FsPluginLoader, PluginPathError } from "./loader.js";
-import { pluginManifestSchema } from "./manifest.js";
+import { pluginManifestSchema } from "@pizza-bot/plugin-api";
 
 async function writeEnvExpansionPluginFixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "plugin-env-fixture-"));
@@ -59,11 +59,14 @@ describe("FsPluginLoader", () => {
     expect(serverArg.startsWith(EXAMPLE_ROOT)).toBe(true);
   });
 
-  it("discovers plugins under a directory and returns their manifests", async () => {
+  it("finds plugins under a directory for explicit host loading", async () => {
     const loader = new FsPluginLoader();
     const reg = new ContributionRegistry();
-    const manifests = await loader.discover(EXAMPLES_DIR, reg);
-    expect(manifests.map((m) => m.name)).toEqual(["mcp-status"]);
+    const sources = await loader.find(EXAMPLES_DIR);
+    for (const source of sources) {
+      await loader.load(source.manifest, source.root, reg);
+    }
+    expect(sources.map(({ manifest }) => manifest.name)).toEqual(["mcp-status"]);
     expect(reg.skills.has("health-report")).toBe(true);
     expect(reg.mcpServers.has("mcp-status")).toBe(true);
   });
@@ -99,14 +102,14 @@ describe("FsPluginLoader", () => {
   });
 
   it("rejects a manifest with a non-kebab-case name", async () => {
-    const loader = new FsPluginLoader();
+    const root = await mkdtemp(join(tmpdir(), "plugin-name-fixture-"));
+    const manifestPath = join(root, ".claude-plugin/plugin.json");
+    await mkdir(join(root, ".claude-plugin"), { recursive: true });
+    await writeFile(manifestPath, JSON.stringify({ name: "Bad Name" }));
+
     await expect(
-      (async () => {
-        const { pluginManifestSchema } = await import("./manifest.js");
-        return pluginManifestSchema.parse({ name: "Bad Name" });
-      })(),
-    ).rejects.toThrow();
-    void loader;
+      new FsPluginLoader().readManifest(manifestPath),
+    ).rejects.toThrow(/kebab-case name/);
   });
 
   it("reports malformed manifests while ignoring directories without one", async () => {
@@ -117,13 +120,12 @@ describe("FsPluginLoader", () => {
     await mkdir(join(pluginsDir, "ordinary-directory"));
 
     const errors: Array<{ root: string; error: unknown }> = [];
-    const manifests = await new FsPluginLoader().discover(
+    const sources = await new FsPluginLoader().find(
       pluginsDir,
-      new ContributionRegistry(),
       (root, error) => errors.push({ root, error }),
     );
 
-    expect(manifests).toEqual([]);
+    expect(sources).toEqual([]);
     expect(errors).toHaveLength(1);
     expect(errors[0]?.root).toBe(brokenRoot);
     expect(String(errors[0]?.error)).toContain("Invalid plugin manifest");

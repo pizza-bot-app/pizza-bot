@@ -17,6 +17,7 @@ import {
   updateStateWireSchema,
   type ThreadStateWire,
 } from "@pizza-bot/core";
+import type { PluginLoadStatus } from "@pizza-bot/plugin-api";
 
 export interface ApiClientOptions {
   baseUrl: string;
@@ -858,12 +859,21 @@ export interface McpServerRow {
 }
 
 export interface PluginInfo {
+  id: string;
   name: string;
+  apiVersion?: string;
   version?: string;
   displayName?: string;
   description?: string;
   author?: string;
   homepage?: string;
+  status?: PluginLoadStatus;
+  detail?: string;
+  engine?: string;
+  capabilities?: {
+    required: string[];
+    optional: string[];
+  };
   removable: boolean;
   contributions: { skills: number; mcpServers: number };
   materialization?: {

@@ -10,7 +10,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadPlugins } from "./plugin-host.js";
 import { materializePlugin } from "./materializer.js";
-import { pluginManifestSchema, type PluginManifest } from "./manifest.js";
+import {
+  pluginManifestSchema,
+  type PluginManifest,
+} from "@pizza-bot/plugin-api";
+import { createPluginHostContract } from "./compatibility.js";
 
 const roots: string[] = [];
 
@@ -105,14 +109,18 @@ describe("plugin materializers", () => {
 
     const loaded = await loadPlugins({
       pluginsDir: fixture.pluginsDir,
+      hostContract: createPluginHostContract("1.0.0"),
       materializationCacheDir: fixture.cacheRoot,
       materializationReason: "install",
       connectMcp: false,
     });
 
-    expect(loaded.manifests.map((manifest) => manifest.name)).toEqual([
-      "generated-tools",
-    ]);
+    expect(loaded.pluginReports).toContainEqual(
+      expect.objectContaining({
+        name: "generated-tools",
+        status: "loaded",
+      }),
+    );
     expect(loaded.materializations["generated-tools"]).toMatchObject({
       state: "synced",
       sourceRoots: [fixture.sourceRoot],
