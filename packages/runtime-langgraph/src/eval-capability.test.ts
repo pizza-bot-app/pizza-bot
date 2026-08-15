@@ -113,12 +113,18 @@ describe("Pizza Bot graph assembly", () => {
     expect(mocks.createSubAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         tools: [send],
-        skills: ["/skills/mailer/"],
         interruptOn: {
           outlook__send: { allowedDecisions: ["approve", "edit", "reject"] },
         },
       }),
     );
+    const subagentParams = mocks.createSubAgent.mock.calls[0]![0] as {
+      middleware: Array<{ name?: string }>;
+      skills?: string[];
+    };
+    expect(subagentParams).not.toHaveProperty("skills");
+    expect(subagentParams.middleware.map((middleware) => middleware.name))
+      .not.toContain("SkillsMiddleware");
     expect(mocks.modelCallLimitMiddleware.mock.calls).toEqual([
       [{ runLimit: 20, exitBehavior: "end" }],
       [{ runLimit: 20, exitBehavior: "end" }],
