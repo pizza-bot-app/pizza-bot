@@ -2,15 +2,19 @@
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { SkillCatalog } from "@pizza-bot/core";
 import { MultiServerMCPClient, type Connection } from "@langchain/mcp-adapters";
-import { join } from "node:path";
-import { FsPluginLoader } from "./loader.js";
+import type { PluginLoadStatus } from "@pizza-bot/plugin-api";
+import { basename, join } from "node:path";
+import {
+  FsPluginLoader,
+  UnsupportedPluginApiVersionError,
+} from "./loader.js";
 import { loadSkillCatalog } from "./skill-catalog.js";
 import { ContributionRegistry } from "./registry.js";
 import type {
   PluginManifest,
   McpServerEntry,
   PluginMaterializerReason,
-} from "./manifest.js";
+} from "@pizza-bot/plugin-api";
 import type { ToolCatalog } from "./wildcard.js";
 import {
   isNodeFamilyCommand,
@@ -24,18 +28,31 @@ import {
   type PluginMaterializationStatus,
 } from "./materializer.js";
 import { restoreNullableSchemaTypes } from "./mcp-schema.js";
+import {
+  evaluatePluginCompatibility,
+  type PluginHostContract,
+} from "./compatibility.js";
 
 export { parseFrontmatter };
 
 export interface LoadedPlugins {
   readonly registry: ContributionRegistry;
-  readonly manifests: PluginManifest[];
+  readonly pluginReports: readonly PluginLoadReport[];
   readonly tools: Record<string, StructuredToolInterface>;
   readonly catalog: ToolCatalog;
   readonly skills: SkillCatalog;
   readonly materializations: Readonly<Record<string, PluginMaterializationStatus>>;
   /** The host must close the client to reap MCP subprocesses. */
   readonly client?: McpClientPool;
+}
+
+export interface PluginLoadReport {
+  name: string;
+  root: string;
+  apiVersion: string;
+  status: PluginLoadStatus;
+  manifest?: PluginManifest;
+  detail?: string;
 }
 
 export type McpConnectionStatus = "loading" | "retrying" | "connected" | "error";
@@ -163,6 +180,8 @@ export interface LoadPluginsOptions {
   /** Host-owned cache for validated materializer output. */
   materializationCacheDir?: string;
   materializationReason?: PluginMaterializerReason;
+  /** Host contract used to evaluate engines and required capabilities. */
+  hostContract: PluginHostContract;
 }
 
 /** Invalid plugins and failed MCP connections are logged and skipped. */
@@ -173,13 +192,54 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
   const registry = new ContributionRegistry();
 
   const dirs = Array.isArray(opts.pluginsDir) ? opts.pluginsDir : [opts.pluginsDir];
-  const manifests: PluginManifest[] = [];
+  const pluginReports: PluginLoadReport[] = [];
   const materializations: Record<string, PluginMaterializationStatus> = {};
   for (const dir of dirs) {
     const found = await loader.find(dir, (d, err) => {
-      log(`skipping plugin at ${d}: ${err instanceof Error ? err.message : String(err)}`);
+      const detail = err instanceof Error ? err.message : String(err);
+      const unsupported = err instanceof UnsupportedPluginApiVersionError;
+      pluginReports.push({
+        name: unsupported && err.pluginName ? err.pluginName : basename(d),
+        root: d,
+        apiVersion: unsupported ? err.apiVersion : "unknown",
+        status: unsupported ? "incompatible" : "failed",
+        detail,
+      });
+      log(`skipping plugin at ${d}: ${detail}`);
     });
     for (const source of found) {
+      const report = (
+        status: PluginLoadStatus,
+        detail?: string,
+      ): void => {
+        pluginReports.push({
+          name: source.manifest.name,
+          root: source.root,
+          apiVersion: source.manifest.apiVersion,
+          status,
+          manifest: source.manifest,
+          ...(detail ? { detail } : {}),
+        });
+      };
+      if (!source.manifest.enabled) {
+        report("disabled", "Disabled by plugin manifest");
+        log(
+          `skipping plugin at ${source.root}: Disabled by plugin manifest`,
+        );
+        continue;
+      }
+      const compatibility = evaluatePluginCompatibility(
+        source.manifest,
+        opts.hostContract,
+      );
+      if (!compatibility.compatible) {
+        report("incompatible", compatibility.detail);
+        log(
+          `skipping plugin at ${source.root}: ${compatibility.detail ?? "Incompatible plugin"}`,
+        );
+        continue;
+      }
+
       const materializer =
         source.manifest.extensions?.["dev.pizzabot.materializer"];
       let loadRoot = source.root;
@@ -190,7 +250,7 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
             sourceRoots: materializer.sourceRoots,
             detail: "Plugin materialization cache is not configured",
           };
-          manifests.push(source.manifest);
+          report("failed", "Plugin materialization cache is not configured");
           continue;
         }
         const result = await materializePlugin({
@@ -204,7 +264,10 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
           log(
             `materializer for "${source.manifest.name}" failed: ${result.status.detail ?? "unknown error"}`,
           );
-          manifests.push(source.manifest);
+          report(
+            "failed",
+            result.status.detail ?? "Plugin materialization failed",
+          );
           continue;
         }
         loadRoot = result.root;
@@ -221,10 +284,12 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
             )
           : source.manifest;
         await loader.load(loadManifest, loadRoot, registry);
-        manifests.push(source.manifest);
+        report("loaded");
       } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        report("failed", detail);
         log(
-          `skipping plugin at ${source.root}: ${err instanceof Error ? err.message : String(err)}`,
+          `skipping plugin at ${source.root}: ${detail}`,
         );
       }
     }
@@ -241,7 +306,7 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
     }
     return {
       registry,
-      manifests,
+      pluginReports,
       tools: {},
       catalog: {},
       skills,
@@ -265,7 +330,7 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
 
   return {
     registry,
-    manifests,
+    pluginReports,
     tools,
     catalog,
     skills,

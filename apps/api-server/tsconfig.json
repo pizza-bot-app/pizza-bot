@@ -11,6 +11,7 @@
     { "path": "../../packages/runtime-langgraph" },
     { "path": "../../packages/inference-providers" },
     { "path": "../../packages/storage" },
+    { "path": "../../packages/plugin-api" },
     { "path": "../../packages/plugin-sdk" }
   ],
   "include": ["src"]

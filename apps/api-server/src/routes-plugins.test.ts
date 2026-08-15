@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ContributionRegistry,
-  pluginManifestSchema,
   type LoadedPlugins,
 } from "@pizza-bot/plugin-sdk";
+import { pluginManifestSchema } from "@pizza-bot/plugin-api";
 import type { AgentHost } from "./agent-host.js";
 import { pluginRoutes } from "./routes-plugins.js";
 import { storedZip } from "./test-utils/stored-zip.js";
@@ -49,14 +49,22 @@ describe("plugin routes", () => {
     );
     const plugins = {
       registry,
-      manifests: [
-        pluginManifestSchema.parse({
+      pluginReports: [
+        {
           name: "external-bundle",
-          displayName: "External Bundle",
-          version: "1.2.3",
-          description: "External integrations.",
-          author: { name: "External Publisher" },
-        }),
+          root: "/addons/external-bundle",
+          apiVersion: "pizza-bot/v1",
+          status: "loaded",
+          manifest: pluginManifestSchema.parse({
+            name: "external-bundle",
+            displayName: "External Bundle",
+            version: "1.2.3",
+            description: "External integrations.",
+            author: { name: "External Publisher" },
+            engines: { pizzaBot: ">=1 <2" },
+            capabilities: { required: ["skills/v1"] },
+          }),
+        },
       ],
       tools: {},
       catalog: {},
@@ -81,11 +89,19 @@ describe("plugin routes", () => {
     expect(await response.json()).toMatchObject({
       plugins: [
         {
+          id: expect.stringMatching(/^plugin_[A-Za-z0-9_-]{16}$/),
           name: "external-bundle",
+          apiVersion: "pizza-bot/v1",
+          status: "loaded",
           displayName: "External Bundle",
           version: "1.2.3",
           description: "External integrations.",
           author: "External Publisher",
+          engine: ">=1 <2",
+          capabilities: {
+            required: ["skills/v1"],
+            optional: [],
+          },
           removable: false,
           contributions: {
             skills: 1,
@@ -96,6 +112,81 @@ describe("plugin routes", () => {
             sourceRoots: ["/addons"],
             lastSyncedAt: "2026-08-10T00:00:00.000Z",
           },
+        },
+      ],
+    });
+  });
+
+  it("reports incompatible, disabled, and failed plugins without contributions", async () => {
+    const registry = new ContributionRegistry();
+    registry.registerPlugin("future-plugin");
+    registry.registerSkill(
+      "future-plugin",
+      "/plugins/loaded-copy/skills/example",
+      "example",
+      "/plugins/loaded-copy/skills/example/SKILL.md",
+    );
+    const plugins = {
+      registry,
+      pluginReports: [
+        {
+          name: "future-plugin",
+          root: "/plugins/future-plugin",
+          apiVersion: "pizza-bot/v2",
+          status: "incompatible",
+          detail: "Unsupported plugin API version",
+        },
+        {
+          name: "paused-plugin",
+          root: "/plugins/paused-plugin",
+          apiVersion: "pizza-bot/v1",
+          status: "disabled",
+          detail: "Disabled by plugin manifest",
+          manifest: pluginManifestSchema.parse({
+            name: "paused-plugin",
+            enabled: false,
+          }),
+        },
+        {
+          name: "broken-plugin",
+          root: "/plugins/broken-plugin",
+          apiVersion: "unknown",
+          status: "failed",
+          detail: "Invalid plugin manifest",
+        },
+      ],
+      tools: {},
+      catalog: {},
+      skills: new Map(),
+      materializations: {},
+    } satisfies LoadedPlugins;
+    const host = {
+      whenReady: async () => {},
+      plugins,
+      pluginIsInstalled: async () => true,
+    } as unknown as AgentHost;
+
+    const response = await pluginRoutes(host).request("/plugins");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      plugins: [
+        {
+          id: expect.stringMatching(/^plugin_[A-Za-z0-9_-]{16}$/),
+          name: "future-plugin",
+          apiVersion: "pizza-bot/v2",
+          status: "incompatible",
+          detail: "Unsupported plugin API version",
+          removable: true,
+          contributions: { skills: 0, mcpServers: 0 },
+        },
+        {
+          name: "paused-plugin",
+          status: "disabled",
+        },
+        {
+          name: "broken-plugin",
+          status: "failed",
         },
       ],
     });

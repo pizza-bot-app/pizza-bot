@@ -15,6 +15,7 @@
   "dependencies": {
     "@langchain/langgraph-sdk": "~1.9.28",
     "@pizza-bot/core": "*",
+    "@pizza-bot/plugin-api": "*",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",

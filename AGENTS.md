@@ -23,6 +23,10 @@ frontend consumes them through the `@langchain/langgraph-sdk`
   message/thread-slice projection helpers live in `apps/web/src/projection` — the
   only consumer is the web app, so they sit beside it rather than in a shared
   package. The eslint layering rule enforces core's purity.
+- `packages/plugin-api` is the public, browser-safe plugin contract — no
+  `node:*`, LangChain, runtime, or UI imports. `packages/plugin-sdk` owns the
+  Node-bound filesystem loader, materializers, MCP clients, and contribution
+  registries. The eslint layering rule enforces plugin-api's purity.
 - **`packages/runtime-langgraph` is the ONLY production package that imports
   `deepagents` — the graph engine.** The `tests/langgraph-compat` workspace is a
   test-only exception because it pins DeepAgents' public exports. If the

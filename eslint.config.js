@@ -98,6 +98,31 @@ export default tseslint.config(
     },
   },
   {
+    // Public plugin contracts must be usable by plugin authors and browser clients.
+    files: ["packages/plugin-api/src/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "node:*",
+                "@langchain/*",
+                "@pizza-bot/*",
+                "deepagents",
+                "ai",
+                "react",
+              ],
+              message:
+                "plugin-api is a public, browser-safe contract package; host, runtime, and UI dependencies stay in plugin-sdk or their owning app.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["**/*.test.ts", "**/*.test.tsx"],
     languageOptions: { globals: { ...globals.node } },
     rules: {

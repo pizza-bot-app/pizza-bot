@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { ProtocolEvent } from "@langchain/langgraph";
 import {
   PIZZA_BOT_AGENT,
@@ -15,7 +15,7 @@ import {
   type RunOptions,
   type ThreadState,
 } from "@pizza-bot/core";
-import { pluginManifestSchema } from "@pizza-bot/plugin-sdk";
+import { pluginManifestSchema } from "@pizza-bot/plugin-api";
 import { AgentHost } from "./agent-host.js";
 import type { ImportedPlugin } from "./plugin-import.js";
 
@@ -97,6 +97,21 @@ describe("AgentHost lifecycle and identity", () => {
 
   it("keeps user skills under the data root", async () => {
     expect(await host.skillsDirectory()).toBe(join(dataRoot, "skills"));
+  });
+
+  it("rejects unsafe plugin management names", async () => {
+    const outsideName = `${basename(dataRoot)}-outside`;
+    const outside = join(dataRoot, "..", outsideName);
+    mkdirSync(join(outside, ".claude-plugin"), { recursive: true });
+    try {
+      expect(await host.pluginIsInstalled(`../../${outsideName}`)).toBe(false);
+      await expect(
+        host.deletePlugin(`../../${outsideName}`),
+      ).resolves.toBe(false);
+      expect(existsSync(join(outside, ".claude-plugin"))).toBe(true);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("loads and removes a user skill", async () => {

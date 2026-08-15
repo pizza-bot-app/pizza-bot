@@ -92,7 +92,7 @@ export function PluginsModule({
               ].filter((entry) => entry.count > 0);
 
               return (
-                <li className="plugin-card" key={plugin.name}>
+                <li className="plugin-card" key={plugin.id}>
                   <div className="plugin-card-icon" aria-hidden="true">
                     <Puzzle size={20} />
                   </div>
@@ -100,8 +100,20 @@ export function PluginsModule({
                     <div className="plugin-card-heading">
                       <h2>{plugin.displayName ?? plugin.name}</h2>
                       {plugin.version && <span className="plugin-version">v{plugin.version}</span>}
+                      {plugin.status && plugin.status !== "loaded" && (
+                        <span
+                          className={`plugin-load-status ${plugin.status}`}
+                        >
+                          {plugin.status}
+                        </span>
+                      )}
                     </div>
                     {plugin.description && <p>{plugin.description}</p>}
+                    {plugin.status && plugin.status !== "loaded" && plugin.detail && (
+                      <p className={`plugin-load-detail ${plugin.status}`}>
+                        {plugin.detail}
+                      </p>
+                    )}
                     <div className="plugin-card-meta">
                       {plugin.author && <span>{plugin.author}</span>}
                       {plugin.homepage && (

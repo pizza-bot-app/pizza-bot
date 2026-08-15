@@ -100,5 +100,11 @@ id; removing the customization restores the plugin skill. Plugin MCP server
 definitions remain part of the installed bundle. Install only sources you
 trust.
 
+The screen retains every discovered bundle and reports whether it loaded, was
+disabled by its manifest, is incompatible with this Pizza Bot release, or
+failed validation or activation. Disabled plugins are re-enabled by editing
+their manifest and setting top-level `enabled` to `true`, then reloading plugins
+or restarting Pizza Bot.
+
 See the [plugins guide](../plugins/README.md) for the supported manifest subset,
 resource paths, materializers, and packaging shipped plugin dependencies.

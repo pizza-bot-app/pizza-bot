@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { McpServerEntry } from "@pizza-bot/plugin-sdk";
+import type { McpServerEntry } from "@pizza-bot/plugin-api";
 import { AgentHost } from "./agent-host.js";
 import { buildApp } from "./index.js";
 
