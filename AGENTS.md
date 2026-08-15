@@ -202,6 +202,12 @@ and `test` build only their task dependencies. Keep the affected tests and
 typecheck green, and run the full CI checks before opening a PR. Do not merge to
 `main` or push a branch unless the repository owner asks.
 
+On macOS, `gh` credentials may be stored in Keychain and unavailable to
+sandboxed commands. If `gh auth status` or another `gh` command reports an
+authentication failure in the sandbox, rerun that command outside the sandbox
+before diagnosing an expired credential or requesting reauthentication. Do not
+extract or repackage credentials as a workaround.
+
 After a PR is merged, clean up from the main checkout by removing the worktree
 before deleting its local branch:
 
