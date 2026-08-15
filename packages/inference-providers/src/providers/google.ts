@@ -5,6 +5,7 @@ import type { BaseMessage } from "@langchain/core/messages";
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import type { ChatGenerationChunk, ChatResult } from "@langchain/core/outputs";
 import type {
+  ModelBuildOptions,
   ModelDescriptor,
   ModelProvider,
   ProviderAuthMethod,
@@ -166,9 +167,12 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     }
   }
 
-  async buildModel(modelId: string): Promise<BaseChatModel> {
+  async buildModel(
+    modelId: string,
+    options: ModelBuildOptions = {},
+  ): Promise<BaseChatModel> {
     try {
-      return await this.construct(modelId);
+      return await this.construct(modelId, options);
     } catch (error) {
       const code = translateGoogleError(error);
       if (code) {
@@ -182,7 +186,10 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     }
   }
 
-  private async construct(modelId: string): Promise<BaseChatModel> {
+  private async construct(
+    modelId: string,
+    options: ModelBuildOptions,
+  ): Promise<BaseChatModel> {
     const { ChatGoogle } = await import("@langchain/google/node");
     const apiKey = this.resolveApiKey();
     if (!apiKey) {
@@ -203,7 +210,10 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     );
     class ThoughtSignatureSafeChatGoogle extends ChatGoogle {
       override get profile() {
-        return withContextWindow(super.profile, descriptor?.contextWindow);
+        return withContextWindow(
+          super.profile,
+          options.contextWindow ?? descriptor?.contextWindow,
+        );
       }
 
       override async _generate(

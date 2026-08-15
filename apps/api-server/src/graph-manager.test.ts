@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ModelRegistry, type SkillCatalog, type SkillCatalogEntry } from "@pizza-bot/core";
-import { registerBuiltinProviders } from "@pizza-bot/inference-providers";
+import {
+  ModelRegistry,
+  type ModelProvider,
+  type SkillCatalog,
+  type SkillCatalogEntry,
+} from "@pizza-bot/core";
+import { registerBuiltinProviders, UnavailableChatModel } from "@pizza-bot/inference-providers";
 import { GraphManager } from "./graph-manager.js";
 
 const MODEL_ID = "bedrock:global.anthropic.claude-sonnet-5";
@@ -50,6 +55,69 @@ describe("GraphManager", () => {
 
     await registry.replaceCapabilities({ skills: new Map() });
     expect(await registry.agentFor(OTHER_MODEL_ID)).not.toBe(first);
+  });
+
+  it("rebuilds the warm graph when its provider context override changes", async () => {
+    const registry = await createRegistry();
+    const first = registry.agent;
+
+    await registry.setModelOverrides("bedrock", {
+      "global.anthropic.claude-sonnet-5": { contextWindow: 32_768 },
+    });
+
+    expect(registry.agent).not.toBe(first);
+  });
+
+  it("invalidates model variants without rebuilding an unrelated warm graph", async () => {
+    const registry = await createRegistry();
+    const warm = registry.agent;
+    const firstVariant = await registry.agentFor(OTHER_MODEL_ID);
+
+    await registry.setModelOverrides("openai", {
+      "private-deployment": { contextWindow: 32_768 },
+    });
+
+    expect(registry.agent).toBe(warm);
+    expect(await registry.agentFor(OTHER_MODEL_ID)).not.toBe(firstVariant);
+  });
+
+  it("restores registry overrides when the warm graph cannot rebuild", async () => {
+    let failBuild = false;
+    const models = new ModelRegistry();
+    const provider: ModelProvider = {
+      id: "stub",
+      async listModels() {
+        return [{
+          id: "model",
+          provider: "stub",
+          displayName: "Model",
+          contextWindow: 128_000,
+        }];
+      },
+      async buildModel() {
+        if (failBuild) throw new Error("provider unavailable");
+        return new UnavailableChatModel();
+      },
+    };
+    models.register(provider);
+    const registry = new GraphManager({
+      modelId: "stub:model",
+      models,
+      dependencies: {},
+    });
+    await registry.initialize(await models.buildModel("stub:model"));
+    const warm = registry.agent;
+    failBuild = true;
+
+    await expect(registry.setModelOverrides("stub", {
+      model: { contextWindow: 32_768 },
+    })).rejects.toThrow("provider unavailable");
+
+    expect(models.getModelOverrides("stub")).toBeUndefined();
+    expect(registry.agent).toBe(warm);
+    await expect(models.listAll()).resolves.toEqual([
+      expect.objectContaining({ contextWindow: 128_000 }),
+    ]);
   });
 
   it("allows a requested model absent from provider discovery", async () => {

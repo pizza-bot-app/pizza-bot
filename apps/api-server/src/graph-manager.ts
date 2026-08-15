@@ -98,6 +98,8 @@ export class GraphManager {
     displayName: string;
     provider: string;
     contextWindow?: number;
+    detectedContextWindow?: number;
+    contextWindowSource?: "override";
   }>> {
     const descriptors = await this.models.listAll({ includeDisabled });
     return descriptors.map((descriptor) => ({
@@ -105,6 +107,12 @@ export class GraphManager {
       displayName: descriptor.displayName,
       provider: descriptor.provider,
       ...(descriptor.contextWindow ? { contextWindow: descriptor.contextWindow } : {}),
+      ...(descriptor.detectedContextWindow
+        ? { detectedContextWindow: descriptor.detectedContextWindow }
+        : {}),
+      ...(descriptor.contextWindowSource
+        ? { contextWindowSource: descriptor.contextWindowSource }
+        : {}),
     }));
   }
 
@@ -117,6 +125,8 @@ export class GraphManager {
       displayName: string;
       provider: string;
       contextWindow?: number;
+      detectedContextWindow?: number;
+      contextWindowSource?: "override";
     }>;
     providers: ModelCatalogStatus[];
   }> {
@@ -128,6 +138,12 @@ export class GraphManager {
         provider: descriptor.provider,
         ...(descriptor.contextWindow
           ? { contextWindow: descriptor.contextWindow }
+          : {}),
+        ...(descriptor.detectedContextWindow
+          ? { detectedContextWindow: descriptor.detectedContextWindow }
+          : {}),
+        ...(descriptor.contextWindowSource
+          ? { contextWindowSource: descriptor.contextWindowSource }
           : {}),
       })),
       providers: snapshot.providers,
@@ -153,6 +169,28 @@ export class GraphManager {
 
   setEnabledModels(providerId: string, modelIds: readonly string[] | undefined): void {
     this.models.setEnabledModels(providerId, modelIds);
+  }
+
+  async setModelOverrides(
+    providerId: string,
+    overrides: Parameters<ModelRegistry["setModelOverrides"]>[1],
+  ): Promise<void> {
+    await this.enqueueUpdate(async () => {
+      const previous = this.models.getModelOverrides(providerId);
+      const changed = this.models.setModelOverrides(providerId, overrides);
+      if (!changed) return;
+      try {
+        if (this.modelId.startsWith(`${providerId}:`)) {
+          await this.rebuild();
+          return;
+        }
+        this.cache.clear();
+        this.cache.set(this.modelId, Promise.resolve(this.agent));
+      } catch (error) {
+        this.models.setModelOverrides(providerId, previous);
+        throw error;
+      }
+    });
   }
 
   providerProcessEnv(): Record<string, string> {

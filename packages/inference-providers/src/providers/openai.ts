@@ -8,6 +8,7 @@ import type { ChatModelStreamEvent } from "@langchain/core/language_models/event
 import type { ChatOpenAIFields } from "@langchain/openai";
 import {
   classifyError,
+  type ModelBuildOptions,
   type ModelProvider,
   type ModelDescriptor,
   type ResolvedProviderConfig,
@@ -200,9 +201,12 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
     }
   }
 
-  async buildModel(modelId: string): Promise<BaseChatModel> {
+  async buildModel(
+    modelId: string,
+    options: ModelBuildOptions = {},
+  ): Promise<BaseChatModel> {
     try {
-      return await this.construct(modelId);
+      return await this.construct(modelId, options);
     } catch (err) {
       const code = translateOpenAIError(err);
       if (code)
@@ -211,7 +215,10 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
     }
   }
 
-  private async construct(modelId: string): Promise<BaseChatModel> {
+  private async construct(
+    modelId: string,
+    options: ModelBuildOptions,
+  ): Promise<BaseChatModel> {
     const apiKey = this.apiKey ?? process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new OpenAiBuildError("No OpenAI API key configured (set OPENAI_API_KEY).", "AUTH_EXPIRED");
@@ -237,6 +244,9 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
       apiMode: this.apiMode,
       learnedMaxTokens,
       fetch: this.fetchFn,
+      ...(options.contextWindow !== undefined
+        ? { contextWindow: options.contextWindow }
+        : {}),
       ...(descriptor ? { descriptor } : {}),
       ...(configuredBaseUrl ? { baseUrl: configuredBaseUrl } : {}),
     });
@@ -249,6 +259,7 @@ export interface OpenAiChatModelOptions {
   maxTokens: number;
   apiMode: OpenAiApiMode;
   descriptor?: ModelDescriptor;
+  contextWindow?: number;
   learnedMaxTokens?: Map<string, number>;
   baseUrl?: string;
   fetch?: typeof fetch;
@@ -319,6 +330,7 @@ export async function createOpenAiChatModel(
     maxTokens,
     apiMode,
     descriptor,
+    contextWindow,
     learnedMaxTokens,
     baseUrl,
     fetch: fetchFn,
@@ -340,7 +352,10 @@ export async function createOpenAiChatModel(
 
   class DialectChatOpenAI extends ChatOpenAI {
     override get profile() {
-      return withContextWindow(super.profile, descriptor?.contextWindow);
+      return withContextWindow(
+        super.profile,
+        contextWindow ?? descriptor?.contextWindow,
+      );
     }
 
     private outbound(messages: BaseMessage[]): BaseMessage[] {

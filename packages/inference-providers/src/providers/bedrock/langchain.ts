@@ -2,6 +2,7 @@
 import type { BaseMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type {
+  ModelBuildOptions,
   ModelProvider,
   ModelDescriptor,
   ProviderAuthMethod,
@@ -258,9 +259,12 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     };
   }
 
-  async buildModel(modelId: string): Promise<BaseChatModel> {
+  async buildModel(
+    modelId: string,
+    options: ModelBuildOptions = {},
+  ): Promise<BaseChatModel> {
     try {
-      return await this.construct(modelId);
+      return await this.construct(modelId, options);
     } catch (err) {
       const code = translateBedrockError(err);
       if (code) throw new BedrockBuildError(err instanceof Error ? err.message : String(err), code, { cause: err });
@@ -268,7 +272,10 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     }
   }
 
-  private async construct(modelId: string): Promise<BaseChatModel> {
+  private async construct(
+    modelId: string,
+    options: ModelBuildOptions,
+  ): Promise<BaseChatModel> {
     if (!this.descriptors.has(modelId)) {
       await this.listModels().catch(() => []);
     }
@@ -292,6 +299,9 @@ export class BedrockLangChainModelProvider implements ModelProvider {
           : `${mantleEndpoint(this.region)}/v1`,
         fetch: await this.mantleFetch(),
         learnedMaxTokens: this.learnedMaxTokens,
+        ...(options.contextWindow !== undefined
+          ? { contextWindow: options.contextWindow }
+          : {}),
         ...(descriptor ? { descriptor } : {}),
       });
     }
@@ -306,16 +316,22 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         baseUrl: `${mantleEndpoint(this.region)}/anthropic`,
         authMode: "api-key",
         fetch: await this.mantleFetch(),
+        ...(options.contextWindow !== undefined
+          ? { contextWindow: options.contextWindow }
+          : {}),
         ...(descriptor ? { descriptor } : {}),
       });
     }
 
-    return this.constructConverse(modelId, descriptor);
+    return this.constructConverse(
+      modelId,
+      options.contextWindow ?? descriptor?.contextWindow,
+    );
   }
 
   private async constructConverse(
     modelId: string,
-    descriptor: ModelDescriptor | undefined,
+    contextWindow: number | undefined,
   ): Promise<BaseChatModel> {
     const { ChatBedrockConverse } = await import("@langchain/aws");
     const reasoning = supportsReasoning(modelId);
@@ -324,7 +340,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     // from this dynamically imported class, so only `messages` remains typed.
     class ReasoningSafeChatBedrockConverse extends ChatBedrockConverse {
       override get profile() {
-        return withContextWindow(super.profile, descriptor?.contextWindow);
+        return withContextWindow(super.profile, contextWindow);
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

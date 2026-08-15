@@ -7,6 +7,45 @@ export interface SavedProviderConfig {
 export interface ProviderModelPreferences {
   mode: "all" | "selected";
   selected: string[];
+  overrides?: Record<string, ModelOverrides>;
+}
+
+export interface ModelOverrides {
+  contextWindow: number;
+}
+
+export const MAX_CONTEXT_WINDOW = 10_000_000;
+export const MAX_MODEL_OVERRIDES = 5_000;
+
+export function isValidContextWindow(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0 &&
+    (value as number) <= MAX_CONTEXT_WINDOW;
+}
+
+export function parseModelOverrides(
+  value: unknown,
+): NonNullable<ProviderModelPreferences["overrides"]> | null {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length > MAX_MODEL_OVERRIDES) return null;
+
+  const overrides: NonNullable<ProviderModelPreferences["overrides"]> = {};
+  for (const [modelId, candidate] of entries) {
+    if (
+      !modelId ||
+      modelId.length > 512 ||
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
+      return null;
+    }
+    const contextWindow = (candidate as { contextWindow?: unknown }).contextWindow;
+    if (!isValidContextWindow(contextWindow)) return null;
+    overrides[modelId] = { contextWindow };
+  }
+  return overrides;
 }
 
 const ENV_REFERENCE = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/;

@@ -1,12 +1,15 @@
 /** Provider-agnostic registry keyed by `provider:model`. */
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { ErrorCode } from "./protocol-types.js";
+import type { ModelOverrides } from "./provider-config.js";
 
 export interface ModelDescriptor {
   id: string;
   provider: string;
   displayName: string;
   contextWindow?: number;
+  detectedContextWindow?: number;
+  contextWindowSource?: "override";
   maxOutputTokens?: number;
   supportsTools?: boolean;
   supportsVision?: boolean;
@@ -145,10 +148,14 @@ export interface ResolvedProviderConfig {
   values: Record<string, string>;
 }
 
+export interface ModelBuildOptions {
+  contextWindow?: number;
+}
+
 export interface ModelProvider {
   readonly id: string;
   listModels(): Promise<ModelDescriptor[]>;
-  buildModel(modelId: string): Promise<BaseChatModel>;
+  buildModel(modelId: string, options?: ModelBuildOptions): Promise<BaseChatModel>;
   readonly authSchema?: readonly ProviderAuthMethod[];
   /** The provider can use ambient credentials or defaults without saved config. */
   readonly availableWithoutConfig?: boolean;
@@ -212,6 +219,7 @@ export class ModelRegistry {
   private catalogGeneration = 0;
   private lastGoodModels = new Map<string, ModelDescriptor[]>();
   private enabledModels = new Map<string, Set<string>>();
+  private modelOverrides = new Map<string, Map<string, ModelOverrides>>();
 
   register(provider: ModelProvider): void {
     this.providers.set(provider.id, provider);
@@ -233,6 +241,39 @@ export class ModelRegistry {
     else this.enabledModels.set(providerId, new Set(modelIds));
   }
 
+  setModelOverrides(
+    providerId: string,
+    overrides: Readonly<Record<string, ModelOverrides>> | undefined,
+  ): boolean {
+    const entries = Object.entries(overrides ?? {});
+    const previous = this.modelOverrides.get(providerId);
+    if (
+      (previous?.size ?? 0) === entries.length &&
+      entries.every(([modelId, value]) =>
+        previous?.get(modelId)?.contextWindow === value.contextWindow
+      )
+    ) {
+      return false;
+    }
+    if (entries.length === 0) {
+      this.modelOverrides.delete(providerId);
+      return true;
+    }
+    this.modelOverrides.set(
+      providerId,
+      new Map(entries.map(([modelId, value]) => [modelId, { ...value }])),
+    );
+    return true;
+  }
+
+  getModelOverrides(providerId: string): Record<string, ModelOverrides> | undefined {
+    const overrides = this.modelOverrides.get(providerId);
+    if (!overrides) return undefined;
+    return Object.fromEntries(
+      [...overrides].map(([modelId, value]) => [modelId, { ...value }]),
+    );
+  }
+
   private parse(qualified: string): { provider: string; modelId: string } | undefined {
     const idx = qualified.indexOf(":");
     if (idx <= 0 || idx === qualified.length - 1) return undefined;
@@ -244,7 +285,14 @@ export class ModelRegistry {
     if (!parsed) throw new Error(`Model id "${qualified}" must be "provider:model".`);
     const p = this.providers.get(parsed.provider);
     if (!p) throw new Error(`No model provider registered for "${parsed.provider}".`);
-    return p.buildModel(parsed.modelId);
+    const contextWindow = this.modelOverrides
+      .get(parsed.provider)
+      ?.get(parsed.modelId)
+      ?.contextWindow;
+    return p.buildModel(
+      parsed.modelId,
+      contextWindow === undefined ? undefined : { contextWindow },
+    );
   }
 
   async validate(qualified: string): Promise<ModelAvailability> {
@@ -261,7 +309,13 @@ export class ModelRegistry {
       };
     }
     // Discovery is advisory and may itself be unavailable for remote providers.
-    const descriptor = (await p.listModels().catch(() => [])).find((d) => d.id === parsed.modelId);
+    const discovered = (await p.listModels().catch(() => [])).find((d) => d.id === parsed.modelId);
+    const descriptor = discovered
+      ? this.applyDescriptorOverrides(
+          discovered,
+          this.modelOverrides.get(parsed.provider)?.get(parsed.modelId),
+        )
+      : undefined;
     return {
       available: true,
       provider: parsed.provider,
@@ -281,7 +335,14 @@ export class ModelRegistry {
     }
     const p = this.providers.get(check.provider)!;
     try {
-      return await p.buildModel(check.modelId);
+      const contextWindow = this.modelOverrides
+        .get(check.provider)
+        ?.get(check.modelId)
+        ?.contextWindow;
+      return await p.buildModel(
+        check.modelId,
+        contextWindow === undefined ? undefined : { contextWindow },
+      );
     } catch (err) {
       const code = codeOf(err);
       throw new ModelUnavailableError(
@@ -301,13 +362,34 @@ export class ModelRegistry {
     options: { includeDisabled?: boolean; refresh?: boolean } = {},
   ): Promise<ModelCatalogSnapshot> {
     const snapshot = await this.loadCatalog(options.refresh === true);
-    const models = options.includeDisabled
+    const enabledModels = options.includeDisabled
       ? snapshot.models
       : snapshot.models.filter((model) => {
           const enabled = this.enabledModels.get(model.provider);
           return enabled === undefined || enabled.has(model.id);
         });
+    const models = enabledModels.map((model) =>
+      this.applyDescriptorOverrides(
+        model,
+        this.modelOverrides.get(model.provider)?.get(model.id),
+      )
+    );
     return { models, providers: snapshot.providers };
+  }
+
+  private applyDescriptorOverrides(
+    descriptor: ModelDescriptor,
+    overrides: ModelOverrides | undefined,
+  ): ModelDescriptor {
+    if (!overrides) return descriptor;
+    return {
+      ...descriptor,
+      ...(descriptor.contextWindow !== undefined
+        ? { detectedContextWindow: descriptor.contextWindow }
+        : {}),
+      contextWindow: overrides.contextWindow,
+      contextWindowSource: "override",
+    };
   }
 
   private async loadCatalog(refresh: boolean): Promise<ModelCatalogSnapshot> {

@@ -1,9 +1,10 @@
 /** Persists provider settings as environment-variable references, never secrets. */
 import Database from "better-sqlite3";
-import type {
-  ProviderConfigPort,
-  ProviderModelPreferences,
-  SavedProviderConfig,
+import {
+  parseModelOverrides,
+  type ProviderConfigPort,
+  type ProviderModelPreferences,
+  type SavedProviderConfig,
 } from "@pizza-bot/core";
 
 interface ConfigRow {
@@ -158,12 +159,18 @@ function parseConfig(json: string): SavedProviderConfig | undefined {
 function parseModelPreferences(json: string): ProviderModelPreferences | undefined {
   try {
     const parsed = JSON.parse(json) as Partial<ProviderModelPreferences>;
+    const overrides = parseModelOverrides(parsed.overrides);
     if (
       (parsed.mode === "all" || parsed.mode === "selected") &&
       Array.isArray(parsed.selected) &&
-      parsed.selected.every((id) => typeof id === "string")
+      parsed.selected.every((id) => typeof id === "string") &&
+      overrides !== null
     ) {
-      return { mode: parsed.mode, selected: [...new Set(parsed.selected)] };
+      return {
+        mode: parsed.mode,
+        selected: [...new Set(parsed.selected)],
+        ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+      };
     }
   } catch {
     // Ignore corrupt records.

@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import {
   envReferenceName,
   isEnvReference,
+  MAX_CONTEXT_WINDOW,
+  parseModelOverrides,
   type ProviderAuthMethod,
   type ProviderModelPreferences,
   type SavedProviderConfig,
@@ -87,7 +89,9 @@ export function providerRoutes(host: AgentHost): Hono {
     const raw = (await c.req.json().catch(() => ({}))) as {
       mode?: unknown;
       selected?: unknown;
+      overrides?: unknown;
     };
+    const overrides = parseModelOverrides(raw.overrides);
     if (
       (raw.mode !== "all" && raw.mode !== "selected") ||
       !Array.isArray(raw.selected) ||
@@ -96,13 +100,18 @@ export function providerRoutes(host: AgentHost): Hono {
         modelId.length > 0 &&
         modelId.length <= 512
       ) ||
-      raw.selected.length > 5_000
+      raw.selected.length > 5_000 ||
+      overrides === null
     ) {
-      return c.json({ error: "Body must be { mode: \"all\" | \"selected\", selected: string[] }." }, 400);
+      return c.json({
+        error:
+          `Body must include a valid model mode, selected model IDs, and integer context-window overrides between 1 and ${MAX_CONTEXT_WINDOW}.`,
+      }, 400);
     }
     const preferences: ProviderModelPreferences = {
       mode: raw.mode,
       selected: [...new Set(raw.selected)],
+      ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
     };
     await host.setProviderModelPreferences(id, preferences);
     return c.json(preferences);

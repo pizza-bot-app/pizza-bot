@@ -182,7 +182,9 @@ in `core/src/protocol-types.ts`:
   cross-thread.
 - **Model context limits** are resolved by each inference-provider adapter from
   effective local configuration or provider metadata, with models.dev filling
-  missing catalog fields. The adapter publishes the same available limit as
+  missing catalog fields. An optional model-specific user override is persisted
+  with provider model preferences and takes precedence over discovered metadata.
+  The registry publishes the effective limit as
   `ModelDescriptor.contextWindow` for clients and
   `model.profile.maxInputTokens` for DeepAgents summarization. Native LangChain
   profiles remain the fallback when catalog metadata is unavailable.

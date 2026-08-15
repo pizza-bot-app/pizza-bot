@@ -21,6 +21,14 @@ interface ProviderView {
   modelPreferences: ProviderModelPreferences;
 }
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describe("provider routes", () => {
   let dataRoot: string;
   let pluginsDir: string;
@@ -334,9 +342,133 @@ describe("provider routes", () => {
     expect(models.models).toEqual([expect.objectContaining({ id: "anthropic:claude-b" })]);
   });
 
+  it("persists model-specific context-window overrides", async () => {
+    const res = await putModels("anthropic", {
+      mode: "all",
+      selected: [],
+      overrides: {
+        "private-large": { contextWindow: 131_072 },
+        "private-small": { contextWindow: 32_768 },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      mode: "all",
+      selected: [],
+      overrides: {
+        "private-large": { contextWindow: 131_072 },
+        "private-small": { contextWindow: 32_768 },
+      },
+    });
+    expect((await list()).find((p) => p.id === "anthropic")!.modelPreferences)
+      .toEqual({
+        mode: "all",
+        selected: [],
+        overrides: {
+          "private-large": { contextWindow: 131_072 },
+          "private-small": { contextWindow: 32_768 },
+        },
+      });
+  });
+
+  it("restores persisted preferences when applying an override fails", async () => {
+    const previous: ProviderModelPreferences = {
+      mode: "selected",
+      selected: ["private-small"],
+      overrides: { "private-small": { contextWindow: 32_768 } },
+    };
+    await host.setProviderModelPreferences("openai", previous);
+    const graphs = (host as unknown as {
+      graphs: {
+        setEnabledModels(providerId: string, modelIds: string[] | undefined): void;
+        setModelOverrides(
+          providerId: string,
+          overrides: ProviderModelPreferences["overrides"],
+        ): Promise<void>;
+      };
+    }).graphs;
+    const setEnabledModels = vi.spyOn(graphs, "setEnabledModels");
+    vi.spyOn(graphs, "setModelOverrides").mockRejectedValueOnce(
+      new Error("provider unavailable"),
+    );
+
+    await expect(host.setProviderModelPreferences("openai", {
+      mode: "all",
+      selected: [],
+      overrides: { "private-large": { contextWindow: 131_072 } },
+    })).rejects.toThrow("provider unavailable");
+
+    expect(host.providerConfigs.getModelPreferences("openai")).toEqual(previous);
+    expect(setEnabledModels).toHaveBeenLastCalledWith("openai", ["private-small"]);
+  });
+
+  it("serializes same-provider preference updates across rollback", async () => {
+    const previous: ProviderModelPreferences = {
+      mode: "selected",
+      selected: ["private-small"],
+    };
+    const first: ProviderModelPreferences = {
+      mode: "all",
+      selected: [],
+      overrides: { "private-large": { contextWindow: 131_072 } },
+    };
+    const second: ProviderModelPreferences = {
+      mode: "selected",
+      selected: ["private-large"],
+      overrides: { "private-large": { contextWindow: 65_536 } },
+    };
+    await host.setProviderModelPreferences("openai", previous);
+    const graphs = (host as unknown as {
+      graphs: {
+        setModelOverrides(
+          providerId: string,
+          overrides: ProviderModelPreferences["overrides"],
+        ): Promise<void>;
+      };
+    }).graphs;
+    const firstStarted = deferred();
+    const rejectFirst = deferred();
+    const setModelOverrides = vi.spyOn(graphs, "setModelOverrides")
+      .mockImplementationOnce(async () => {
+        firstStarted.resolve();
+        await rejectFirst.promise;
+        throw new Error("provider unavailable");
+      })
+      .mockResolvedValueOnce();
+
+    const firstUpdate = host.setProviderModelPreferences("openai", first);
+    const firstResult = expect(firstUpdate).rejects.toThrow("provider unavailable");
+    await firstStarted.promise;
+    const secondUpdate = host.setProviderModelPreferences("openai", second);
+
+    expect(setModelOverrides).toHaveBeenCalledTimes(1);
+    rejectFirst.resolve();
+    await firstResult;
+    await secondUpdate;
+
+    expect(setModelOverrides).toHaveBeenCalledTimes(2);
+    expect(host.providerConfigs.getModelPreferences("openai")).toEqual(second);
+  });
+
   it("rejects malformed model preferences and unknown providers", async () => {
     expect((await putModels("anthropic", { mode: "selected", selected: "claude" })).status)
       .toBe(400);
+    expect((await putModels("anthropic", {
+      mode: "all",
+      selected: [],
+      overrides: { "private-deployment": { contextWindow: 0 } },
+    })).status).toBe(400);
+    expect((await putModels("anthropic", {
+      mode: "all",
+      selected: [],
+      overrides: { "private-deployment": { contextWindow: 32_768.5 } },
+    })).status).toBe(400);
+    expect((await putModels("anthropic", {
+      mode: "all",
+      selected: [],
+      overrides: { "private-deployment": { contextWindow: 10_000_001 } },
+    })).status).toBe(400);
     expect((await putModels("nope", { mode: "all", selected: [] })).status).toBe(404);
   });
 

@@ -57,6 +57,12 @@ describe("Ollama model discovery", () => {
 
     const model = await provider.buildModel("small:latest");
     expect(model.profile.maxInputTokens).toBe(8_192);
+
+    const overridden = await provider.buildModel("small:latest", {
+      contextWindow: 16_384,
+    }) as typeof model & { numCtx?: number };
+    expect(overridden.numCtx).toBe(16_384);
+    expect(overridden.profile.maxInputTokens).toBe(16_384);
   });
 
   it("replaces a cleared custom host with the environment fallback", async () => {

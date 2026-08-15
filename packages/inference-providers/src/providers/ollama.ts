@@ -5,7 +5,13 @@ import { AIMessage, AIMessageChunk, type BaseMessage } from "@langchain/core/mes
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import type { ChatGenerationChunk, ChatResult } from "@langchain/core/outputs";
 import type { ChatModelStreamEvent } from "@langchain/core/language_models/event";
-import type { ModelProvider, ModelDescriptor, ResolvedProviderConfig, ProviderAuthMethod } from "@pizza-bot/core";
+import type {
+  ModelBuildOptions,
+  ModelProvider,
+  ModelDescriptor,
+  ResolvedProviderConfig,
+  ProviderAuthMethod,
+} from "@pizza-bot/core";
 import {
   buildToolArgNames,
   coerceOllamaMessageContent,
@@ -122,7 +128,10 @@ export class OllamaLangChainModelProvider implements ModelProvider {
     }));
   }
 
-  async buildModel(modelId: string): Promise<BaseChatModel> {
+  async buildModel(
+    modelId: string,
+    options: ModelBuildOptions = {},
+  ): Promise<BaseChatModel> {
     const { ChatOllama } = await import("@langchain/ollama");
     const runSignal = new AsyncLocalStorage<AbortSignal>();
     const fetchWithRunSignal: typeof fetch = (input, init) => {
@@ -130,7 +139,8 @@ export class OllamaLangChainModelProvider implements ModelProvider {
       return this.fetchFn(input, signal ? { ...init, signal } : init);
     };
     const details = await this.inspectModel(modelId);
-    const numCtx = this.effectiveContextWindow(details);
+    // Explicit overrides are authoritative request-level KV cache sizes.
+    const numCtx = options.contextWindow ?? this.effectiveContextWindow(details);
     const think = this.thinking === "enabled" ||
       (this.thinking === "auto" && details?.capabilities?.includes("thinking") === true);
     const modelProfile = {

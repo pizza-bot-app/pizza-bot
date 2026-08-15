@@ -1,6 +1,12 @@
 /** Anthropic-direct provider backed by lazy-loaded `ChatAnthropic`. */
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import type { ModelProvider, ModelDescriptor, ResolvedProviderConfig, ProviderAuthMethod } from "@pizza-bot/core";
+import type {
+  ModelBuildOptions,
+  ModelProvider,
+  ModelDescriptor,
+  ResolvedProviderConfig,
+  ProviderAuthMethod,
+} from "@pizza-bot/core";
 import {
   enrichModelDescriptors,
   resolveModelsDevCatalog,
@@ -192,9 +198,12 @@ export class AnthropicLangChainModelProvider implements ModelProvider {
     }
   }
 
-  async buildModel(modelId: string): Promise<BaseChatModel> {
+  async buildModel(
+    modelId: string,
+    options: ModelBuildOptions = {},
+  ): Promise<BaseChatModel> {
     try {
-      return await this.construct(modelId);
+      return await this.construct(modelId, options);
     } catch (err) {
       const code = translateAnthropicError(err);
       if (code)
@@ -203,7 +212,10 @@ export class AnthropicLangChainModelProvider implements ModelProvider {
     }
   }
 
-  private async construct(modelId: string): Promise<BaseChatModel> {
+  private async construct(
+    modelId: string,
+    options: ModelBuildOptions,
+  ): Promise<BaseChatModel> {
     const apiKey = this.apiKey ?? process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new AnthropicBuildError("No Anthropic API key configured (set ANTHROPIC_API_KEY).", "AUTH_EXPIRED");
@@ -219,6 +231,9 @@ export class AnthropicLangChainModelProvider implements ModelProvider {
       baseUrl: this.resolvedBaseUrl(),
       authMode: this.authMode,
       fetch: this.fetchFn,
+      ...(options.contextWindow !== undefined
+        ? { contextWindow: options.contextWindow }
+        : {}),
       ...(descriptor ? { descriptor } : {}),
     });
   }
@@ -246,6 +261,7 @@ export interface AnthropicChatModelOptions {
   baseUrl: string;
   authMode: AnthropicAuthMode;
   descriptor?: ModelDescriptor;
+  contextWindow?: number;
   fetch?: typeof fetch;
 }
 
@@ -260,6 +276,7 @@ export async function createAnthropicChatModel(
     baseUrl,
     authMode,
     descriptor,
+    contextWindow,
     fetch: fetchFn,
   } = options;
   const defaultHeaders = authMode === "bearer"
@@ -271,7 +288,10 @@ export async function createAnthropicChatModel(
 
   class ContextAwareChatAnthropic extends ChatAnthropic {
     override get profile() {
-      return withContextWindow(super.profile, descriptor?.contextWindow);
+      return withContextWindow(
+        super.profile,
+        contextWindow ?? descriptor?.contextWindow,
+      );
     }
   }
 

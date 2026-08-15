@@ -36,5 +36,6 @@ export async function registerBuiltinProviders(registry: ModelRegistry, configs?
     if (preferences?.mode === "selected") {
       registry.setEnabledModels(provider.id, preferences.selected);
     }
+    registry.setModelOverrides(provider.id, preferences?.overrides);
   }
 }

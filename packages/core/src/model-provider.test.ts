@@ -5,6 +5,7 @@ import {
   ModelRegistry,
   ModelUnavailableError,
   recommendedModelCandidates,
+  type ModelBuildOptions,
   type ModelDescriptor,
   type ModelProvider,
 } from "./model-provider.js";
@@ -12,7 +13,7 @@ import {
 function stubProvider(opts: {
   id?: string;
   models?: ModelDescriptor[];
-  build?: (modelId: string) => Promise<BaseChatModel>;
+  build?: (modelId: string, options?: ModelBuildOptions) => Promise<BaseChatModel>;
   onBuild?: (modelId: string) => void;
 }): ModelProvider {
   const id = opts.id ?? "stub";
@@ -24,9 +25,9 @@ function stubProvider(opts: {
     async listModels() {
       return models;
     },
-    async buildModel(modelId: string) {
+    async buildModel(modelId: string, options?: ModelBuildOptions) {
       opts.onBuild?.(modelId);
-      if (opts.build) return opts.build(modelId);
+      if (opts.build) return opts.build(modelId, options);
       return { modelId } as unknown as BaseChatModel;
     },
   };
@@ -114,6 +115,25 @@ describe("ModelRegistry.resolveModel (requested selection)", () => {
     expect(err.code).toBe("AUTH_EXPIRED");
     expect(err.message).toContain("unavailable");
   });
+
+  it("projects a model-specific context override into the built model profile", async () => {
+    const registry = new ModelRegistry();
+    registry.register(stubProvider({
+      build: async (_modelId, options) => ({
+        profile: { toolCalling: true, maxInputTokens: options?.contextWindow ?? 128_000 },
+      }) as unknown as BaseChatModel,
+    }));
+    registry.setModelOverrides("stub", {
+      "private-deployment": { contextWindow: 32_768 },
+    });
+
+    const model = await registry.resolveModel("stub:private-deployment");
+
+    expect(model.profile).toMatchObject({
+      toolCalling: true,
+      maxInputTokens: 32_768,
+    });
+  });
 });
 
 describe("ModelRegistry.listAll", () => {
@@ -154,6 +174,54 @@ describe("ModelRegistry.listAll", () => {
 
     registry.setEnabledModels("stub", undefined);
     await expect(registry.listAll()).resolves.toHaveLength(2);
+  });
+
+  it("overrides catalog context per model and restores discovered metadata", async () => {
+    const registry = new ModelRegistry();
+    registry.register(stubProvider({
+      models: [{
+        id: "model-a",
+        provider: "stub",
+        displayName: "Model A",
+        contextWindow: 128_000,
+      }],
+    }));
+    registry.setModelOverrides("stub", {
+      "model-a": { contextWindow: 32_768 },
+    });
+
+    await expect(registry.listAll()).resolves.toEqual([
+      expect.objectContaining({
+        id: "model-a",
+        contextWindow: 32_768,
+        detectedContextWindow: 128_000,
+        contextWindowSource: "override",
+      }),
+    ]);
+
+    registry.setModelOverrides("stub", undefined);
+    await expect(registry.listAll()).resolves.toEqual([
+      expect.objectContaining({
+        id: "model-a",
+        contextWindow: 128_000,
+      }),
+    ]);
+  });
+
+  it("detects override changes without depending on object key order", () => {
+    const registry = new ModelRegistry();
+    expect(registry.setModelOverrides("stub", {
+      "model-a": { contextWindow: 32_768 },
+      "model-b": { contextWindow: 65_536 },
+    })).toBe(true);
+    expect(registry.setModelOverrides("stub", {
+      "model-b": { contextWindow: 65_536 },
+      "model-a": { contextWindow: 32_768 },
+    })).toBe(false);
+    expect(registry.setModelOverrides("stub", {
+      "model-a": { contextWindow: 32_768 },
+      "model-b": { contextWindow: 131_072 },
+    })).toBe(true);
   });
 
   it("reports provider failures without hiding successful catalogs", async () => {

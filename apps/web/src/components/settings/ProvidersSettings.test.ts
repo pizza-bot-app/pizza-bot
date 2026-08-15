@@ -3,9 +3,26 @@ import type { ProviderConfigView, ProviderView } from "@/api-client";
 import type { ProviderAuthMethod } from "@pizza-bot/core";
 import {
   getProviderStatus,
+  parseContextWindow,
   secretKeysWithStoredValue,
   unavailableLocalSecretValidationError,
 } from "./ProvidersSettings.js";
+
+describe("parseContextWindow", () => {
+  it("accepts positive whole token counts with common separators", () => {
+    expect(parseContextWindow("32768")).toBe(32_768);
+    expect(parseContextWindow("131,072")).toBe(131_072);
+    expect(parseContextWindow("1_000_000")).toBe(1_000_000);
+  });
+
+  it("rejects empty, fractional, negative, and unsafe values", () => {
+    expect(parseContextWindow("")).toBeUndefined();
+    expect(parseContextWindow("32768.5")).toBeUndefined();
+    expect(parseContextWindow("-1")).toBeUndefined();
+    expect(parseContextWindow("10,000,001")).toBeUndefined();
+    expect(parseContextWindow(String(Number.MAX_SAFE_INTEGER + 1))).toBeUndefined();
+  });
+});
 
 function provider(overrides: Partial<ProviderView>): ProviderView {
   return {

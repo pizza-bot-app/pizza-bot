@@ -336,6 +336,7 @@ export class AgentHost {
 
   private graphs?: GraphManager;
   private readonly warmup: Promise<void>;
+  private readonly providerPreferenceUpdates = new Map<string, Promise<void>>();
   private readinessState: "warming" | "ready" | "failed" = "warming";
 
   private skillsDir?: string | false;
@@ -854,20 +855,72 @@ export class AgentHost {
     preferences: ProviderModelPreferences,
   ): Promise<void> {
     await this.warmup;
-    this.graphs!.setEnabledModels(
-      providerId,
-      preferences.mode === "selected" ? preferences.selected : undefined,
-    );
-    this.providerConfigs.setModelPreferences(providerId, preferences);
-    if (!this.explicitModelId && !this.providerConfigs.getDefaultModel()) {
-      await this.setDefaultModel(null);
-    }
+    await this.queueProviderPreferenceUpdate(providerId, async () => {
+      const previous = this.providerConfigs.getModelPreferences(providerId);
+      this.providerConfigs.setModelPreferences(providerId, preferences);
+      this.graphs!.setEnabledModels(
+        providerId,
+        preferences.mode === "selected" ? preferences.selected : undefined,
+      );
+      try {
+        await this.graphs!.setModelOverrides(providerId, preferences.overrides);
+      } catch (error) {
+        if (previous) this.providerConfigs.setModelPreferences(providerId, previous);
+        else this.providerConfigs.removeModelPreferences(providerId);
+        this.restoreEnabledModels(providerId, previous);
+        throw error;
+      }
+      if (!this.explicitModelId && !this.providerConfigs.getDefaultModel()) {
+        await this.setDefaultModel(null);
+      }
+    });
   }
 
   async clearProviderModelPreferences(providerId: string): Promise<void> {
     await this.warmup;
-    this.graphs!.setEnabledModels(providerId, undefined);
-    this.providerConfigs.removeModelPreferences(providerId);
+    await this.queueProviderPreferenceUpdate(providerId, async () => {
+      const previous = this.providerConfigs.getModelPreferences(providerId);
+      this.providerConfigs.removeModelPreferences(providerId);
+      this.graphs!.setEnabledModels(providerId, undefined);
+      try {
+        await this.graphs!.setModelOverrides(providerId, undefined);
+      } catch (error) {
+        if (previous) this.providerConfigs.setModelPreferences(providerId, previous);
+        this.restoreEnabledModels(providerId, previous);
+        throw error;
+      }
+    });
+  }
+
+  private queueProviderPreferenceUpdate(
+    providerId: string,
+    update: () => Promise<void>,
+  ): Promise<void> {
+    const prior = this.providerPreferenceUpdates.get(providerId) ?? Promise.resolve();
+    const result = prior.then(update);
+    const tail = result.catch(() => {});
+    this.providerPreferenceUpdates.set(providerId, tail);
+    return result.finally(() => {
+      if (this.providerPreferenceUpdates.get(providerId) === tail) {
+        this.providerPreferenceUpdates.delete(providerId);
+      }
+    });
+  }
+
+  private async drainProviderPreferenceUpdates(): Promise<void> {
+    while (this.providerPreferenceUpdates.size > 0) {
+      await Promise.all(this.providerPreferenceUpdates.values());
+    }
+  }
+
+  private restoreEnabledModels(
+    providerId: string,
+    previous: ProviderModelPreferences | undefined,
+  ): void {
+    this.graphs!.setEnabledModels(
+      providerId,
+      previous?.mode === "selected" ? previous.selected : undefined,
+    );
   }
 
   async contextWindow(): Promise<number | undefined> {
@@ -1821,6 +1874,7 @@ export class AgentHost {
     // Run-end and pending-delete maintenance write through the app stores, so let
     // them settle before any store closes.
     await this.drainMaintenance();
+    await this.drainProviderPreferenceUpdates();
     await this.mcpReloads.catch(() => {});
     await Promise.allSettled(this.mcpRetirements);
     // Disarm before closing transports because their onclose hooks also fire here.

@@ -903,6 +903,8 @@ export interface ModelsInfo {
     displayName: string;
     provider: string;
     contextWindow?: number;
+    detectedContextWindow?: number;
+    contextWindowSource?: "override";
   }>;
   providers?: ModelCatalogStatus[];
   default: string;
@@ -931,6 +933,7 @@ export interface ProviderView {
 export interface ProviderModelPreferences {
   mode: "all" | "selected";
   selected: string[];
+  overrides?: Record<string, { contextWindow: number }>;
 }
 
 export interface AgentInfo {

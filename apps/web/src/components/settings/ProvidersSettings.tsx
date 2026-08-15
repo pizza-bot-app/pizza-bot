@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, RefreshCw, Search, Settings2, X } from "lucide-react";
 import { SECRET_UNCHANGED } from "@/api-client";
 import type {
   ProviderView,
@@ -8,14 +8,31 @@ import type {
   ModelsInfo,
   StatusInfo,
 } from "@/api-client";
-import type {
-  ModelCatalogStatus,
-  ProviderAuthField,
-  ProviderAuthMethod,
+import {
+  isValidContextWindow,
+  MAX_CONTEXT_WINDOW,
+  type ModelCatalogStatus,
+  type ProviderAuthField,
+  type ProviderAuthMethod,
 } from "@pizza-bot/core";
 import { L } from "../../lexicon.js";
 import { groupModelsByProvider, providerLabel } from "../../model-options.js";
 import { useAppToast } from "../AppToast.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog.js";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip.js";
 
 // Secret inputs never receive stored values. Desktop stores raw keys in the OS
 // keychain; browser mode accepts only an environment-variable reference.
@@ -135,10 +152,14 @@ function ProviderSummary({
   onSelect: () => void;
 }) {
   const status = getProviderStatus(provider, catalog, health);
+  const overrideCount = Object.keys(provider.modelPreferences.overrides ?? {}).length;
   const modelSummary =
     provider.modelPreferences.mode === "selected"
       ? `${provider.modelPreferences.selected.length} selected`
       : `${modelCount} model${modelCount === 1 ? "" : "s"}`;
+  const summary = overrideCount > 0
+    ? `${modelSummary} · ${overrideCount} override${overrideCount === 1 ? "" : "s"}`
+    : modelSummary;
 
   return (
     <button type="button" className="settings-provider-summary" onClick={onSelect}>
@@ -147,7 +168,7 @@ function ProviderSummary({
           <span className="settings-provider-name">{providerLabel(provider.id)}</span>
           <span className={`provenance-badge ${status.tone}`}>{status.label}</span>
         </span>
-        <span className="settings-row-hint">{modelSummary}</span>
+        <span className="settings-row-hint">{summary}</span>
       </span>
       <ChevronRight size={17} aria-hidden="true" />
     </button>
@@ -451,6 +472,11 @@ function ProviderModelsField({
 }) {
   const selected = new Set(preferences.selected);
   const normalized = query.trim().toLowerCase();
+  const overrides = preferences.overrides ?? {};
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
+  const [editorMode, setEditorMode] = useState<"automatic" | "override">("automatic");
+  const [contextDraft, setContextDraft] = useState("");
+  const [contextError, setContextError] = useState<string | null>(null);
   const rawId = (qualified: string) =>
     qualified.startsWith(`${providerId}:`)
       ? qualified.slice(providerId.length + 1)
@@ -458,14 +484,28 @@ function ProviderModelsField({
   const discovered = models.map((model) => ({
     id: rawId(model.id),
     displayName: model.displayName,
+    contextWindow: model.contextWindow,
+    detectedContextWindow: model.detectedContextWindow,
+    contextWindowSource: model.contextWindowSource,
     savedOnly: false,
   }));
   const discoveredIds = new Set(discovered.map((model) => model.id));
+  const retainedIds = [...new Set([
+    ...(preferences.mode === "selected" ? preferences.selected : []),
+    ...Object.keys(overrides),
+  ])];
   const choices = [
     ...discovered,
-    ...preferences.selected
+    ...retainedIds
       .filter((id) => !discoveredIds.has(id))
-      .map((id) => ({ id, displayName: id, savedOnly: true })),
+      .map((id) => ({
+        id,
+        displayName: id,
+        contextWindow: overrides[id]?.contextWindow,
+        detectedContextWindow: undefined,
+        contextWindowSource: overrides[id] ? "override" as const : undefined,
+        savedOnly: true,
+      })),
   ];
   const visible = choices
     .filter((model) =>
@@ -477,7 +517,40 @@ function ProviderModelsField({
     const next = new Set(selected);
     if (next.has(modelId)) next.delete(modelId);
     else next.add(modelId);
-    onChange({ mode: "selected", selected: [...next] });
+    onChange({ ...preferences, mode: "selected", selected: [...next] });
+  };
+  const editingModel = choices.find((model) => model.id === editingModelId);
+  const detectedContextWindow = automaticContextWindow(editingModel);
+  const openEditor = (modelId: string) => {
+    const existing = overrides[modelId];
+    const model = choices.find((choice) => choice.id === modelId);
+    const detected = automaticContextWindow(model);
+    setEditingModelId(modelId);
+    setEditorMode(existing ? "override" : "automatic");
+    setContextDraft(existing ? String(existing.contextWindow) : detected ? String(detected) : "");
+    setContextError(null);
+  };
+  const applyEditor = () => {
+    if (!editingModelId) return;
+    const nextOverrides = { ...overrides };
+    if (editorMode === "automatic") {
+      delete nextOverrides[editingModelId];
+    } else {
+      const contextWindow = parseContextWindow(contextDraft);
+      if (contextWindow === undefined) {
+        setContextError(
+          `Enter a whole number between 1 and ${MAX_CONTEXT_WINDOW.toLocaleString("en-US")}.`,
+        );
+        return;
+      }
+      nextOverrides[editingModelId] = { contextWindow };
+    }
+    const { overrides: _currentOverrides, ...base } = preferences;
+    onChange({
+      ...base,
+      ...(Object.keys(nextOverrides).length > 0 ? { overrides: nextOverrides } : {}),
+    });
+    setEditingModelId(null);
   };
 
   return (
@@ -523,52 +596,190 @@ function ProviderModelsField({
           <span className="segmented-count">{preferences.selected.length}</span>
         </button>
       </div>
-      {preferences.mode === "selected" && (
-        <>
-          <div className="sidebar-search-wrap provider-model-search">
-            <Search size={15} className="sidebar-search-icon" />
-            <input
-              className="sidebar-search"
-              aria-label={`Search ${providerId} models`}
-              placeholder="Search models..."
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-            />
-            {query && (
+      <div className="sidebar-search-wrap provider-model-search">
+        <Search size={15} className="sidebar-search-icon" />
+        <input
+          className="sidebar-search"
+          aria-label={`Search ${providerId} models`}
+          placeholder="Search models..."
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+        />
+        {query && (
+          <button
+            type="button"
+            className="sidebar-search-clear"
+            aria-label="Clear model search"
+            onClick={() => onQueryChange("")}
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+      <div className="provider-model-list">
+        {visible.length === 0 && (
+          <div className="provider-model-empty">{L.modelCatalogEmpty}</div>
+        )}
+        <TooltipProvider>
+          {visible.map((model) => {
+            const contextOverride = overrides[model.id];
+            const providerContextWindow = automaticContextWindow(model);
+            const modelCopy = (
+              <span className="provider-model-option-copy">
+                <span className="provider-model-option-name">
+                  {model.displayName}
+                  {model.savedOnly ? ` ${L.modelCatalogSavedOnly}` : ""}
+                </span>
+                <span className="provider-model-option-context">
+                  Context {formatContextWindow(
+                    contextOverride?.contextWindow ?? providerContextWindow,
+                  )}
+                  {contextOverride && <span className="provenance-badge user">Override</span>}
+                </span>
+              </span>
+            );
+            return (
+              <div className="provider-model-option" key={model.id}>
+                {preferences.mode === "selected" ? (
+                  <label className="provider-model-option-select selectable">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(model.id)}
+                      onChange={() => toggle(model.id)}
+                    />
+                    {modelCopy}
+                  </label>
+                ) : (
+                  <div className="provider-model-option-select">{modelCopy}</div>
+                )}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="provider-model-settings"
+                      aria-label={`Settings for ${model.displayName}`}
+                      onClick={() => openEditor(model.id)}
+                    >
+                      <Settings2 size={15} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent sideOffset={6}>Model settings</TooltipContent>
+                </Tooltip>
+              </div>
+            );
+          })}
+        </TooltipProvider>
+      </div>
+
+      <Dialog
+        open={editingModelId !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingModelId(null);
+        }}
+      >
+        <DialogContent className="provider-model-settings-dialog">
+          <DialogHeader>
+            <DialogTitle className="provider-model-settings-title">
+              {editingModel?.displayName ?? editingModelId}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Configure model context window.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="provider-model-settings-body">
+            <div className="field-label">Context window</div>
+            <div
+              className="segmented provider-context-mode"
+              role="group"
+              aria-label="Context window source"
+            >
               <button
                 type="button"
-                className="sidebar-search-clear"
-                aria-label="Clear model search"
-                onClick={() => onQueryChange("")}
+                className={`segmented-btn${editorMode === "automatic" ? " active" : ""}`}
+                aria-pressed={editorMode === "automatic"}
+                onClick={() => {
+                  setEditorMode("automatic");
+                  setContextError(null);
+                }}
               >
-                <X size={14} />
+                Automatic
               </button>
+              <button
+                type="button"
+                className={`segmented-btn${editorMode === "override" ? " active" : ""}`}
+                aria-pressed={editorMode === "override"}
+                onClick={() => {
+                  setEditorMode("override");
+                  if (!contextDraft && detectedContextWindow) {
+                    setContextDraft(String(detectedContextWindow));
+                  }
+                  setContextError(null);
+                }}
+              >
+                Override
+              </button>
+            </div>
+            {editorMode === "automatic" ? (
+              <div className="provider-context-automatic">
+                <span>Provider value</span>
+                <strong>{formatContextWindow(detectedContextWindow, true)}</strong>
+              </div>
+            ) : (
+              <label className="field provider-context-input-field">
+                <span className="field-label">Tokens</span>
+                <input
+                  className="field-input"
+                  inputMode="numeric"
+                  autoFocus
+                  value={contextDraft}
+                  aria-invalid={contextError !== null}
+                  onChange={(event) => {
+                    setContextDraft(event.target.value);
+                    setContextError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") applyEditor();
+                  }}
+                />
+              </label>
             )}
+            {contextError && <div className="provider-context-error">{contextError}</div>}
           </div>
-          <div className="provider-model-list">
-            {visible.length === 0 && (
-              <div className="provider-model-empty">{L.modelCatalogEmpty}</div>
-            )}
-            {visible.map((model) => {
-              return (
-                <label className="provider-model-option" key={model.id}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(model.id)}
-                    onChange={() => toggle(model.id)}
-                  />
-                  <span>
-                    {model.displayName}
-                    {model.savedOnly ? ` ${L.modelCatalogSavedOnly}` : ""}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        </>
-      )}
+          <DialogFooter>
+            <DialogClose asChild>
+              <button type="button" className="btn-secondary">Cancel</button>
+            </DialogClose>
+            <button type="button" className="btn-primary" onClick={applyEditor}>
+              Done
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+export function parseContextWindow(value: string): number | undefined {
+  const normalized = value.trim().replace(/[,_\s]/g, "");
+  if (!/^\d+$/.test(normalized)) return undefined;
+  const parsed = Number(normalized);
+  return isValidContextWindow(parsed) ? parsed : undefined;
+}
+
+function automaticContextWindow(model: {
+  contextWindow?: number;
+  detectedContextWindow?: number;
+  contextWindowSource?: "override";
+} | undefined): number | undefined {
+  return model?.detectedContextWindow ??
+    (model?.contextWindowSource === "override" ? undefined : model?.contextWindow);
+}
+
+function formatContextWindow(value: number | undefined, full = false): string {
+  if (value === undefined) return "Not reported";
+  return new Intl.NumberFormat("en-US", full
+    ? { maximumFractionDigits: 0 }
+    : { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
 function FieldInput({

@@ -1,6 +1,7 @@
 /** OpenRouter provider backed by the native LangChain `ChatOpenRouter` integration. */
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type {
+  ModelBuildOptions,
   ModelDescriptor,
   ModelProvider,
   ProviderAuthMethod,
@@ -170,7 +171,10 @@ export class OpenRouterLangChainModelProvider implements ModelProvider {
     }
   }
 
-  async buildModel(modelId: string): Promise<BaseChatModel> {
+  async buildModel(
+    modelId: string,
+    options: ModelBuildOptions = {},
+  ): Promise<BaseChatModel> {
     const { ChatOpenRouter } = await import("@langchain/openrouter");
     const apiKey = this.resolveApiKey();
     if (!apiKey) {
@@ -191,7 +195,10 @@ export class OpenRouterLangChainModelProvider implements ModelProvider {
 
     class ContextAwareChatOpenRouter extends ChatOpenRouter {
       override get profile() {
-        return withContextWindow(super.profile, descriptor?.contextWindow);
+        return withContextWindow(
+          super.profile,
+          options.contextWindow ?? descriptor?.contextWindow,
+        );
       }
     }
 
