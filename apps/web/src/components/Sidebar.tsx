@@ -9,8 +9,16 @@ import {
   Pin,
   PinOff,
   Trash2,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  FolderInput,
+  MoreHorizontal,
+  Pencil,
+  Check,
+  SlidersHorizontal,
 } from "lucide-react";
-import type { ApiClient, ThreadInfo, SearchHit } from "@/api-client";
+import type { ApiClient, FolderInfo, ThreadInfo, SearchHit } from "@/api-client";
 import { useKnownThreadIds, useRunningThreadIds } from "../use-thread-slice.js";
 import { datePeriod, PERIOD_ORDER, relativeTime, type DatePeriod } from "../lib/conversation.js";
 import { selectionAfterDelete } from "../lib/list-nav.js";
@@ -34,13 +42,22 @@ import { createConversationSearch } from "../conversation-search.js";
 import { ConfirmationDialog } from "./ConfirmationDialog.js";
 import { useAppToast } from "./AppToast.js";
 import { SwipeToDelete } from "./SwipeToDelete.js";
+import { FolderNameDialog } from "./FolderNameDialog.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.js";
 
 export interface SidebarProps {
   client: ApiClient;
   openedThreads: ReadonlySet<string>;
   activeThreadId: string | null;
   onSelect: (threadId: string) => void;
-  onNewChat: () => void;
+  onNewChat: (folderId?: string) => void | Promise<void>;
   onOpenThread: (threadId: string) => void;
   onOpenSearchHit?: (hit: SearchHit) => void;
   onDeleted: (threadId: string) => void;
@@ -50,7 +67,11 @@ export interface SidebarProps {
   onFocusComposer?: () => void;
 }
 
-type Filter = "all" | "unread" | "action";
+type Filter = "all" | "unread" | "action" | "unfiled" | `folder:${string}`;
+
+type FolderEditor =
+  | { mode: "create" }
+  | { mode: "rename"; folder: FolderInfo };
 
 export function Sidebar({
   client,
@@ -70,14 +91,20 @@ export function Sidebar({
   const localKnown = useKnownThreadIds();
   const localRunning = useRunningThreadIds();
   const [threads, setThreads] = useState<ThreadInfo[]>([]);
+  const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
+  const [foldersVisible, setFoldersVisible] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<string>>(
     () => new Set<string>(["Last Week", "This Month", "Older"]),
   );
   const [confirmDelete, setConfirmDelete] = useState<ThreadInfo | null>(null);
+  const [folderEditor, setFolderEditor] = useState<FolderEditor | null>(null);
+  const [confirmFolderDelete, setConfirmFolderDelete] = useState<FolderInfo | null>(null);
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
   const [swipedThreadId, setSwipedThreadId] = useState<string | null>(null);
   const threadListRef = useRef<HTMLDivElement | null>(null);
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null);
@@ -91,7 +118,7 @@ export function Sidebar({
     [listRef],
   );
 
-  const refresh = useMemo(
+  const refreshThreads = useMemo(
     () =>
       createSidebarRefresh(client, {
         onThreads: (list) => {
@@ -101,6 +128,15 @@ export function Sidebar({
       }),
     [client, onThreadsLoaded],
   );
+
+  const refresh = useCallback(async () => {
+    const [threadList, folderList] = await Promise.all([
+      refreshThreads(),
+      client.listFolders(),
+    ]);
+    setFolders(folderList);
+    return threadList;
+  }, [client, refreshThreads]);
 
   const completionRefresh = useMemo(
     () =>
@@ -153,10 +189,76 @@ export function Sidebar({
     [client, notify, refresh],
   );
 
+  const onMoveThread = useCallback(
+    async (thread: ThreadInfo, folderId: string | null) => {
+      try {
+        const updated = await client.setThreadFolder(thread.threadId, folderId);
+        setThreads((current) =>
+          current.map((candidate) =>
+            candidate.threadId === updated.threadId ? updated : candidate,
+          ),
+        );
+      } catch (error) {
+        console.error("move thread failed", error);
+        notify({
+          title: "Could not move conversation",
+          description: error instanceof Error ? error.message : undefined,
+          tone: "error",
+        });
+      }
+    },
+    [client, notify],
+  );
+
+  const saveFolder = useCallback(
+    async (name: string) => {
+      const editor = folderEditor;
+      if (!editor) return;
+      setFolderBusy(true);
+      setFolderError(null);
+      try {
+        const folder =
+          editor.mode === "create"
+            ? await client.createFolder(name)
+            : await client.renameFolder(editor.folder.folderId, name);
+        setFolderEditor(null);
+        await refresh();
+        if (editor.mode === "create") setFilter(`folder:${folder.folderId}`);
+      } catch (error) {
+        setFolderError(error instanceof Error ? error.message : "Folder update failed");
+      } finally {
+        setFolderBusy(false);
+      }
+    },
+    [client, folderEditor, refresh],
+  );
+
+  const deleteFolder = useCallback(async () => {
+    const folder = confirmFolderDelete;
+    if (!folder) return;
+    setFolderBusy(true);
+    setFolderError(null);
+    try {
+      await client.deleteFolder(folder.folderId);
+      setConfirmFolderDelete(null);
+      if (filter === `folder:${folder.folderId}`) setFilter("unfiled");
+      await refresh();
+    } catch (error) {
+      setFolderError(error instanceof Error ? error.message : "Folder deletion failed");
+    } finally {
+      setFolderBusy(false);
+    }
+  }, [client, confirmFolderDelete, filter, refresh]);
+
   // The dialog layer keeps Enter and Escape from reaching list/global bindings.
   useLayer("sidebar-delete", {
-    active: !!confirmDelete,
-    onEscape: () => setConfirmDelete(null),
+    active: !!confirmDelete || !!folderEditor || !!confirmFolderDelete,
+    onEscape: () => {
+      setConfirmDelete(null);
+      setFolderEditor(null);
+      setConfirmFolderDelete(null);
+      setFolderError(null);
+    },
   });
 
   useEffect(() => {
@@ -229,11 +331,19 @@ export function Sidebar({
     [activeThreadId],
   );
 
+  const selectedFolderId = filter.startsWith("folder:")
+    ? filter.slice("folder:".length)
+    : undefined;
+
   const visibleRows =
     filter === "unread"
       ? rows.filter(isUnread)
       : filter === "action"
         ? rows.filter((t) => t.awaitingAction)
+        : filter === "unfiled"
+          ? rows.filter((t) => !t.folderId)
+          : selectedFolderId
+            ? rows.filter((t) => t.folderId === selectedFolderId)
         : rows;
 
   const unreadCount = useMemo(() => rows.filter(isUnread).length, [rows, isUnread]);
@@ -241,6 +351,23 @@ export function Sidebar({
     () => rows.filter((t) => t.awaitingAction).length,
     [rows],
   );
+  const folderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const thread of rows) {
+      if (thread.folderId) {
+        counts.set(thread.folderId, (counts.get(thread.folderId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [rows]);
+  const unfiledCount = useMemo(
+    () => rows.filter((thread) => !thread.folderId).length,
+    [rows],
+  );
+  const toggleFolders = useCallback(() => {
+    if (foldersVisible) setFilter("all");
+    setFoldersVisible((visible) => !visible);
+  }, [foldersVisible]);
 
   const groups = useMemo(() => {
     const pinned = visibleRows.filter((t) => t.pinned);
@@ -364,7 +491,10 @@ export function Sidebar({
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <button className="new-chat" onClick={onNewChat}>
+        <button
+          className="new-chat"
+          onClick={() => void onNewChat(selectedFolderId)}
+        >
           <Plus size={16} /> New
         </button>
         <div className="sidebar-search-wrap">
@@ -413,7 +543,92 @@ export function Sidebar({
             {actionCount > 0 && <span className="segmented-count">{actionCount}</span>}
           </button>
         </div>
+        <button
+          className={`sidebar-filter-more${foldersVisible ? " active" : ""}`}
+          title={foldersVisible ? "Hide folder filters" : "Show folder filters"}
+          aria-label={foldersVisible ? "Hide folder filters" : "Show folder filters"}
+          aria-pressed={foldersVisible}
+          onClick={toggleFolders}
+        >
+          <SlidersHorizontal size={15} />
+        </button>
       </div>
+
+      {foldersVisible && (
+        <div className="sidebar-folders">
+          <div className="sidebar-folders-head">
+            <span>Folders</span>
+            <button
+              className="sidebar-folder-add"
+              aria-label="Create folder"
+              title="Create folder"
+              onClick={() => {
+                setFolderError(null);
+                setFolderEditor({ mode: "create" });
+              }}
+            >
+              <FolderPlus size={15} />
+            </button>
+          </div>
+          <div className="sidebar-folder-list">
+            <button
+              className={`sidebar-folder-row${filter === "unfiled" ? " active" : ""}`}
+              onClick={() => setFilter("unfiled")}
+            >
+              <FolderOpen size={15} />
+              <span className="sidebar-folder-name">Inbox</span>
+              <span className="sidebar-folder-count">{unfiledCount}</span>
+            </button>
+            {folders.map((folder) => (
+              <div
+                className={`sidebar-folder-row${filter === `folder:${folder.folderId}` ? " active" : ""}`}
+                key={folder.folderId}
+              >
+                <button
+                  className="sidebar-folder-select"
+                  onClick={() => setFilter(`folder:${folder.folderId}`)}
+                >
+                  <Folder size={15} />
+                  <span className="sidebar-folder-name">{folder.name}</span>
+                </button>
+                <span className="sidebar-folder-count">
+                  {folderCounts.get(folder.folderId) ?? 0}
+                </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className="sidebar-folder-actions"
+                      aria-label={`Manage ${folder.name}`}
+                      title="Folder actions"
+                    >
+                      <MoreHorizontal size={15} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="thread-folder-menu">
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setFolderError(null);
+                        setFolderEditor({ mode: "rename", folder });
+                      }}
+                    >
+                      <Pencil /> Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => {
+                        setFolderError(null);
+                        setConfirmFolderDelete(folder);
+                      }}
+                    >
+                      <Trash2 /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="sidebar-scroll" ref={sidebarScrollRef}>
         {searchActive ? (
@@ -524,6 +739,47 @@ export function Sidebar({
                                 )}
                                 {t.source === "fork" && <span className="thread-badge">⑂</span>}
                                 <span className="thread-actions">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <button
+                                        className="thread-action"
+                                        aria-label="Move conversation"
+                                        title="Move to folder"
+                                        onClick={(event) => event.stopPropagation()}
+                                      >
+                                        <FolderInput size={14} />
+                                      </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent
+                                      align="end"
+                                      className="thread-folder-menu"
+                                      onClick={(event) => event.stopPropagation()}
+                                    >
+                                      <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                                      <DropdownMenuItem
+                                        onSelect={() => void onMoveThread(t, null)}
+                                      >
+                                        {!t.folderId ? <Check /> : <FolderOpen />}
+                                        Inbox
+                                      </DropdownMenuItem>
+                                      {folders.length > 0 && <DropdownMenuSeparator />}
+                                      {folders.map((folder) => (
+                                        <DropdownMenuItem
+                                          key={folder.folderId}
+                                          onSelect={() =>
+                                            void onMoveThread(t, folder.folderId)
+                                          }
+                                        >
+                                          {t.folderId === folder.folderId ? (
+                                            <Check />
+                                          ) : (
+                                            <Folder />
+                                          )}
+                                          {folder.name}
+                                        </DropdownMenuItem>
+                                      ))}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
                                   <button
                                     className={`thread-action${t.pinned ? " pinned" : ""}`}
                                     aria-label={t.pinned ? "Unpin conversation" : "Pin conversation"}
@@ -569,6 +825,37 @@ export function Sidebar({
           destructive
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => void onDeleteConfirm()}
+        />
+      )}
+      {folderEditor && (
+        <FolderNameDialog
+          title={folderEditor.mode === "create" ? "Create folder" : "Rename folder"}
+          confirmLabel={folderEditor.mode === "create" ? "Create" : "Rename"}
+          {...(folderEditor.mode === "rename"
+            ? { initialName: folderEditor.folder.name }
+            : {})}
+          busy={folderBusy}
+          error={folderError}
+          onCancel={() => {
+            setFolderEditor(null);
+            setFolderError(null);
+          }}
+          onConfirm={(name) => void saveFolder(name)}
+        />
+      )}
+      {confirmFolderDelete && (
+        <ConfirmationDialog
+          title="Delete folder?"
+          message={`Conversations in “${confirmFolderDelete.name}” will move to Inbox. No conversations will be deleted.`}
+          confirmLabel="Delete"
+          destructive
+          busy={folderBusy}
+          error={folderError}
+          onCancel={() => {
+            setConfirmFolderDelete(null);
+            setFolderError(null);
+          }}
+          onConfirm={() => void deleteFolder()}
         />
       )}
     </div>

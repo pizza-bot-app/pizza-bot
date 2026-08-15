@@ -7,6 +7,7 @@ export interface ThreadRecord {
   threadId: string;
   title: string;
   source: ThreadSource;
+  folderId?: string;
   pinned: boolean;
   /** Indicates completed activity that the user has not viewed. */
   unread: boolean;
@@ -26,6 +27,7 @@ export interface ThreadRecord {
 interface ThreadRow {
   thread_id: string;
   title: string;
+  folder_id: string | null;
   parent_thread_id: string | null;
   parent_checkpoint_id: string | null;
   source: string;
@@ -43,6 +45,7 @@ export interface NewThreadInput {
   threadId: string;
   title?: string;
   source?: ThreadSource;
+  folderId?: string;
   pinned?: boolean;
   parentThreadId?: string;
   parentCheckpointId?: string;
@@ -64,7 +67,9 @@ export type ThreadPatch = Partial<
     | "lastMessage"
     | "lastMessageRole"
   >
->;
+> & {
+  folderId?: string | null;
+};
 
 export class ThreadStore {
   private readonly db: Database.Database;
@@ -76,6 +81,7 @@ export class ThreadStore {
       CREATE TABLE IF NOT EXISTS threads (
         thread_id            TEXT PRIMARY KEY,
         title                TEXT NOT NULL,
+        folder_id            TEXT,
         parent_thread_id     TEXT,
         parent_checkpoint_id TEXT,
         source               TEXT NOT NULL DEFAULT 'user',
@@ -92,6 +98,13 @@ export class ThreadStore {
         ON threads (pinned DESC, last_activity_at DESC);
       CREATE INDEX IF NOT EXISTS idx_threads_source  ON threads (source);
     `);
+    const columns = this.db
+      .prepare<[], { name: string }>("PRAGMA table_info(threads)")
+      .all();
+    if (!columns.some((column) => column.name === "folder_id")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN folder_id TEXT");
+    }
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_threads_folder ON threads (folder_id)");
   }
 
   /** The shared database handle is owned by `openAppDatabase`. */
@@ -103,6 +116,7 @@ export class ThreadStore {
       threadId: input.threadId,
       title: input.title ?? "New conversation",
       source: input.source ?? "user",
+      ...(input.folderId !== undefined ? { folderId: input.folderId } : {}),
       pinned: input.pinned ?? false,
       unread: false,
       awaitingAction: false,
@@ -117,11 +131,11 @@ export class ThreadStore {
     this.db
       .prepare(
         `INSERT INTO threads
-           (thread_id, title, parent_thread_id, parent_checkpoint_id, source, pinned, unread,
+           (thread_id, title, folder_id, parent_thread_id, parent_checkpoint_id, source, pinned, unread,
             awaiting_action, model_id, created_at, last_activity_at, last_message,
             last_message_role)
          VALUES
-           (@thread_id, @title, @parent_thread_id, @parent_checkpoint_id, @source, @pinned, @unread,
+           (@thread_id, @title, @folder_id, @parent_thread_id, @parent_checkpoint_id, @source, @pinned, @unread,
             @awaiting_action, @model_id, @created_at, @last_activity_at, @last_message,
             @last_message_role)`,
       )
@@ -154,17 +168,20 @@ export class ThreadStore {
   update(threadId: string, patch: ThreadPatch): ThreadRecord | undefined {
     const current = this.get(threadId);
     if (!current) return undefined;
+    const { folderId, ...rest } = patch;
     const merged: ThreadRecord = {
       ...current,
-      ...patch,
+      ...rest,
       threadId,
       createdAt: current.createdAt,
       lastActivityAt: current.lastActivityAt,
+      ...(folderId ? { folderId } : {}),
     };
+    if ("folderId" in patch && folderId === null) delete merged.folderId;
     this.db
       .prepare(
         `UPDATE threads SET
-           title = @title, parent_thread_id = @parent_thread_id,
+           title = @title, folder_id = @folder_id, parent_thread_id = @parent_thread_id,
            parent_checkpoint_id = @parent_checkpoint_id, source = @source,
            pinned = @pinned, unread = @unread, awaiting_action = @awaiting_action,
            model_id = @model_id,
@@ -216,6 +233,7 @@ function toThread(row: ThreadRow): ThreadRecord {
     createdAt: row.created_at,
     lastActivityAt: row.last_activity_at,
   };
+  if (row.folder_id !== null) rec.folderId = row.folder_id;
   if (row.parent_thread_id !== null) rec.parentThreadId = row.parent_thread_id;
   if (row.parent_checkpoint_id !== null) rec.parentCheckpointId = row.parent_checkpoint_id;
   if (row.model_id !== null) rec.modelId = row.model_id;
@@ -228,6 +246,7 @@ function toRow(rec: ThreadRecord): ThreadRow {
   return {
     thread_id: rec.threadId,
     title: rec.title,
+    folder_id: rec.folderId ?? null,
     parent_thread_id: rec.parentThreadId ?? null,
     parent_checkpoint_id: rec.parentCheckpointId ?? null,
     source: rec.source,

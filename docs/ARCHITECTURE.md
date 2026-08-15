@@ -218,9 +218,9 @@ Two systems, injected as `RuntimeDeps` (`packages/storage`):
 - **Store** — `SqliteStore extends BaseStore` → `store.sqlite` (cross-thread
   long-term memory; durable analog to the in-memory store).
 
-Everything the platform itself owns — thread metadata, triggers, terminal run
-activity, capability enablement preferences, the FTS message index, and
-attachment metadata — lives in one
+Everything the platform itself owns — thread metadata, user-defined thread
+folders, triggers, terminal run activity, capability enablement preferences, the
+FTS message index, and attachment metadata — lives in one
 `app.sqlite`, opened once via `openAppDatabase()`: a **single**
 `better-sqlite3` handle (one WAL lock) shared by the stores, rather than one
 handle per store on the same file. The data-root layout
@@ -298,8 +298,8 @@ ready/heartbeat/changed stream that refreshes the inbox, plus
 outcomes used by desktop notifications. This is not the LangGraph Agent Server
 API: assistants, standard runs, stores, and crons are absent, and standard
 Agent Server clients are not a compatibility target. Platform routes provide
-list/search/fork/PATCH/DELETE behavior, and `GET /ping` is the desktop-sidecar
-health probe.
+thread list/search/fork/PATCH/DELETE behavior plus folder CRUD, and `GET /ping`
+is the desktop-sidecar health probe.
 
 **`ProtocolRunManager`** (`protocol-run-manager.ts`) is the in-process run
 registry: it tracks the current run for each thread, assigns each generation a
@@ -422,6 +422,12 @@ map to AI Elements' `Confirmation` and `Reasoning`; source parts render as
 linked source annotations. The
 Activity panel renders observed subagent delegations and transcript drill-downs,
 not model-maintained progress state.
+
+The inbox sidebar treats `All`, `Unread`, and `Action` as global smart views.
+User folders are an orthogonal, single-folder organization layer over thread
+metadata; deleting a folder moves its threads to `Inbox`. The filter control
+shows or hides the folder panel and resets the active view to `All` when hidden,
+so a folder scope is never applied without a visible explanation.
 
 **Concurrent streams, only while active.** Several threads can stream at once, but
 an idle thread holds no live connection. Each thread's `StreamController` lives in
