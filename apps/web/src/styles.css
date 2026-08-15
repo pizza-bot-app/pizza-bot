@@ -543,6 +543,148 @@ body {
 .tool-io { margin: 0; padding: 8px 10px; font-size: 12px; background: var(--code-bg); overflow-x: auto; }
 .tool-io.out { border-top: 1px solid var(--border); }
 
+.hitl-confirmation {
+  width: min(48rem, calc(100vw - 3rem));
+  max-width: 100%;
+  gap: 12px;
+}
+.hitl-confirmation-title {
+  min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  color: var(--text);
+}
+.hitl-confirmation-title b { overflow-wrap: anywhere; }
+.hitl-tool-id {
+  max-width: 100%; color: var(--dim); font-family: var(--mono); font-size: 10px;
+  font-weight: 500; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.approval-arguments {
+  width: 100%; min-width: 0;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+}
+.approval-arguments-single { display: block; }
+.approval-argument {
+  min-width: 0; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+.approval-argument > dt,
+.approval-argument-nested dt,
+.approval-field-label {
+  min-width: 0; color: var(--dim); font-size: 11px; font-weight: 700;
+  line-height: 1.3; overflow-wrap: anywhere;
+}
+.approval-argument > dd { margin-top: 4px; }
+.approval-argument-value {
+  display: block; color: var(--text); line-height: 1.45;
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+}
+.approval-argument-empty { color: var(--dim); font-style: italic; }
+.approval-argument-scalar {
+  min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+}
+.approval-argument-type {
+  flex: 0 0 auto; color: var(--dim); font-size: 9px; font-weight: 700;
+  line-height: 1.4; text-transform: uppercase; letter-spacing: .04em;
+}
+.approval-argument-list {
+  display: flex; flex-direction: column; gap: 5px;
+  margin: 0; padding: 0; list-style: none;
+}
+.approval-argument-list > li {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 6px; align-items: start;
+}
+.approval-argument-index {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--panel); color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums;
+}
+.approval-argument-nested { display: flex; flex-direction: column; gap: 6px; }
+.approval-argument-nested > div {
+  min-width: 0; padding-left: 8px; border-left: 2px solid var(--border);
+}
+.approval-argument-nested dd { margin-top: 2px; }
+.approval-arguments-empty {
+  width: 100%; padding: 8px 10px; color: var(--dim); font-style: italic;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+.approval-batch {
+  width: 100%; display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0;
+  list-style: none;
+}
+.approval-batch > li {
+  min-width: 0; display: flex; flex-direction: column; gap: 6px;
+  padding: 10px; border: 1px solid var(--border); border-radius: 6px;
+}
+.approval-batch-tool {
+  min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+}
+.approval-batch-tool > b { overflow-wrap: anywhere; }
+.hitl-editor-wrap, .hitl-response-wrap { width: 100%; min-width: 0; }
+.approval-editor { width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.approval-editor-modes {
+  align-self: flex-start; display: inline-flex; padding: 2px; gap: 2px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+.approval-editor-modes button {
+  min-height: 28px; padding: 0 10px; border: 0; border-radius: 4px;
+  background: transparent; color: var(--dim); cursor: pointer; font: inherit; font-size: 12px;
+}
+.approval-editor-modes button.active {
+  background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .16);
+}
+.approval-editor-modes button[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.approval-fields {
+  width: 100%; min-width: 0;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+  padding: 1px;
+}
+.approval-field {
+  min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 5px;
+}
+.approval-field-input,
+.approval-field-text,
+.approval-json-editor,
+.hitl-response-editor {
+  width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text);
+}
+.approval-field-input { height: 38px; padding: 7px 9px; font: inherit; }
+.approval-field-text {
+  min-height: 42px; max-height: 180px; height: auto; padding: 9px 10px;
+  resize: vertical; overflow-y: auto; font: inherit; line-height: 1.45;
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+}
+.approval-null-type { cursor: pointer; }
+.approval-field-group {
+  grid-column: 1 / -1; padding: 10px;
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.approval-field-children {
+  min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+}
+.approval-field-group > .approval-field-label { margin-bottom: 3px; color: var(--text); }
+.approval-field-boolean {
+  min-height: 64px; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+.approval-boolean-control {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 7px;
+  color: var(--text); cursor: pointer; font-weight: 600;
+}
+.approval-boolean-control input { width: 16px; height: 16px; accent-color: var(--brand); }
+.approval-json-editor {
+  min-height: 140px; max-height: min(52vh, 30rem); padding: 10px 12px;
+  resize: vertical; overflow-x: hidden; font-family: var(--mono); font-size: 12px; line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
+}
+.approval-editor-error { color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
+.hitl-response-editor {
+  min-height: 88px; max-height: 220px; padding: 10px 12px;
+  resize: vertical; font: inherit; line-height: 1.45;
+}
+.hitl-actions {
+  width: 100%; align-self: stretch; flex-wrap: wrap; padding-top: 2px;
+}
+
 /* Anchors the mention and model popovers above the composer. */
 .composer-wrap { position: relative; flex: 0 0 auto; padding: 12px 16px 16px; background: var(--bg); }
 .composer {
@@ -1608,6 +1750,16 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
   .composer textarea { min-height: 44px; max-height: 140px; }
   .feed { padding: 12px; }
   .msg { max-width: 100%; }
+  .hitl-confirmation { width: calc(100vw - 24px); padding: 12px; }
+  .approval-arguments,
+  .approval-fields,
+  .approval-field-children { grid-template-columns: minmax(0, 1fr); }
+  .approval-field-group { padding: 9px; }
+  .hitl-actions {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch;
+  }
+  .hitl-actions > button { width: 100%; min-width: 0; padding-inline: 8px; }
+  .hitl-actions > button:last-child:nth-child(odd) { grid-column: 1 / -1; }
 
   .logs-toolbar { grid-template-columns: minmax(0, 1fr); padding: 10px 12px; }
   .logs-search, .logs-levels { grid-column: 1; }
