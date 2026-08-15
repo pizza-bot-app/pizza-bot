@@ -9,10 +9,29 @@ export function langGraphRoutes(host: AgentHost): Hono {
   const app = new Hono();
 
   app.post("/threads", async (c) => {
-    const body = await c.req.json().catch(() => ({}));
-    const threadId = (body as { thread_id?: string }).thread_id ?? newThreadId();
+    const body = (await c.req.json().catch(() => ({}))) as {
+      thread_id?: string;
+      metadata?: { folder_id?: unknown };
+    };
+    const threadId = body.thread_id ?? newThreadId();
+    const folderId = body.metadata?.folder_id;
+    if (folderId !== undefined) {
+      if (typeof folderId !== "string") {
+        return c.json({ error: "metadata.folder_id must be a string" }, 400);
+      }
+      if (!host.folderStore.get(folderId)) {
+        return c.json({ error: "folder not found" }, 404);
+      }
+      host.threadStore.ensure({ threadId, folderId });
+    }
     const now = new Date().toISOString();
-    return c.json({ thread_id: threadId, status: "idle", metadata: {}, created_at: now, updated_at: now });
+    return c.json({
+      thread_id: threadId,
+      status: "idle",
+      metadata: folderId === undefined ? {} : { folder_id: folderId },
+      created_at: now,
+      updated_at: now,
+    });
   });
 
   app.post("/threads/:thread_id/state", async (c) => {

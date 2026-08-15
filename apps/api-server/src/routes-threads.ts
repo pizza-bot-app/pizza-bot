@@ -197,10 +197,12 @@ export function threadRoutes(host: AgentHost): Hono {
           const timer = setTimeout(done, 15_000);
           (timer as { unref?: () => void }).unref?.();
         });
-      const unsubscribe = host.threadStore.subscribe(() => {
+      const onChange = () => {
         changed = true;
         wake?.();
-      });
+      };
+      const unsubscribeThreads = host.threadStore.subscribe(onChange);
+      const unsubscribeFolders = host.folderStore.subscribe(onChange);
       const onAbort = () => wake?.();
       signal.addEventListener("abort", onAbort, { once: true });
 
@@ -222,7 +224,8 @@ export function threadRoutes(host: AgentHost): Hono {
         }
       } finally {
         signal.removeEventListener("abort", onAbort);
-        unsubscribe();
+        unsubscribeThreads();
+        unsubscribeFolders();
       }
     });
   });
@@ -242,15 +245,26 @@ export function threadRoutes(host: AgentHost): Hono {
       pinned?: boolean;
       title?: string;
       unread?: boolean;
+      folderId?: string | null;
     };
     const patch: {
       pinned?: boolean;
       title?: string;
       unread?: boolean;
+      folderId?: string | null;
     } = {};
     if (typeof body.pinned === "boolean") patch.pinned = body.pinned;
     if (typeof body.title === "string") patch.title = body.title;
     if (typeof body.unread === "boolean") patch.unread = body.unread;
+    if ("folderId" in body) {
+      if (body.folderId !== null && typeof body.folderId !== "string") {
+        return c.json({ error: "folderId must be a string or null" }, 400);
+      }
+      if (typeof body.folderId === "string" && !host.folderStore.get(body.folderId)) {
+        return c.json({ error: "folder not found" }, 404);
+      }
+      patch.folderId = body.folderId;
+    }
     const record = host.threadStore.update(c.req.param("thread_id"), patch);
     if (!record) return c.json({ error: "thread not found" }, 404);
     return c.json(record);
@@ -314,6 +328,7 @@ export function threadRoutes(host: AgentHost): Hono {
       parentThreadId: sourceThreadId,
       parentCheckpointId: state.checkpointId,
       ...(source?.modelId ? { modelId: source.modelId } : {}),
+      ...(source?.folderId ? { folderId: source.folderId } : {}),
     });
     // Make the fork searchable before its first run triggers normal maintenance.
     host.search.reindexThread(forkId, slice as import("@pizza-bot/storage").IndexableMessage[]);

@@ -111,11 +111,12 @@ afterEach(() => {
 function fakeHost(history: ForkMessage[], runningThreads: Set<string> = new Set()) {
   const app = openAppDatabase(tmpDb());
   openApps.push(app);
-  const { threadStore, search, threadActivity } = app;
+  const { threadStore, search, threadActivity, folders: folderStore } = app;
   let updated: { threadId: string; values: unknown } | undefined;
   const purgedCheckpoints: string[] = [];
   const host = {
     threadStore,
+    folderStore,
     search,
     threadActivity,
     persistence: {
@@ -170,6 +171,7 @@ describe("threadRoutes: fork", () => {
       threadId: "src",
       title: "Order",
       modelId: "bedrock:claude-sonnet-5",
+      folderId: "projects",
     });
 
     const res = await threadRoutes(host).request("/threads/src/fork", {
@@ -185,12 +187,14 @@ describe("threadRoutes: fork", () => {
       parentCheckpointId: string;
       title: string;
       modelId: string;
+      folderId: string;
     };
     expect(rec.source).toBe("fork");
     expect(rec.parentThreadId).toBe("src");
     expect(rec.parentCheckpointId).toBe("chk_src");
     expect(rec.title).toBe("Order (fork)");
     expect(rec.modelId).toBe("bedrock:claude-sonnet-5");
+    expect(rec.folderId).toBe("projects");
 
     const upd = getUpdated()!;
     expect(upd.threadId).toBe(rec.threadId);
@@ -478,6 +482,42 @@ describe("threadRoutes: patch (pin / rename)", () => {
     const rec = (await res.json()) as { threadId: string; unread: boolean };
     expect(rec).toMatchObject({ threadId: "t1", unread: false });
     expect(host.threadStore.get("t1")?.unread).toBe(false);
+  });
+
+  it("moves a thread into a folder and back to unfiled", async () => {
+    const { host } = fakeHost([]);
+    host.folderStore.create({ folderId: "projects", name: "Projects" });
+    host.threadStore.create({ threadId: "t1" });
+
+    const moved = await threadRoutes(host).request("/threads/t1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folderId: "projects" }),
+    });
+    expect((await moved.json()) as { folderId?: string }).toMatchObject({
+      folderId: "projects",
+    });
+
+    const cleared = await threadRoutes(host).request("/threads/t1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folderId: null }),
+    });
+    expect((await cleared.json()) as { folderId?: string }).not.toHaveProperty(
+      "folderId",
+    );
+  });
+
+  it("rejects moves into unknown folders", async () => {
+    const { host } = fakeHost([]);
+    host.threadStore.create({ threadId: "t1" });
+    const response = await threadRoutes(host).request("/threads/t1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folderId: "missing" }),
+    });
+    expect(response.status).toBe(404);
+    expect(host.threadStore.get("t1")?.folderId).toBeUndefined();
   });
 });
 

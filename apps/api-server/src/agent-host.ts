@@ -31,6 +31,7 @@ import {
   resolveLayout,
   TriggerStore,
   ThreadStore,
+  FolderStore,
   SearchStore,
   SettingsStore,
   ProviderConfigStore,
@@ -321,6 +322,7 @@ export class AgentHost {
   readonly triggerService: TriggerService;
 
   readonly threadStore: ThreadStore;
+  readonly folderStore: FolderStore;
   readonly search: SearchStore;
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
@@ -379,6 +381,7 @@ export class AgentHost {
     this.appDb = openAppDatabase(appDbPath, attachmentsDir || undefined);
     this.triggers = this.appDb.triggers;
     this.threadStore = this.appDb.threadStore;
+    this.folderStore = this.appDb.folders;
     this.search = this.appDb.search;
     this.settings = this.appDb.settings;
     this.providerConfigs = this.appDb.providerConfigs;
