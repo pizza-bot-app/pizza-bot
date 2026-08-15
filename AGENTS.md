@@ -184,6 +184,12 @@ Name branches `<type>/<kebab-case-description>` using an intent such as `fix`,
 `feat`, `refactor`, `docs`, `test`, or `chore`. Branch names MUST describe the
 change, not the implementation tool, agent, author, or worktree.
 
+Create worktrees under the main checkout's repo-local
+`.worktrees/<kebab-case-description>` directory. The worktree directory MUST
+match the description portion of its branch name; omit the `<type>/` prefix.
+For example:
+`git worktree add .worktrees/skill-worker-bundled-files -b fix/skill-worker-bundled-files main`.
+
 A fresh worktree needs its own `npm install` before building or testing;
 otherwise workspace imports can resolve against stale output from another
 checkout. Run `npm run build` before starting any application entrypoint:
