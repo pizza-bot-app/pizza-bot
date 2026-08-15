@@ -2,7 +2,6 @@
 import {
   createDeepAgent,
   createFilesystemMiddleware,
-  createSkillsMiddleware,
   createSubAgent,
   registerHarnessProfile,
   type CompiledSubAgent,
@@ -10,7 +9,6 @@ import {
 } from "deepagents";
 import {
   collectSkillFiles,
-  collectSkillPaths,
   normalizeSkillFile,
   resolveToolReferences,
   splitSkillMd,
@@ -241,7 +239,6 @@ export async function resolveSkillSubagents(
         description: entry.description,
         systemPrompt: skillBody(entry) || entry.description,
         tools,
-        skills: collectSkillPaths([entry.id], skills),
         middleware,
         ...(interruptOn && Object.keys(interruptOn).length > 0 ? { interruptOn } : {}),
       } as unknown as SubAgent;
@@ -271,8 +268,7 @@ export interface StateFile {
 }
 
 /**
- * Materialize all equipped skills in shared run state. Each participant receives
- * only its own skill paths, so shared seeding does not leak skills into prompts.
+ * Materialize equipped skill files in shared run state for explicit reference reads.
  */
 export function buildSkillSeed(deps: RuntimeDeps): Record<string, StateFile> {
   const contentByPath = collectSkillFiles(
@@ -338,9 +334,6 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
           tools: subagent.tools ?? [],
           middleware: [
             createFilesystemMiddleware({ backend }),
-            ...(subagent.skills?.length
-              ? [createSkillsMiddleware({ backend, sources: subagent.skills })]
-              : []),
             ...(subagent.middleware ?? []),
           ],
         }),

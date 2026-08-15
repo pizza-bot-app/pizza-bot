@@ -130,7 +130,7 @@ const skills: SkillCatalog = new Map([
 ]);
 
 describe("skill worker files", () => {
-  it("reads its sibling reference without exposing another skill", async () => {
+  it("reads its sibling reference without rereading its own skill", async () => {
     const model = new SkillFileReadingModel({});
     const agent = await createPizzaBotAgent("Delegate this request.", { model, skills });
 
@@ -150,7 +150,11 @@ describe("skill worker files", () => {
     expect(model.readResult).toContain(REFERENCE_CONTENT);
     expect(model.delegationResult).toContain(REFERENCE_CONTENT);
     expect(model.workerSystemPrompt).toContain("/skills/reader/references/oven.txt");
-    expect(model.workerSystemPrompt).toContain("Reads its bundled oven reference.");
+    expect(model.workerSystemPrompt).not.toContain("/skills/reader/SKILL.md");
+    expect(model.workerSystemPrompt).not.toContain("## Skills System");
+    expect(
+      model.workerSystemPrompt.match(/Read \/skills\/reader\/references\/oven\.txt/g),
+    ).toHaveLength(1);
     expect(model.workerSystemPrompt).not.toContain(HIDDEN_MARKER);
   });
 });

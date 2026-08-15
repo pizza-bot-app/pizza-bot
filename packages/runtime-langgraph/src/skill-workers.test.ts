@@ -45,7 +45,6 @@ describe("resolveSkillSubagents", () => {
     expect(resolved![0]).toMatchObject({
       name: "mailer",
       tools: [send],
-      skills: ["/skills/mailer/"],
       systemPrompt: "Follow mailer.",
     });
     expect(resolved![1]).toMatchObject({ name: "plain", tools: [] });
