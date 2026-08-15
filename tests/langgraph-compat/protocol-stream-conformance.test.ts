@@ -301,9 +301,10 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       .join("");
     expect(text).toContain("Subagent completed.");
     expect(text).toContain("Delegation completed.");
-    expect(model.boundToolSets).toContainEqual([
-      "filesystem-mcp-server__read_file",
-    ]);
+    expect(model.boundToolSets.some((tools) =>
+      tools.includes("filesystem-mcp-server__read_file") &&
+      tools.includes("read_file")
+    )).toBe(true);
     expect(events.some(
       (e) =>
         channelOf(e) === "lifecycle" &&
