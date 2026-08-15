@@ -7,7 +7,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const sourceDir = path.join(repoRoot, "dist", "backend");
+const expectPlaywrightUnavailable = process.argv.includes(
+  "--expect-playwright-unavailable",
+);
+const forcePlaywrightUnavailable = process.argv.includes(
+  "--force-playwright-unavailable",
+);
+const artifactArg = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
+const sourceDir = artifactArg
+  ? path.resolve(artifactArg)
+  : path.join(repoRoot, "dist", "backend");
 if (!existsSync(path.join(sourceDir, "start.mjs"))) {
   throw new Error("missing dist/backend/start.mjs; run npm run backend:bundle first");
 }
@@ -33,6 +42,9 @@ const child = fork(entry, [], {
     PIZZA_DATA_ROOT: dataRoot,
     PIZZA_HOST: "127.0.0.1",
     PIZZA_MODEL: "ollama:smoke",
+    ...(forcePlaywrightUnavailable
+      ? { PIZZA_PLAYWRIGHT_BROWSER_PATH: "/browser/does/not/exist" }
+      : {}),
     PORT: "0",
   },
   stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -110,14 +122,15 @@ try {
     ["playwright-mcp"],
   );
 
-  const mcpServers = await waitForMcpLoaded(baseUrl, authHeaders);
-  assert.deepEqual(
-    mcpServers
-      .filter((server) => server.name === "playwright")
-      .map((server) => ({ name: server.name, status: server.status }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
-    [{ name: "playwright", status: "loaded" }],
+  const playwright = await waitForPlaywright(
+    baseUrl,
+    authHeaders,
+    expectPlaywrightUnavailable ? "error" : "loaded",
   );
+  if (expectPlaywrightUnavailable) {
+    assert.match(playwright.detail ?? "", /browser_not_found/);
+    assert.match(playwright.detail ?? "", /PIZZA_PLAYWRIGHT_BROWSER_PATH/);
+  }
 
   const skills = await fetch(`${baseUrl}/skills`, { headers: authHeaders });
   assert.equal(skills.status, 200);
@@ -126,8 +139,8 @@ try {
   );
   assert.equal(
     browserAutomation?.status,
-    "ready",
-    `bundled browser skill must be ready: ${browserAutomation?.statusDetail ?? "not found"}`,
+    expectPlaywrightUnavailable ? "unavailable" : "ready",
+    `unexpected browser skill state: ${browserAutomation?.statusDetail ?? "not found"}`,
   );
 
   streamAbort = new AbortController();
@@ -255,20 +268,20 @@ async function waitForHealthy(baseUrl, origin) {
   throw new Error(`backend did not become healthy: ${lastStatus}`);
 }
 
-async function waitForMcpLoaded(baseUrl, headers) {
+async function waitForPlaywright(baseUrl, headers, expectedStatus) {
   const deadline = Date.now() + 15_000;
   let servers = [];
   while (Date.now() < deadline) {
     const response = await fetch(`${baseUrl}/status`, { headers });
     assert.equal(response.status, 200);
     servers = (await response.json()).mcp.servers;
-    const shipped = servers.filter((server) => server.name === "playwright");
-    if (shipped.length === 1 && shipped[0].status === "loaded") {
-      return servers;
-    }
+    const shipped = servers.find((server) => server.name === "playwright");
+    if (shipped?.status === expectedStatus) return shipped;
     await delay(100);
   }
-  throw new Error(`packaged MCP servers did not load: ${JSON.stringify(servers)}`);
+  throw new Error(
+    `Playwright MCP did not reach ${expectedStatus}: ${JSON.stringify(servers)}`,
+  );
 }
 
 function createSseReader(body) {

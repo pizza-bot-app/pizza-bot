@@ -57,6 +57,30 @@ jobs:
       - name: Build backend container
         run: docker build --file deploy/linux/Dockerfile --tag pizza-bot-backend:ci .
 
+      - name: Smoke backend container
+        run: >-
+          docker run --rm
+          --volume "$PWD/scripts:/smoke:ro"
+          pizza-bot-backend:ci
+          node /smoke/smoke-remote-backend.mjs
+          --expect-playwright-unavailable
+          /opt/pizza-bot
+
+      - name: Build browser-enabled backend container
+        run: >-
+          docker build
+          --file deploy/linux/Dockerfile
+          --target runtime-with-browser
+          --tag pizza-bot-backend-browser:ci
+          .
+
+      - name: Smoke Playwright in browser-enabled container
+        run: >-
+          docker run --rm
+          --volume "$PWD/scripts:/smoke:ro"
+          pizza-bot-backend-browser:ci
+          node /smoke/smoke-playwright-mcp.mjs /opt/pizza-bot
+
       # Keep the network-dependent registry check last so it cannot hide
       # deterministic code, test, or build failures.
       - name: Audit production dependencies

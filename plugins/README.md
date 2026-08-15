@@ -62,7 +62,17 @@ Pizza Bot installers do not include Chrome for Testing or another browser. A
 packaged app uses Chrome, Edge, or Chromium already installed on the machine
 (or the matching Chrome for Testing revision if it already exists in
 Playwright's cache). If none is available, install one of those supported
-browsers and reconnect the Playwright MCP server.
+browsers and reconnect the Playwright MCP server. Set
+`PIZZA_PLAYWRIGHT_BROWSER_PATH` when the browser is outside the backend
+process's `PATH`; the launcher also checks conventional Linux Chrome, Edge,
+Chromium, and Snap locations. It selects headless mode when Linux has no display
+server.
+
+The default Linux backend image does not include a browser. Build its
+`runtime-with-browser` target when browser automation must be self-contained.
+Browsers installed on the container host are not visible inside the container.
+When no supported browser is visible, the server reports an actionable
+`browser_not_found` status and the rest of the backend remains available.
 
 Playwright's npm packages do not download browsers from an install or
 postinstall script. The root `allowScripts` policy and the packager's

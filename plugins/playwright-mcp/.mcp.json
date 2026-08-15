@@ -2,7 +2,10 @@
   "mcpServers": {
     "playwright": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/launch.mjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/launch.mjs"],
+      "env": {
+        "PIZZA_PLAYWRIGHT_BROWSER_PATH": "${PIZZA_PLAYWRIGHT_BROWSER_PATH}"
+      }
     }
   }
 }

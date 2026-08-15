@@ -1,6 +1,19 @@
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
+const LINUX_BROWSER_PATHS = [
+  "/opt/google/chrome/chrome",
+  "/opt/google/chrome/google-chrome",
+  "/opt/microsoft/msedge/msedge",
+  "/snap/bin/chromium",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/microsoft-edge-stable",
+  "/usr/bin/microsoft-edge",
+];
+
 const BROWSER_SELECTION_FLAGS = [
   "--browser",
   "--executable-path",
@@ -23,6 +36,10 @@ export function installedBrowser({
   exists = existsSync,
   managedExecutablePath,
 } = {}) {
+  const configuredPath = env.PIZZA_PLAYWRIGHT_BROWSER_PATH?.trim();
+  if (configuredPath) {
+    return exists(configuredPath) ? { executablePath: configuredPath } : undefined;
+  }
   if (platform === "darwin") {
     if (exists("/Applications/Google Chrome.app")) {
       return { channel: "chrome" };
@@ -64,11 +81,22 @@ export function installedBrowser({
       exists,
     );
     if (executablePath) return { executablePath };
+    const conventionalPath = LINUX_BROWSER_PATHS.find((candidate) =>
+      exists(candidate),
+    );
+    if (conventionalPath) return { executablePath: conventionalPath };
   }
   if (managedExecutablePath && exists(managedExecutablePath)) {
     return { executablePath: managedExecutablePath };
   }
   return undefined;
+}
+
+export function needsHeadlessMode({
+  platform = process.platform,
+  env = process.env,
+} = {}) {
+  return platform === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY;
 }
 
 function findOnPath(names, pathValue, exists) {
