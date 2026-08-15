@@ -1,6 +1,8 @@
 /** DeepAgents/LangGraph runtime implementation. */
 import {
   createDeepAgent,
+  createFilesystemMiddleware,
+  createSkillsMiddleware,
   createSubAgent,
   registerHarnessProfile,
   type CompiledSubAgent,
@@ -329,10 +331,18 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
       name: subagent.name,
       description: subagent.description,
       runnable: isolateSubagentLocalState(
+        // Compiled workers bypass createDeepAgent's declarative filesystem/skills normalization.
         createSubAgent({
           ...subagent,
           model,
           tools: subagent.tools ?? [],
+          middleware: [
+            createFilesystemMiddleware({ backend }),
+            ...(subagent.skills?.length
+              ? [createSkillsMiddleware({ backend, sources: subagent.skills })]
+              : []),
+            ...(subagent.middleware ?? []),
+          ],
         }),
       ),
     };

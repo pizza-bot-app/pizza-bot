@@ -184,6 +184,12 @@ Name branches `<type>/<kebab-case-description>` using an intent such as `fix`,
 `feat`, `refactor`, `docs`, `test`, or `chore`. Branch names MUST describe the
 change, not the implementation tool, agent, author, or worktree.
 
+Create worktrees under the main checkout's repo-local
+`.worktrees/<kebab-case-description>` directory. The worktree directory MUST
+match the description portion of its branch name; omit the `<type>/` prefix.
+For example:
+`git worktree add .worktrees/skill-worker-bundled-files -b fix/skill-worker-bundled-files main`.
+
 A fresh worktree needs its own `npm install` before building or testing;
 otherwise workspace imports can resolve against stale output from another
 checkout. Run `npm run build` before starting any application entrypoint:
@@ -191,3 +197,17 @@ checkout. Run `npm run build` before starting any application entrypoint:
 and `test` build only their task dependencies. Keep the affected tests and
 typecheck green, and run the full CI checks before opening a PR. Do not merge to
 `main` or push a branch unless the repository owner asks.
+
+After a PR is merged, clean up from the main checkout by removing the worktree
+before deleting its local branch:
+
+```bash
+git worktree remove .worktrees/<kebab-case-description>
+git branch -d <type>/<kebab-case-description>
+git fetch --prune
+```
+
+If GitHub did not delete the remote head branch, remove it with
+`git push origin --delete <type>/<kebab-case-description>`. Use
+`git worktree prune` only to clear stale metadata for worktree directories that
+were already removed; it does not remove a valid worktree.
