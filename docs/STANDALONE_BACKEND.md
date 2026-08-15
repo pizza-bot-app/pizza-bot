@@ -18,6 +18,9 @@ SQLite databases and is not a horizontally scalable service.
 - A source checkout and npm are required only to build it.
 - A deployed artifact needs Node.js, its environment, and a writable data
   directory; it does not need the repository or an `npm install`.
+- The bundled Browser Automation Plugin needs Chrome, Edge, or Chromium on the
+  backend host. The default container image omits a browser; the backend reports
+  the plugin as unavailable without affecting its other capabilities.
 
 For source development, install and build the workspace first:
 
@@ -228,6 +231,15 @@ Build the multi-stage image from the repository root:
 docker build -f deploy/linux/Dockerfile -t pizza-bot-backend .
 ```
 
+The default image omits Chromium. To include it for the Browser Automation
+Plugin, build the optional target:
+
+```bash
+docker build -f deploy/linux/Dockerfile \
+  --target runtime-with-browser \
+  -t pizza-bot-backend-browser .
+```
+
 Finch can build the same image on macOS. Initialize its VM once, then build the
 native Linux architecture or cross-build an AMD64 server image:
 
@@ -269,9 +281,9 @@ origin allowlist.
 
 ### systemd
 
-Build and transfer `dist/backend`, then install Node.js 24 on the server. The
-provided unit expects `/usr/bin/node`; edit `ExecStart` if the host installs it
-elsewhere.
+Build and transfer `dist/backend`, then install Node.js 24. Install Chrome,
+Edge, or Chromium when the Browser Automation Plugin is needed. The provided
+unit expects `/usr/bin/node`; edit `ExecStart` if the host installs it elsewhere.
 
 Create the service account and directories:
 
@@ -297,6 +309,13 @@ sudoedit /etc/pizza-bot/pizza-bot.env
 Replace `PIZZA_API_TOKEN` with `openssl rand -hex 32` output before enabling the
 service. A loopback listener cannot detect that Caddy will expose it, so the
 systemd configuration does not provide the non-loopback startup guard.
+
+The launcher checks common browser locations outside the service `PATH`. Set an
+explicit path in `/etc/pizza-bot/pizza-bot.env` when needed:
+
+```bash
+PIZZA_PLAYWRIGHT_BROWSER_PATH=/opt/google/chrome/chrome
+```
 
 Start and inspect the service:
 
@@ -398,5 +417,6 @@ private network, or use an SSH tunnel. See [SECURITY.md](../SECURITY.md).
 | Desktop rejects the URL | Use HTTPS outside loopback, or connect through a loopback SSH tunnel. |
 | Runs or sidebar updates stall | Disable reverse-proxy buffering for both SSE endpoints. |
 | Backend green, provider red | Configure a model provider and credentials on the backend. |
+| Playwright reports `browser_not_found` | Install a browser where the backend runs, or set `PIZZA_PLAYWRIGHT_BROWSER_PATH`; a host browser is not visible inside a container. |
 | Skill unavailable | Configure the required server-side MCP server and tools. |
 | systemd cannot write a path | Add the trusted path to `ReadWritePaths` or keep it under the data root. |
