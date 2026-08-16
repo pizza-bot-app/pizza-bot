@@ -149,8 +149,20 @@ const config: ForgeConfig = {
     }),
     new MakerZIP({}, ["darwin"]),
     new MakerDMG({ format: "ULFO", icon: path.join(iconsDir, "icon-mac.icns") }, ["darwin"]),
-    new MakerRpm({ options: { icon: path.join(iconsDir, "icon.png") } }),
-    new MakerDeb({ options: { icon: path.join(iconsDir, "icon.png") } }),
+    new MakerRpm({
+      options: {
+        name: "pizza-bot-oss",
+        bin: "pizza-bot-oss",
+        icon: path.join(iconsDir, "icon.png"),
+      },
+    }),
+    new MakerDeb({
+      options: {
+        name: "pizza-bot-oss",
+        bin: "pizza-bot-oss",
+        icon: path.join(iconsDir, "icon.png"),
+      },
+    }),
   ],
 
   plugins: [new AutoUnpackNativesPlugin({})],
