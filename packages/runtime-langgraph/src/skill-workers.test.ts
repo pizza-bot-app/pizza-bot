@@ -51,6 +51,7 @@ describe("resolveSkillSubagents", () => {
     expect(resolved![0]!.middleware?.map((middleware) => middleware.name)).toEqual([
       "ModelCallLimitMiddleware",
       "ToolCallLimitMiddleware",
+      "subagentFinalization",
       "toolErrorRecovery",
       "outputTruncation",
       "DynamicSystemPromptMiddleware",
@@ -106,6 +107,7 @@ describe("resolveSkillSubagents", () => {
     expect(resolved![0]!.middleware?.map((middleware) => middleware.name)).toEqual([
       "ModelCallLimitMiddleware",
       "ToolCallLimitMiddleware",
+      "subagentFinalization",
       "toolErrorRecovery",
       "outputTruncation",
       "DynamicSystemPromptMiddleware",

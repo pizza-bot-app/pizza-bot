@@ -37,6 +37,38 @@ describe("toolErrorRecoveryMiddleware", () => {
     expect(String(out.content)).toContain("try again");
   });
 
+  it("tells the model to stop retrying a persistently rate-limited source", async () => {
+    const wrap = wrapToolCall();
+    const rateLimit = Object.assign(new Error("request rejected"), {
+      code: "RATE_LIMIT",
+    });
+    const out = (await wrap(request("search", "call_rate"), async () => {
+      throw rateLimit;
+    })) as ToolMessage;
+
+    expect(String(out.content)).toContain("rate-limited");
+    expect(String(out.content)).toContain("Retry this tool at most once");
+    expect(String(out.content)).toContain("partial results");
+    expect(String(out.content)).not.toContain("fix the arguments");
+  });
+
+  it("recognizes a nested HTTP 429 without relying on provider message text", async () => {
+    const wrap = wrapToolCall();
+    const rateLimit = Object.assign(new Error("request rejected"), { status: 429 });
+    const invocationError = new ToolInvocationError(rateLimit, {
+      id: "call_rate",
+      name: "search",
+      args: {},
+      type: "tool_call",
+    });
+    const out = (await wrap(request("search", "call_rate"), async () => {
+      throw invocationError;
+    })) as ToolMessage;
+
+    expect(String(out.content)).toContain("rate-limited");
+    expect(String(out.content)).not.toContain("fix the arguments");
+  });
+
   it("RE-THROWS a graph interrupt (HITL must still pause, not be swallowed)", async () => {
     const wrap = wrapToolCall();
     const interrupt = new GraphInterrupt([{ value: "approve?", id: "i1" }]);

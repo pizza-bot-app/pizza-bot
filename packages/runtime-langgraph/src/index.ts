@@ -34,6 +34,10 @@ import { modelCallLimitMiddleware, toolCallLimitMiddleware } from "langchain";
 import { buildBackend } from "./backend.js";
 import { toolErrorRecoveryMiddleware } from "./tool-error-middleware.js";
 import { outputTruncationMiddleware } from "./output-truncation-middleware.js";
+import {
+  SUBAGENT_MODEL_CALL_COUNT,
+  subagentFinalizationMiddleware,
+} from "./subagent-finalization-middleware.js";
 import { attachmentInlineMiddleware } from "./attachment-inline-middleware.js";
 import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
 import { streamProtocolEvents, toLangGraphInput, type ProtocolCapableGraph } from "./stream-protocol.js";
@@ -88,6 +92,7 @@ const SUBAGENT_STATE_EXCLUSIONS = [
   "runModelCallCount",
   "threadToolCallCount",
   "runToolCallCount",
+  SUBAGENT_MODEL_CALL_COUNT,
 ] as const;
 
 function excludeSubagentLocalState(state: Record<string, unknown>): Record<string, unknown> {
@@ -216,6 +221,7 @@ export async function resolveSkillSubagents(
     try {
       const middleware: unknown[] = [
         ...runLimitMiddleware(AGENT_RUN_LIMITS.subagent),
+        subagentFinalizationMiddleware(AGENT_RUN_LIMITS.subagent.modelCalls),
         toolErrorRecoveryMiddleware(),
         outputTruncationMiddleware(),
         currentDateTimeMiddleware(),
