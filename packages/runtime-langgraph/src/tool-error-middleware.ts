@@ -2,6 +2,12 @@
 import { createMiddleware, ToolInvocationError } from "langchain";
 import { ToolMessage } from "@langchain/core/messages";
 import { isGraphInterrupt } from "@langchain/langgraph";
+import { classifyError } from "@pizza-bot/core";
+
+const RATE_LIMIT_GUIDANCE =
+  "The tool's source is rate-limited. Retry this tool at most once. If it is " +
+  "still unavailable, stop using this source for this run and return verified " +
+  "partial results with a clear coverage disclaimer.";
 
 /**
  * In langchain@1.5.2/deepagents@1.12.1, inner wrappers turn tool failures into
@@ -21,9 +27,13 @@ export function toolErrorRecoveryMiddleware() {
         if (isGraphInterrupt(err)) throw err;
         const { id, name } = request.toolCall;
         const detail = toolErrorDetail(err);
+        const guidance =
+          toolErrorCode(err) === "RATE_LIMIT"
+            ? RATE_LIMIT_GUIDANCE
+            : "Please fix the arguments and try again.";
         return new ToolMessage({
           status: "error",
-          content: `Error running tool "${name}": ${detail}\nPlease fix the arguments and try again.`,
+          content: `Error running tool "${name}": ${detail}\n${guidance}`,
           tool_call_id: id ?? "",
           name,
         });
@@ -41,4 +51,26 @@ function toolErrorDetail(error: unknown): string {
     current = current.cause;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+function toolErrorCode(error: unknown) {
+  let current = error;
+  const seen = new Set<unknown>();
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if (classifyError(current) === "RATE_LIMIT" || httpStatusOf(current) === 429) {
+      return "RATE_LIMIT";
+    }
+    current =
+      current instanceof ToolInvocationError
+        ? current.toolError
+        : (current as { cause?: unknown }).cause;
+  }
+  return classifyError(toolErrorDetail(error));
+}
+
+function httpStatusOf(error: object): number | undefined {
+  const value = error as { status?: unknown; statusCode?: unknown };
+  const status = value.status ?? value.statusCode;
+  return typeof status === "number" ? status : undefined;
 }
