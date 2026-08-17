@@ -31,6 +31,7 @@ import {
   resolveLayout,
   TriggerStore,
   ThreadStore,
+  FolderStore,
   SearchStore,
   SettingsStore,
   ProviderConfigStore,
@@ -49,6 +50,7 @@ import {
 } from "@pizza-bot/storage";
 import {
   loadPlugins,
+  createPluginHostContract,
   loadBuiltinSkills,
   loadUserSkills,
   loadUserMcpServers,
@@ -60,11 +62,15 @@ import {
   type McpConnectResult,
   type McpConnectionEvent,
   type LoadedPlugins,
-  type PluginMaterializerReason,
   type ToolCatalog,
 } from "@pizza-bot/plugin-sdk";
 import { McpHealthMonitor, type McpClientLike } from "./mcp-health-monitor.js";
-import type { McpServerEntry } from "@pizza-bot/plugin-sdk";
+import {
+  pluginNameSchema,
+  type McpServerEntry,
+  type PluginMaterializerReason,
+} from "@pizza-bot/plugin-api";
+import apiPackage from "../package.json" with { type: "json" };
 import {
   resolvePluginsDir,
   resolveExternalPluginsDirs,
@@ -93,6 +99,7 @@ import { getLogger, redactDiagnosticText } from "@pizza-bot/logging";
 
 const mcpLog = getLogger("mcp");
 const LAST_RESORT_MODEL = "bedrock:global.anthropic.claude-sonnet-5";
+const PLUGIN_HOST_CONTRACT = createPluginHostContract(apiPackage.version);
 
 function stateAwaitsAction(state: ThreadState): boolean {
   if (state.awaitingInput === true || (state.interrupts?.length ?? 0) > 0) {
@@ -322,6 +329,7 @@ export class AgentHost {
   readonly triggerService: TriggerService;
 
   readonly threadStore: ThreadStore;
+  readonly folderStore: FolderStore;
   readonly search: SearchStore;
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
@@ -382,6 +390,7 @@ export class AgentHost {
     this.appDb = openAppDatabase(appDbPath, attachmentsDir || undefined);
     this.triggers = this.appDb.triggers;
     this.threadStore = this.appDb.threadStore;
+    this.folderStore = this.appDb.folders;
     this.search = this.appDb.search;
     this.settings = this.appDb.settings;
     this.providerConfigs = this.appDb.providerConfigs;
@@ -1463,6 +1472,7 @@ export class AgentHost {
     const userEntries = await this.loadUserMcpEntries();
     const next = await loadPlugins({
       pluginsDir: this.pluginDirs,
+      hostContract: PLUGIN_HOST_CONTRACT,
       extraMcpServers: userEntries,
       ...(this.providerMcpEnv ? { extraEnv: this.providerMcpEnv } : {}),
       log: (m) => console.log(`[plugins] ${m}`),
@@ -1500,7 +1510,7 @@ export class AgentHost {
         throw error;
       }
       console.log(
-        `[plugins] runtime reload complete: ${next.manifests.length} plugin(s), ${Object.keys(catalog).length} MCP server(s) connected`,
+        `[plugins] runtime reload complete: ${next.pluginReports.filter((plugin) => plugin.status === "loaded").length} plugin(s), ${Object.keys(catalog).length} MCP server(s) connected`,
       );
     });
   }
@@ -1514,7 +1524,7 @@ export class AgentHost {
   /** A plugin is user-managed only if it was installed into the writable install dir. */
   async pluginIsInstalled(name: string): Promise<boolean> {
     const dir = await this.pluginsInstallDirectory();
-    if (!dir) return false;
+    if (!dir || !pluginNameSchema.safeParse(name).success) return false;
     const entries = await readdir(join(dir, name)).catch(() => null);
     return entries !== null && entries.includes(".claude-plugin");
   }
@@ -1692,6 +1702,7 @@ export class AgentHost {
       const plugins = pluginsDir
         ? await loadPlugins({
             pluginsDir,
+            hostContract: PLUGIN_HOST_CONTRACT,
             extraMcpServers: userMcpServers,
             extraEnv: host.providerMcpEnv,
             log: (m) => console.log(`[plugins] ${m}`),

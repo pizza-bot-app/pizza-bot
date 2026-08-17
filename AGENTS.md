@@ -23,6 +23,10 @@ frontend consumes them through the `@langchain/langgraph-sdk`
   message/thread-slice projection helpers live in `apps/web/src/projection` — the
   only consumer is the web app, so they sit beside it rather than in a shared
   package. The eslint layering rule enforces core's purity.
+- `packages/plugin-api` is the public, browser-safe plugin contract — no
+  `node:*`, LangChain, runtime, or UI imports. `packages/plugin-sdk` owns the
+  Node-bound filesystem loader, materializers, MCP clients, and contribution
+  registries. The eslint layering rule enforces plugin-api's purity.
 - **`packages/runtime-langgraph` is the ONLY production package that imports
   `deepagents` — the graph engine.** The `tests/langgraph-compat` workspace is a
   test-only exception because it pins DeepAgents' public exports. If the
@@ -190,6 +194,12 @@ Name branches `<type>/<kebab-case-description>` using an intent such as `fix`,
 `feat`, `refactor`, `docs`, `test`, or `chore`. Branch names MUST describe the
 change, not the implementation tool, agent, author, or worktree.
 
+Create worktrees under the main checkout's repo-local
+`.worktrees/<kebab-case-description>` directory. The worktree directory MUST
+match the description portion of its branch name; omit the `<type>/` prefix.
+For example:
+`git worktree add .worktrees/skill-worker-bundled-files -b fix/skill-worker-bundled-files main`.
+
 A fresh worktree needs its own `npm install` before building or testing;
 otherwise workspace imports can resolve against stale output from another
 checkout. Run `npm run build` before starting any application entrypoint:
@@ -197,3 +207,23 @@ checkout. Run `npm run build` before starting any application entrypoint:
 and `test` build only their task dependencies. Keep the affected tests and
 typecheck green, and run the full CI checks before opening a PR. Do not merge to
 `main` or push a branch unless the repository owner asks.
+
+On macOS, `gh` credentials may be stored in Keychain and unavailable to
+sandboxed commands. If `gh auth status` or another `gh` command reports an
+authentication failure in the sandbox, rerun that command outside the sandbox
+before diagnosing an expired credential or requesting reauthentication. Do not
+extract or repackage credentials as a workaround.
+
+After a PR is merged, clean up from the main checkout by removing the worktree
+before deleting its local branch:
+
+```bash
+git worktree remove .worktrees/<kebab-case-description>
+git branch -d <type>/<kebab-case-description>
+git fetch --prune
+```
+
+If GitHub did not delete the remote head branch, remove it with
+`git push origin --delete <type>/<kebab-case-description>`. Use
+`git worktree prune` only to clear stale metadata for worktree directories that
+were already removed; it does not remove a valid worktree.

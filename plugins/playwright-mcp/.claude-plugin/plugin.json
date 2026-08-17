@@ -1,6 +1,11 @@
 {
+  "apiVersion": "pizza-bot/v1",
   "name": "playwright-mcp",
   "version": "1.0.0",
+  "engines": { "pizzaBot": ">=1.0.0 <2.0.0" },
+  "capabilities": {
+    "required": ["mcp-servers/v1", "skills/v1"]
+  },
   "displayName": "Playwright Browser Automation",
   "description": "Browser automation and inspection through Playwright MCP.",
   "author": { "name": "Pizza Bot OSS" },

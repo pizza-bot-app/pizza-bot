@@ -11,11 +11,14 @@ import {
 } from "node:path";
 import { z } from "zod";
 import {
+  PLUGIN_API_VERSION,
+  pluginManifestHeaderSchema,
   pluginManifestSchema,
+  pluginNameSchema,
   mcpServerEntrySchema,
   type PluginManifest,
   type McpServerEntry,
-} from "./manifest.js";
+} from "@pizza-bot/plugin-api";
 import { expandMcpEnvVars } from "./mcp-servers-config.js";
 import { ContributionRegistry, type PluginLoader } from "./registry.js";
 
@@ -27,6 +30,18 @@ const mcpServersFileSchema = z.object({
 export interface PluginSource {
   root: string;
   manifest: PluginManifest;
+}
+
+export class UnsupportedPluginApiVersionError extends Error {
+  constructor(
+    readonly apiVersion: string,
+    readonly pluginName?: string,
+  ) {
+    super(
+      `Unsupported plugin API version "${apiVersion}"; this host supports "${PLUGIN_API_VERSION}"`,
+    );
+    this.name = "UnsupportedPluginApiVersionError";
+  }
 }
 
 export class PluginPathError extends Error {
@@ -41,29 +56,6 @@ export class PluginPathError extends Error {
 }
 
 export class FsPluginLoader implements PluginLoader {
-  /**
-   * Directories without a manifest are skipped. Malformed manifests and
-   * contribution load failures are reported through `onError`.
-   */
-  async discover(
-    pluginsDir: string,
-    into: ContributionRegistry,
-    onError: (pluginDir: string, err: unknown) => void = (_d, e) => {
-      throw e;
-    },
-  ): Promise<PluginManifest[]> {
-    const loaded: PluginManifest[] = [];
-    for (const { root, manifest } of await this.find(pluginsDir, onError)) {
-      try {
-        await this.load(manifest, root, into);
-        loaded.push(manifest);
-      } catch (err) {
-        onError(root, err);
-      }
-    }
-    return loaded;
-  }
-
   async find(
     pluginsDir: string,
     onError: (pluginDir: string, err: unknown) => void = (_d, e) => {
@@ -92,9 +84,22 @@ export class FsPluginLoader implements PluginLoader {
   async readManifest(manifestPath: string): Promise<PluginManifest> {
     try {
       const raw = await readFile(manifestPath, "utf8");
-      return pluginManifestSchema.parse(JSON.parse(raw));
+      const value: unknown = JSON.parse(raw);
+      const header = pluginManifestHeaderSchema.safeParse(value);
+      if (
+        header.success &&
+        header.data.apiVersion !== PLUGIN_API_VERSION
+      ) {
+        const pluginName = pluginNameSchema.safeParse(header.data.name);
+        throw new UnsupportedPluginApiVersionError(
+          header.data.apiVersion,
+          pluginName.success ? pluginName.data : undefined,
+        );
+      }
+      return pluginManifestSchema.parse(value);
     } catch (err) {
       if (isMissingFile(err)) throw err;
+      if (err instanceof UnsupportedPluginApiVersionError) throw err;
       throw new Error(
         `Invalid plugin manifest at ${manifestPath}: ${
           err instanceof Error ? err.message : String(err)

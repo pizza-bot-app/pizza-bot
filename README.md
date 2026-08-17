@@ -18,6 +18,8 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 - **Work asynchronously.** Switch conversations without stopping their runs.
 - **Return to the right queue.** Completed work lands in Unread; durable approval
   requests land in Action.
+- **Organize conversations.** Group threads into folders without hiding matching
+  work from the global Unread and Action queues.
 - **Resume real work.** Checkpointed runs survive client disconnects, and cron or
   webhook triggers can start work without an open conversation.
 - **Delegate to specialists.** Skills become tool-scoped workers whose progress
@@ -89,7 +91,7 @@ references, skill authoring, approval gates, and plugin installation.
 
 ```text
 apps/        api-server (Hono) | cli | desktop-shell (Electron) | web (React)
-packages/    core | runtime-langgraph | inference-providers | plugin-sdk | storage | logging
+packages/    core | runtime-langgraph | inference-providers | plugin-api | plugin-sdk | storage | logging
 plugins/     bundled Plugin packages and their packaging workspace
 skills/      optional Built-in Agent Skills
 tests/       LangGraph compatibility and protocol conformance

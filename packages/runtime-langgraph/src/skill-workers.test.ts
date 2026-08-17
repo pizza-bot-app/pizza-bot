@@ -45,13 +45,13 @@ describe("resolveSkillSubagents", () => {
     expect(resolved![0]).toMatchObject({
       name: "mailer",
       tools: [send],
-      skills: ["/skills/mailer/"],
       systemPrompt: "Follow mailer.",
     });
     expect(resolved![1]).toMatchObject({ name: "plain", tools: [] });
     expect(resolved![0]!.middleware?.map((middleware) => middleware.name)).toEqual([
       "ModelCallLimitMiddleware",
       "ToolCallLimitMiddleware",
+      "subagentFinalization",
       "toolErrorRecovery",
       "outputTruncation",
       "DynamicSystemPromptMiddleware",
@@ -107,6 +107,7 @@ describe("resolveSkillSubagents", () => {
     expect(resolved![0]!.middleware?.map((middleware) => middleware.name)).toEqual([
       "ModelCallLimitMiddleware",
       "ToolCallLimitMiddleware",
+      "subagentFinalization",
       "toolErrorRecovery",
       "outputTruncation",
       "DynamicSystemPromptMiddleware",

@@ -1,4 +1,3 @@
-export * from "./manifest.js";
 export * from "./registry.js";
 export * from "./wildcard.js";
 export * from "./loader.js";
@@ -7,3 +6,4 @@ export * from "./skill-catalog.js";
 export * from "./runtime-resolver.js";
 export * from "./mcp-servers-config.js";
 export * from "./materializer.js";
+export * from "./compatibility.js";

@@ -25,6 +25,7 @@ import { statusRoutes } from "./routes-status.js";
 import { toolsRoutes } from "./routes-tools.js";
 import { protocolRoutes } from "./routes-protocol.js";
 import { attachmentRoutes } from "./routes-attachments.js";
+import { folderRoutes } from "./routes-folders.js";
 import { logRoutes } from "./routes-logs.js";
 import { localFolderRoutes } from "./routes-local-folders.js";
 import { limitJsonBody, MAX_JSON_BODY_BYTES } from "./request-limits.js";
@@ -206,6 +207,7 @@ export function buildApp(
   // Literal thread routes and protocol endpoints must precede parameterized
   // LangGraph routes that could otherwise capture the same paths.
   app.route("/", threadRoutes(host));
+  app.route("/", folderRoutes(host));
   app.route("/", protocolRoutes(host));
   app.route("/", langGraphRoutes(host));
   app.route("/", triggerRoutes(host.triggers, host.triggerService));

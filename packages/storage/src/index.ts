@@ -3,6 +3,7 @@ export * from "./persistence.js";
 export * from "./sqlite-store.js";
 export * from "./triggers.js";
 export * from "./threads.js";
+export * from "./folders.js";
 export * from "./attachments.js";
 export * from "./search.js";
 export * from "./settings.js";

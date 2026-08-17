@@ -1,5 +1,8 @@
 /** Parses a plugin ZIP into a manifest-validated bundle ready to write under the install directory. */
-import { pluginManifestSchema, type PluginManifest } from "@pizza-bot/plugin-sdk";
+import {
+  pluginManifestSchema,
+  type PluginManifest,
+} from "@pizza-bot/plugin-api";
 import { ArchiveError, readZipArchive, safeArchivePath } from "./archive.js";
 
 export const MAX_PLUGIN_ARCHIVE_BYTES = 50 * 1024 * 1024;

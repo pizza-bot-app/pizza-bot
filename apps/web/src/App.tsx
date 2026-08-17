@@ -260,12 +260,20 @@ export function App() {
     }
   }, [view, features.enableAutomations, features.enableMemories]);
 
-  const onNewChat = useCallback(() => {
+  const onNewChat = useCallback(async (folderId?: string) => {
     shouldFocusComposerRef.current = true;
     setSearchTarget(null);
     setView("inbox");
-    openThread(freshThreadId(), false);
-  }, [openThread]);
+    const threadId = freshThreadId();
+    if (folderId) {
+      try {
+        await client.createThread(threadId, folderId);
+      } catch (error) {
+        console.error("create thread in folder failed", error);
+      }
+    }
+    openThread(threadId, false);
+  }, [client, openThread]);
 
   const onOpenSearchHit = useCallback(
     (hit: SearchHit) => {
@@ -326,7 +334,7 @@ export function App() {
     setView("settings");
   }, []);
   useHotkey("app.toggleRail", useCallback(() => setShowRail((v) => !v), []));
-  useHotkey("app.newChat", onNewChat);
+  useHotkey("app.newChat", useCallback(() => void onNewChat(), [onNewChat]));
   useHotkey("app.toggleHelp", useCallback(() => setHelpOpen((v) => !v), []));
   useHotkey("app.openSettings", openSettings);
   const onRename = useCallback(

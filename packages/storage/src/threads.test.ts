@@ -54,6 +54,14 @@ describe("ThreadStore: CRUD", () => {
     s.close();
   });
 
+  it("round-trips and clears folder membership", () => {
+    const s = openThreadStore(tmpDb());
+    s.create({ threadId: "th1", folderId: "projects" });
+    expect(s.get("th1")?.folderId).toBe("projects");
+    expect(s.update("th1", { folderId: "research" })?.folderId).toBe("research");
+    expect(s.update("th1", { folderId: null })?.folderId).toBeUndefined();
+  });
+
   it("ensure() is idempotent — creates once, returns existing after", () => {
     const s = openThreadStore(tmpDb());
     const a = s.ensure({ threadId: "th1", title: "first" });
@@ -169,5 +177,37 @@ describe("ThreadStore: CRUD", () => {
     const t = s2.get("th1");
     expect(t?.title).toBe("persisted");
     expect(t?.parentThreadId).toBe("p");
+  });
+
+  it("adds folder membership to databases created before folders existed", () => {
+    const file = tmpDb();
+    const db = new Database(file);
+    db.exec(`
+      CREATE TABLE threads (
+        thread_id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        parent_thread_id TEXT,
+        parent_checkpoint_id TEXT,
+        source TEXT NOT NULL DEFAULT 'user',
+        pinned INTEGER NOT NULL DEFAULT 0,
+        unread INTEGER NOT NULL DEFAULT 0,
+        awaiting_action INTEGER NOT NULL DEFAULT 0,
+        model_id TEXT,
+        created_at TEXT NOT NULL,
+        last_activity_at TEXT NOT NULL,
+        last_message TEXT,
+        last_message_role TEXT
+      );
+      INSERT INTO threads (
+        thread_id, title, source, created_at, last_activity_at
+      ) VALUES (
+        'legacy', 'Existing conversation', 'user', '2026-01-01', '2026-01-01'
+      );
+    `);
+    db.close();
+
+    const store = openThreadStore(file);
+    expect(store.get("legacy")?.title).toBe("Existing conversation");
+    expect(store.update("legacy", { folderId: "projects" })?.folderId).toBe("projects");
   });
 });

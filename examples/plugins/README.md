@@ -6,3 +6,5 @@
 
 Only plugins under the repository's top-level `plugins/` directory ship with
 Pizza Bot. These examples are starting points for custom plugin bundles.
+Their manifests declare `apiVersion` explicitly: this versions the manifest
+contract, while `version` identifies the plugin release.

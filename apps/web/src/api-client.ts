@@ -21,6 +21,7 @@ import {
   updateStateWireSchema,
   type ThreadStateWire,
 } from "@pizza-bot/core";
+import type { PluginLoadStatus } from "@pizza-bot/plugin-api";
 
 export interface ApiClientOptions {
   baseUrl: string;
@@ -146,6 +147,42 @@ export class ApiClient {
 
   async listThreads(): Promise<ThreadInfo[]> {
     return this.json("list threads", "/threads/list");
+  }
+
+  async createThread(threadId: string, folderId?: string): Promise<void> {
+    await this.send("create thread", "/threads", {
+      method: "POST",
+      body: {
+        thread_id: threadId,
+        ...(folderId ? { metadata: { folder_id: folderId } } : {}),
+      },
+    });
+  }
+
+  async listFolders(): Promise<FolderInfo[]> {
+    return this.json("list folders", "/folders");
+  }
+
+  async createFolder(name: string): Promise<FolderInfo> {
+    return this.json("create folder", "/folders", {
+      method: "POST",
+      body: { name },
+    });
+  }
+
+  async renameFolder(folderId: string, name: string): Promise<FolderInfo> {
+    return this.json("rename folder", `/folders/${encodeURIComponent(folderId)}`, {
+      method: "PATCH",
+      body: { name },
+    });
+  }
+
+  async deleteFolder(folderId: string): Promise<boolean> {
+    return deletedFlag(
+      await this.json("delete folder", `/folders/${encodeURIComponent(folderId)}`, {
+        method: "DELETE",
+      }),
+    );
   }
 
   async watchThreadChanges(
@@ -407,6 +444,13 @@ export class ApiClient {
     return this.json("rename thread", `/threads/${encodeURIComponent(threadId)}`, { method: "PATCH", body: { title } });
   }
 
+  async setThreadFolder(threadId: string, folderId: string | null): Promise<ThreadInfo> {
+    return this.json("move thread", `/threads/${encodeURIComponent(threadId)}`, {
+      method: "PATCH",
+      body: { folderId },
+    });
+  }
+
   async markThreadRead(threadId: string): Promise<ThreadInfo> {
     return this.json("mark thread read", `/threads/${encodeURIComponent(threadId)}`, {
       method: "PATCH",
@@ -655,6 +699,7 @@ export interface ThreadInfo {
   threadId: string;
   title: string;
   source: "user" | "trigger" | "fork";
+  folderId?: string;
   pinned: boolean;
   /**
    * Server-managed unread state is independent of client-only running state.
@@ -668,6 +713,13 @@ export interface ThreadInfo {
   modelId?: string;
   lastMessage?: string;
   lastMessageRole?: string;
+}
+
+export interface FolderInfo {
+  folderId: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
 }
 
 export interface StatusInfo {
@@ -840,12 +892,21 @@ export interface McpServerRow {
 }
 
 export interface PluginInfo {
+  id: string;
   name: string;
+  apiVersion?: string;
   version?: string;
   displayName?: string;
   description?: string;
   author?: string;
   homepage?: string;
+  status?: PluginLoadStatus;
+  detail?: string;
+  engine?: string;
+  capabilities?: {
+    required: string[];
+    optional: string[];
+  };
   removable: boolean;
   contributions: { skills: number; mcpServers: number };
   materialization?: {

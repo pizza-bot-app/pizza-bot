@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type PointerEventHandler } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEventHandler,
+} from "react";
 import { ExternalLink, Forward, MessageCircle } from "lucide-react";
 import {
   isForkableTurn,
@@ -37,6 +44,12 @@ import {
 } from "@/components/ai-elements/confirmation";
 import { PartErrorBoundary } from "@/components/PartErrorBoundary";
 import { Avatar } from "./Avatar.js";
+import {
+  ApprovalArgumentEditor,
+  ApprovalArguments,
+  formatArgumentLabel,
+  parseArgumentDraft,
+} from "./ApprovalArguments.js";
 import { approvalEditState } from "./approval-edit.js";
 import { useAttachmentSrc } from "../attachment-src.js";
 
@@ -225,7 +238,13 @@ function PartView({
 
   if (part.type.startsWith("tool-")) {
     if (part.state === "approval-requested") {
-      return <InterruptConfirmation part={part} onDecision={onDecision} />;
+      return (
+        <InterruptConfirmation
+          key={part.toolCallId}
+          part={part}
+          onDecision={onDecision}
+        />
+      );
     }
 
     return (
@@ -314,7 +333,7 @@ function AttachmentPart({
   );
 }
 
-function InterruptConfirmation({
+export function InterruptConfirmation({
   part,
   onDecision,
 }: {
@@ -328,12 +347,14 @@ function InterruptConfirmation({
   ) => void;
 }) {
   const toolName = part.type.slice("tool-".length);
+  const toolLabel = formatArgumentLabel(toolName);
   const [editing, setEditing] = useState(false);
   const [responding, setResponding] = useState(false);
-  const [originalDraft] = useState(() => JSON.stringify(part.input, null, 2));
+  const originalDraft = JSON.stringify(part.input, null, 2) ?? "null";
   const [draft, setDraft] = useState(originalDraft);
   const [responseDraft, setResponseDraft] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const parsedDraft = useMemo(() => parseArgumentDraft(draft), [draft]);
+  const error = parsedDraft.ok ? null : parsedDraft.error;
 
   const batch = part.batch;
   const isBatch = Array.isArray(batch) && batch.length > 1;
@@ -342,21 +363,21 @@ function InterruptConfirmation({
   const canEdit = !isBatch && allowed.includes("edit");
   const editState = approvalEditState(originalDraft, draft);
 
+  useEffect(() => {
+    if (!editing) setDraft(originalDraft);
+  }, [editing, originalDraft]);
+
   const submitEdit = () => {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(draft);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Invalid JSON");
-      return;
-    }
-    setError(null);
-    onDecision?.(part.toolCallId, "edit", parsed, toolName);
+    if (!parsedDraft.ok) return;
+    onDecision?.(part.toolCallId, "edit", parsedDraft.value, toolName);
   };
 
   const revertEdit = () => {
     setDraft(originalDraft);
-    setError(null);
+  };
+
+  const updateDraftValue = (value: unknown) => {
+    setDraft(JSON.stringify(value, null, 2) ?? "null");
   };
 
   const submitRespond = () => {
@@ -365,44 +386,60 @@ function InterruptConfirmation({
   };
 
   return (
-    <Confirmation approval={{ id: part.toolCallId }} state="approval-requested">
-      <ConfirmationTitle>
-        {isBatch ? (
-          <>
-            Approve <b>{batch!.length}</b> <b>{toolName}</b> calls?
-          </>
-        ) : (
-          <>
-            Approve <b>{toolName}</b>? <code className="text-xs">{JSON.stringify(part.input)}</code>
-          </>
-        )}
+    <Confirmation
+      approval={{ id: part.toolCallId }}
+      state="approval-requested"
+      className="hitl-confirmation"
+    >
+      <ConfirmationTitle className="hitl-confirmation-title">
+        <span>
+          {isBatch ? (
+            <>
+              Approve <b>{batch!.length}</b> <b>{toolLabel}</b> calls?
+            </>
+          ) : (
+            <>
+              Approve <b>{toolLabel}</b>?
+            </>
+          )}
+        </span>
+        {toolLabel !== toolName && <code className="hitl-tool-id">{toolName}</code>}
       </ConfirmationTitle>
       <ConfirmationRequest>
         {isBatch && (
-          <ul className="mb-2 flex flex-col gap-1">
-            {batch!.map((call, i) => (
-              <li key={i} className="text-xs">
-                <b>{call.toolName}</b> <code>{JSON.stringify(call.args)}</code>
-              </li>
-            ))}
+          <ul className="approval-batch">
+            {batch!.map((call, i) => {
+              const callLabel = formatArgumentLabel(call.toolName);
+              return (
+                <li key={i}>
+                  <div className="approval-batch-tool">
+                    <b>{callLabel}</b>
+                    {callLabel !== call.toolName && (
+                      <code className="hitl-tool-id">{call.toolName}</code>
+                    )}
+                  </div>
+                  <ApprovalArguments value={call.args} />
+                </li>
+              );
+            })}
           </ul>
         )}
+        {!isBatch && !editing && <ApprovalArguments value={part.input} />}
         {editing && (
-          <div className="mb-2 flex flex-col gap-1">
-            <textarea
-              className="w-full rounded-md border border-border bg-background p-2 font-mono text-xs text-foreground"
-              rows={Math.min(12, draft.split("\n").length + 1)}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              spellCheck={false}
+          <div className="hitl-editor-wrap">
+            <ApprovalArgumentEditor
+              value={parsedDraft.ok ? parsedDraft.value : part.input}
+              rawDraft={draft}
+              rawError={error}
+              onChange={updateDraftValue}
+              onRawChange={setDraft}
             />
-            {error && <span className="text-destructive text-xs">⚠ {error}</span>}
           </div>
         )}
         {responding && (
-          <div className="mb-2 flex flex-col gap-1">
+          <div className="hitl-response-wrap">
             <textarea
-              className="w-full rounded-md border border-border bg-background p-2 text-sm text-foreground"
+              className="hitl-response-editor"
               rows={3}
               value={responseDraft}
               onChange={(e) => setResponseDraft(e.target.value)}
@@ -411,7 +448,7 @@ function InterruptConfirmation({
             />
           </div>
         )}
-        <ConfirmationActions>
+        <ConfirmationActions className="hitl-actions">
           {editing && editState.changed && (
             <ConfirmationAction variant="outline" onClick={revertEdit}>
               Revert changes
@@ -425,7 +462,12 @@ function InterruptConfirmation({
           </ConfirmationAction>
           {canRespond && !editing && (
             responding ? (
-              <ConfirmationAction onClick={submitRespond}>Send response</ConfirmationAction>
+              <>
+                <ConfirmationAction variant="outline" onClick={() => setResponding(false)}>
+                  Back
+                </ConfirmationAction>
+                <ConfirmationAction onClick={submitRespond}>Send response</ConfirmationAction>
+              </>
             ) : (
               <ConfirmationAction variant="outline" onClick={() => { setResponding(true); setEditing(false); }}>
                 Respond
@@ -435,7 +477,7 @@ function InterruptConfirmation({
           {canEdit && !responding && (
             editing ? (
               editState.changed && (
-                <ConfirmationAction onClick={submitEdit}>
+                <ConfirmationAction disabled={!parsedDraft.ok} onClick={submitEdit}>
                   {editState.approveLabel}
                 </ConfirmationAction>
               )

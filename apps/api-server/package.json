@@ -32,6 +32,7 @@
     "@langchain/langgraph-sdk": "~1.9.28",
     "@pizza-bot/core": "*",
     "@pizza-bot/logging": "*",
+    "@pizza-bot/plugin-api": "*",
     "@pizza-bot/plugin-sdk": "*",
     "@pizza-bot/inference-providers": "*",
     "@pizza-bot/runtime-langgraph": "*",
