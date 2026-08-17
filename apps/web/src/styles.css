@@ -1126,31 +1126,69 @@ body {
   flex: 0 0 auto; padding: 0 12px;
 }
 .local-folder-list { display: flex; flex-direction: column; gap: 10px; }
-.local-folder-row { justify-content: flex-start; gap: 12px; }
+.local-folder-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+}
 .local-folder-row > svg { flex: 0 0 auto; color: var(--dim); }
-.local-folder-row .settings-row-text { flex: 1 1 auto; }
+.local-folder-row .settings-row-text {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  flex: 1 1 auto; min-width: 0; gap: 14px;
+}
+.local-folder-row .settings-row-label {
+  font-weight: 600; white-space: nowrap;
+}
 .local-folder-path {
-  overflow-wrap: anywhere;
+  flex: 1 1 auto; min-width: 0;
+  color: var(--dim);
   font-family: var(--mono, ui-monospace, monospace);
-}
-.local-folder-virtual {
-  display: block; width: fit-content; margin-top: 6px; padding: 2px 5px;
-  border-radius: 4px; background: var(--panel-2); color: var(--dim);
-  font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px;
-}
-.local-folder-access {
-  display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto;
-  color: var(--dim); font-size: 11.5px;
+  font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .local-folder-remove { margin-left: 4px; }
-.local-folder-path-input { display: flex; align-items: stretch; gap: 8px; }
-.local-folder-path-input input { min-width: 0; flex: 1; }
-.local-folder-access-picker { width: fit-content; }
-.local-folder-access-picker .segmented-btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: 32px; padding: 0 12px;
+.local-folder-group { display: flex; flex-direction: column; gap: 8px; }
+.local-folder-group + .local-folder-group { margin-top: 14px; }
+.local-folder-group-title {
+  margin: 0; color: var(--dim);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: .06em; text-transform: uppercase;
 }
-.local-folder-form-actions { display: flex; justify-content: flex-end; }
+.local-folder-add-cta { display: flex; margin-top: 14px; }
+
+.local-folder-dialog-path { display: flex; gap: 8px; margin-top: 12px; }
+.local-folder-dialog-path input {
+  min-width: 0; flex: 1;
+  font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px;
+}
+
+.local-folder-access-options {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 12px;
+}
+.local-folder-access-option {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  cursor: pointer;
+}
+.local-folder-access-option input { margin-top: 2px; }
+.local-folder-access-option > svg { flex: 0 0 auto; margin-top: 2px; color: var(--dim); }
+.local-folder-access-option span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.local-folder-access-option strong { font-size: 13px; }
+.local-folder-access-option small { color: var(--dim); font-size: 12px; line-height: 1.4; }
+.local-folder-access-option.selected { background: var(--panel-2); border-color: var(--text); }
+.local-folder-access-option.selected.write { border-color: var(--warn, #d97706); }
+
+.local-folder-read-note {
+  margin: 10px 0 0; color: var(--dim); font-size: 12px; line-height: 1.45;
+}
+
+.local-folder-write-warning {
+  margin: 10px 0 0; padding: 8px 10px;
+  border-left: 3px solid var(--warn, #d97706);
+  background: var(--panel-2);
+  color: var(--dim); font-size: 12px; line-height: 1.45;
+  border-radius: 4px;
+}
 .local-folder-picker { width: min(560px, calc(100vw - 32px)); }
 .local-folder-picker-location {
   display: flex; align-items: center; gap: 9px; min-height: 36px; margin-top: 12px;
@@ -1656,7 +1694,6 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
   .local-folder-row .settings-row-text {
     flex: 1 1 calc(100% - 42px); min-width: calc(100% - 42px);
   }
-  .local-folder-access { margin-left: 36px; }
   .local-folder-remove { margin-left: auto; }
   .module-body.mobile-list .module-detail { display: none; }
   .module-body.mobile-detail .resource-list,
