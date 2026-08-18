@@ -197,7 +197,8 @@ in `core/src/protocol-types.ts`:
   the backend reverses that encoding before using the granted filesystem root.
   Read-only lookups may recover a uniquely NFKC-equivalent on-disk path when a
   model changes a compatibility character; mutations always require the exact
-  virtual path.
+  virtual path. Grants that overlap the application data root require explicit
+  acknowledgement because they can expose or modify private application state.
   Standalone directory browsing is a separate, operator-configured capability:
   the API lists directories only beneath canonical
   `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS` and never follows symlinks while browsing.

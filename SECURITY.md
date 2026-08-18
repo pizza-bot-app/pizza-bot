@@ -104,8 +104,12 @@ use a SQLite-aware snapshot when backing up live databases.
   is a separate explicit choice that allows creating, changing, and deleting
   files beneath that root. DeepAgents virtual mode provides lexical confinement,
   and Pizza Bot also validates canonical paths and mutation parents to reject
-  traversal and symlink or junction escapes. The Pizza Bot data root and its
-  ancestors and descendants cannot be granted.
+  traversal and symlink or junction escapes.
+- **Data-root access requires confirmation.** A grant that overlaps the Pizza Bot
+  data root triggers an additional warning before it is created. If confirmed,
+  read access can expose conversations, memories, attachments, configuration,
+  logs, and stored credentials. Write access can also corrupt or delete
+  application state.
 - **Folder contents can leave the machine.** The agent may read any accessible
   file below a granted root and include it in prompts or tool calls sent to the
   configured model and MCP providers. Review a folder's complete contents

@@ -127,13 +127,13 @@ describe("local folder routes", () => {
     },
   );
 
-  it("rejects protected or inaccessible browse roots at startup", () => {
+  it("accepts data-root browse paths and rejects inaccessible roots at startup", () => {
     expect(() =>
       buildApp(host, {
         allowLocalFolderConfiguration: true,
         localFolderBrowseRoots: [dataRoot],
       })
-    ).toThrow("cannot include the Pizza Bot data directory");
+    ).not.toThrow();
     expect(() =>
       buildApp(host, {
         allowLocalFolderConfiguration: true,
@@ -237,19 +237,61 @@ describe("local folder routes", () => {
     expect((await create(otherParent, true)).status).toBe(201);
   });
 
-  it("rejects relative, missing, file, and Pizza Bot data paths", async () => {
+  it("warns before granting paths that overlap the Pizza Bot data root", async () => {
     const app = buildApp(host, { allowLocalFolderConfiguration: true });
     const nested = join(dataRoot, "nested");
-    const file = join(allowed, "file.txt");
     mkdirSync(nested);
+
+    for (const folderPath of [dataRoot, nested, join(dataRoot, "..")]) {
+      const response = await app.request("/local-folders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: folderPath, readOnly: false }),
+      });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: "data_root_access_requires_confirmation",
+      });
+    }
+
+    const confirmedReadOnly = await app.request("/local-folders", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        path: dataRoot,
+        acknowledgeDataRootAccess: true,
+      }),
+    });
+    expect(confirmedReadOnly.status).toBe(201);
+    const readOnlyFolder = await confirmedReadOnly.json() as {
+      id: string;
+      path: string;
+      readOnly: boolean;
+    };
+    expect(readOnlyFolder).toMatchObject({
+      path: realpathSync.native(dataRoot),
+      readOnly: true,
+    });
+
+    await app.request(`/local-folders/${readOnlyFolder.id}`, { method: "DELETE" });
+    const confirmedWritable = await app.request("/local-folders", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        path: join(dataRoot, ".."),
+        readOnly: false,
+        acknowledgeDataRootAccess: true,
+      }),
+    });
+    expect(confirmedWritable.status).toBe(201);
+    expect(await confirmedWritable.json()).toMatchObject({ readOnly: false });
+  });
+
+  it("rejects relative, missing, file, and invalid-access paths", async () => {
+    const app = buildApp(host, { allowLocalFolderConfiguration: true });
+    const file = join(allowed, "file.txt");
     writeFileSync(file, "not a directory", "utf8");
-    for (const folderPath of [
-      "relative",
-      join(allowed, "missing"),
-      file,
-      dataRoot,
-      nested,
-    ]) {
+    for (const folderPath of ["relative", join(allowed, "missing"), file]) {
       const response = await app.request("/local-folders", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -257,13 +299,6 @@ describe("local folder routes", () => {
       });
       expect(response.status).toBe(400);
     }
-
-    const protectedParent = await app.request("/local-folders", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: join(dataRoot, "..") }),
-    });
-    expect(protectedParent.status).toBe(400);
 
     const invalidAccess = await app.request("/local-folders", {
       method: "POST",

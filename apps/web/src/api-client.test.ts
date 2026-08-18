@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { ApiClient } from "./api-client.js";
+import { ApiClient, ApiError } from "./api-client.js";
 
 describe("ApiClient", () => {
   afterEach(() => {
@@ -629,7 +629,12 @@ describe("ApiClient", () => {
           status: 503,
         })) as unknown as typeof fetch,
     });
-    await expect(client.listModels()).rejects.toThrow("list models failed: 503 backend unavailable");
+    const error = await client.listModels().catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      code: "boom",
+      message: "list models failed: 503 backend unavailable",
+    });
   });
 
   it("requests an unfiltered forced model catalog refresh", async () => {

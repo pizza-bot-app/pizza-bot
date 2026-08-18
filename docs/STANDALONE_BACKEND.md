@@ -225,8 +225,8 @@ cannot leave those canonical roots. Display labels and virtual path ids are
 derived from the selected directory name. While configuration is enabled,
 anyone with the backend bearer token can enumerate directory names beneath the
 browse roots and grant read or write access to directories accessible by the
-backend process, except the Pizza Bot data root and its ancestors or
-descendants.
+backend process. Grants that overlap the Pizza Bot data root require an explicit
+acknowledgement because they can expose or modify private application state.
 
 For example, this stores an Anthropic environment reference without sending the
 secret over the API:

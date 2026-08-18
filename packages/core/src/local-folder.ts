@@ -23,6 +23,8 @@ export interface CreateLocalFolderInput {
   path: string;
   /** Defaults to true when omitted. */
   readOnly?: boolean;
+  /** Confirms access when the grant overlaps Pizza Bot's data directory. */
+  acknowledgeDataRootAccess?: boolean;
 }
 
 export interface LocalFolderBrowseEntry {

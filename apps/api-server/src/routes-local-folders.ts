@@ -130,10 +130,8 @@ function overlappingGrantError(
 }
 
 function canonicalBrowseRoots(
-  host: AgentHost,
   configuredRoots: readonly string[],
 ): string[] {
-  const dataRoot = canonicalDataRoot(host);
   const roots = configuredRoots.map((configured) => {
     if (!path.isAbsolute(configured)) {
       throw new Error(
@@ -149,11 +147,6 @@ function canonicalBrowseRoots(
         `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS directory is not accessible: ${configured}`,
       );
     }
-    if (isProtectedPath(dataRoot, canonical)) {
-      throw new Error(
-        "PIZZA_LOCAL_FOLDER_BROWSE_ROOTS cannot include the Pizza Bot data directory or its ancestors or descendants",
-      );
-    }
     return canonical;
   });
   return [...new Set(roots)];
@@ -165,7 +158,7 @@ export function localFolderRoutes(
 ): Hono {
   const app = new Hono();
   const configurable = options.configurable;
-  const browseRoots = canonicalBrowseRoots(host, options.browseRoots ?? []);
+  const browseRoots = canonicalBrowseRoots(options.browseRoots ?? []);
   const dataRoot = canonicalDataRoot(host);
 
   app.get("/local-folders", (c) => {
@@ -276,13 +269,17 @@ export function localFolderRoutes(
       return c.json({ error: "invalid_path", detail: directory.detail }, 400);
     }
 
-    if (isProtectedPath(dataRoot, directory.path)) {
+    if (
+      isProtectedPath(dataRoot, directory.path) &&
+      raw.acknowledgeDataRootAccess !== true
+    ) {
       return c.json(
         {
-          error: "protected_path",
-          detail: "The Pizza Bot data directory cannot be exposed as a local folder.",
+          error: "data_root_access_requires_confirmation",
+          detail:
+            "This folder overlaps the Pizza Bot data directory. Confirm access to continue.",
         },
-        400,
+        409,
       );
     }
     if (host.localFolders.hasPath(directory.path)) {
