@@ -53,6 +53,7 @@ describe("Ollama model discovery", () => {
       displayName: "small:latest (Ollama)",
       contextWindow: 8_192,
       supportsTools: true,
+      supportsVision: false,
     }]);
 
     const model = await provider.buildModel("small:latest");

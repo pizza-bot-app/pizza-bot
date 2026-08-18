@@ -40,6 +40,7 @@ import {
 } from "./subagent-finalization-middleware.js";
 import { attachmentInlineMiddleware } from "./attachment-inline-middleware.js";
 import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
+import { localFolderContextMiddleware } from "./local-folder-context-middleware.js";
 import { streamProtocolEvents, toLangGraphInput, type ProtocolCapableGraph } from "./stream-protocol.js";
 
 // The built-in Codex profile otherwise restores the opt-in planning middleware.
@@ -226,6 +227,9 @@ export async function resolveSkillSubagents(
         outputTruncationMiddleware(),
         currentDateTimeMiddleware(),
       ];
+      if (deps.localFolders) {
+        middleware.push(localFolderContextMiddleware(deps.localFolders));
+      }
       if (hasEvalTool(entry.declaredTools)) {
         middleware.push(await codeInterpreterMiddleware(false));
       }
@@ -308,6 +312,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   const backend = buildBackend({
     ...(deps.memoriesDir ? { memoriesDir: deps.memoriesDir } : {}),
     ...(deps.memoryEnabled ? { memoryEnabled: deps.memoryEnabled } : {}),
+    ...(deps.localFolders ? { localFolders: deps.localFolders } : {}),
   });
 
   const middleware: unknown[] = [
@@ -315,6 +320,9 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
     toolErrorRecoveryMiddleware(),
     currentDateTimeMiddleware(),
   ];
+  if (deps.localFolders) {
+    middleware.push(localFolderContextMiddleware(deps.localFolders));
+  }
   // Keep attachment bytes out of checkpoints and inline them only for model calls.
   if (deps.attachmentResolver) {
     middleware.push(attachmentInlineMiddleware(deps.attachmentResolver));

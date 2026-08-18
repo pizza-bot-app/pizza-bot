@@ -37,6 +37,7 @@ import {
   ProviderConfigStore,
   ThreadActivityStore,
   CapabilityPreferencesStore,
+  LocalFolderStore,
   RunMaintenance,
   TITLE_SYSTEM_PROMPT,
   buildTitleUserMessage,
@@ -334,6 +335,7 @@ export class AgentHost {
   readonly providerConfigs: ProviderConfigStore;
   readonly threadActivity: ThreadActivityStore;
   readonly capabilityPreferences: CapabilityPreferencesStore;
+  readonly localFolders: LocalFolderStore;
   modelId: string;
   readonly attachments?: AttachmentStore;
 
@@ -377,6 +379,7 @@ export class AgentHost {
 
   private constructor(
     readonly persistence: Persistence,
+    readonly dataRoot: string,
     explicitModelId: string | undefined,
     appDbPath: string,
     attachmentsDir: string | false,
@@ -393,6 +396,7 @@ export class AgentHost {
     this.providerConfigs = this.appDb.providerConfigs;
     this.threadActivity = this.appDb.threadActivity;
     this.capabilityPreferences = this.appDb.capabilityPreferences;
+    this.localFolders = this.appDb.localFolders;
     this.explicitModelId = explicitModelId ?? process.env.PIZZA_MODEL ?? null;
     this.modelId = this.selectDefaultModel();
     if (this.appDb.attachments) this.attachments = this.appDb.attachments;
@@ -1780,6 +1784,7 @@ export class AgentHost {
               memoryEnabled: () => host.settings.get().enableMemories,
             }
           : {}),
+        localFolders: () => host.localFolders.list(),
         ...(host.attachments ? { attachmentResolver: host.attachments.resolver } : {}),
         ...(Object.keys(tools).length > 0 ? { tools } : {}),
         ...(Object.keys(catalog).length > 0 ? { catalog } : {}),
@@ -1812,7 +1817,14 @@ export class AgentHost {
     const appDbPath = isMemory ? ":memory:" : resolveLayout(opts.dataRoot).appDb;
     const attachmentsDir = isMemory ? false : resolveLayout(opts.dataRoot).attachmentsDir;
 
-    return new AgentHost(lazyPersistence, explicitModelId, appDbPath, attachmentsDir, warm);
+    return new AgentHost(
+      lazyPersistence,
+      opts.dataRoot,
+      explicitModelId,
+      appDbPath,
+      attachmentsDir,
+      warm,
+    );
   }
 
   async close(): Promise<void> {

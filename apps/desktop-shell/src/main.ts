@@ -7,6 +7,7 @@ import {
   shell,
   ipcMain,
   safeStorage,
+  dialog,
 } from "electron";
 import path from "node:path";
 import { homedir } from "node:os";
@@ -148,6 +149,7 @@ const CONNECTION_CHANNELS = {
 const LOG_CHANNEL = "pizza:logs:write";
 const LOG_QUERY_CHANNEL = "pizza:logs:query";
 const LOG_CLEAR_CHANNEL = "pizza:logs:clear";
+const LOCAL_FOLDER_PICK_CHANNEL = "pizza:local-folders:pick";
 
 app.on("second-instance", () => {
   if (mainWindow) {
@@ -200,6 +202,19 @@ async function main(): Promise<void> {
     },
   );
   registerPowerLifecycle();
+  ipcMain.handle(LOCAL_FOLDER_PICK_CHANNEL, async (event) => {
+    if (
+      activeConnection?.mode !== "local" ||
+      !mainWindow ||
+      event.sender !== mainWindow.webContents
+    ) {
+      throw new Error("Folder selection is available only for the embedded backend.");
+    }
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openDirectory", "createDirectory"],
+    });
+    return result.canceled ? undefined : result.filePaths[0];
+  });
 
   const dataRoot = resolveDataRoot();
   secretStore = new SecretStore(safeStorage, path.join(dataRoot, "secrets.json"));

@@ -103,8 +103,14 @@ frontend consumes them through the `@langchain/langgraph-sdk`
 
 ## Windows: constraints the suite has to respect
 
-`npm test` is green on Windows. Four platform differences shape how these tests
+`npm test` is green on Windows. Five platform differences shape how these tests
 are written — keep them in mind when adding assertions or temp-dir cleanup:
+
+- **Two `realpath`s that disagree.** `fs.realpathSync` is Node's JS implementation
+  and preserves 8.3 short names, which is what `os.tmpdir()` yields on CI
+  (`C:\Users\RUNNER~1\...`); `fs/promises` `realpath` and `realpathSync.native`
+  call libuv and expand them. Never compare paths canonicalized by different ones
+  — a containment check across the two silently fails on Windows only.
 
 - **No POSIX mode bits.** Windows `chmod` only toggles the read-only bit, so
   `0o700`/`0o600` assertions can never hold. Gate them on

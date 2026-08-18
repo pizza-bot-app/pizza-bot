@@ -144,6 +144,36 @@ describe("Pizza Bot graph assembly", () => {
     );
   });
 
+  it("adds live local-folder context to Pizza Bot and skill workers", async () => {
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      skills: mailSkill(),
+      tools: { "mcp:outlook:send": { name: "outlook__send" } },
+      catalog: { outlook: ["send"] },
+      localFolders: () => [],
+    });
+
+    const params = mocks.createDeepAgent.mock.calls[0]![0] as {
+      middleware: Array<{ name?: string }>;
+    };
+    expect(params.middleware.map((middleware) => middleware.name)).toEqual(
+      expect.arrayContaining([
+        "DynamicSystemPromptMiddleware",
+        "localFolderContext",
+      ]),
+    );
+
+    const subagentParams = mocks.createSubAgent.mock.calls[0]![0] as {
+      middleware: Array<{ name?: string }>;
+    };
+    expect(subagentParams.middleware.map((middleware) => middleware.name)).toEqual(
+      expect.arrayContaining([
+        "DynamicSystemPromptMiddleware",
+        "localFolderContext",
+      ]),
+    );
+  });
+
   it("requires durable checkpoints when a skill enables HITL", async () => {
     await expect(
       createPizzaBotAgent("prompt", {

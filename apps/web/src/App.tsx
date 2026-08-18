@@ -463,6 +463,7 @@ export function App() {
           ) : view === "settings" ? (
             <div className="module-hub">
               <SettingsModule
+                client={client}
                 theme={theme.preference}
                 onThemeChange={theme.setPreference}
                 persona={persona.value}

@@ -351,6 +351,68 @@ describe("ApiClient", () => {
     expect(captured.init).toMatchObject({ method: "PUT", keepalive: true });
   });
 
+  it("browses, creates, and removes backend-local folder grants", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          method: init?.method,
+          body: typeof init?.body === "string" ? init.body : undefined,
+        });
+        return new Response(
+          init?.method === "DELETE"
+            ? JSON.stringify({ deleted: true })
+            : url.includes("/browse")
+              ? JSON.stringify({
+                  currentPath: "/srv",
+                  parentPath: null,
+                  directories: [{ name: "project", path: "/srv/project" }],
+                })
+            : JSON.stringify({
+                id: "project",
+                label: "Project",
+                path: "/srv/project",
+                virtualPath: "/local/project",
+                readOnly: false,
+                createdAt: "now",
+              }),
+          { status: init?.method === "POST" ? 201 : 200 },
+        );
+      }) as unknown as typeof fetch,
+    });
+
+    expect(await client.browseLocalFolders("/srv")).toMatchObject({
+      currentPath: "/srv",
+      directories: [{ path: "/srv/project" }],
+    });
+    expect(
+      await client.createLocalFolder({
+        path: "/srv/project",
+        readOnly: false,
+      }),
+    ).toMatchObject({ id: "project", readOnly: false });
+    expect(await client.deleteLocalFolder("project")).toBe(true);
+    expect(calls).toEqual([
+      {
+        url: "http://x/local-folders/browse?path=%2Fsrv",
+        method: undefined,
+        body: undefined,
+      },
+      {
+        url: "http://x/local-folders",
+        method: "POST",
+        body: JSON.stringify({ path: "/srv/project", readOnly: false }),
+      },
+      {
+        url: "http://x/local-folders/project",
+        method: "DELETE",
+        body: undefined,
+      },
+    ]);
+  });
+
   it("watches authenticated thread-change events over SSE", async () => {
     const captured: { url?: string; headers?: RequestInit["headers"] } = {};
     const client = new ApiClient({

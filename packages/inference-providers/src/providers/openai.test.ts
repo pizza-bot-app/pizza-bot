@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextOverflowError } from "@langchain/core/errors";
-import { HumanMessage } from "@langchain/core/messages";
+import {
+  HumanMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import {
   convertMessagesToCompletionsMessageParams,
   convertMessagesToResponsesInput,
 } from "@langchain/openai";
-import { isChatModel, OpenAiLangChainModelProvider, retryOutputCap } from "./openai.js";
+import {
+  createOpenAiChatModel,
+  isChatModel,
+  OpenAiLangChainModelProvider,
+  retryOutputCap,
+} from "./openai.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -243,6 +251,56 @@ describe("OpenAI model construction", () => {
         hasTool: true,
       },
     ]);
+  });
+
+  it("sends DeepAgents image tool results as native Responses input", async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return openAiError(
+        bodies.length === 1
+          ? "max_tokens (8192) is greater than max_total_tokens: 4096"
+          : "stop",
+      );
+    }));
+    const model = await createOpenAiChatModel({
+      modelId: "custom-responses-model",
+      apiKey: "test-key",
+      maxTokens: 8_192,
+      apiMode: "responses",
+      baseUrl: "https://proxy.example/openai/v1",
+    });
+    const toolMessage = new ToolMessage({
+      tool_call_id: "call_read",
+      content: [{
+        type: "image",
+        mimeType: "image/png",
+        data: "aW1hZ2U=",
+      }],
+    });
+
+    await expect(consume(model.stream([toolMessage]))).rejects.toThrow("stop");
+
+    expect(bodies).toHaveLength(2);
+    for (const body of bodies) {
+      expect(body).toMatchObject({
+        input: [{
+          type: "function_call_output",
+          call_id: "call_read",
+          output: [{
+            type: "input_image",
+            detail: "auto",
+            image_url: "data:image/png;base64,aW1hZ2U=",
+          }],
+        }],
+      });
+      expect(JSON.stringify(body)).not.toContain("\\\"data\\\":\\\"aW1hZ2U=\\\"");
+    }
+    expect(toolMessage.content).toEqual([{
+      type: "image",
+      mimeType: "image/png",
+      data: "aW1hZ2U=",
+    }]);
   });
 
   it("can force Chat Completions for models LangChain would route to Responses", async () => {

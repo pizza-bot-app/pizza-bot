@@ -13,3 +13,4 @@ export * from "./title.js";
 export * from "./run-maintenance.js";
 export * from "./thread-activity.js";
 export * from "./capability-preferences.js";
+export * from "./local-folders.js";

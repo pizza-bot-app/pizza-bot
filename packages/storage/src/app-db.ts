@@ -9,6 +9,7 @@ import { ProviderConfigStore } from "./provider-configs.js";
 import { AttachmentStore } from "./attachments.js";
 import { ThreadActivityStore } from "./thread-activity.js";
 import { CapabilityPreferencesStore } from "./capability-preferences.js";
+import { LocalFolderStore } from "./local-folders.js";
 import { ensurePrivateDirectory, ensurePrivateFile } from "./private-files.js";
 import { FolderStore } from "./folders.js";
 
@@ -23,6 +24,7 @@ export interface AppDatabase {
   providerConfigs: ProviderConfigStore;
   threadActivity: ThreadActivityStore;
   capabilityPreferences: CapabilityPreferencesStore;
+  localFolders: LocalFolderStore;
   /** Attachment metadata is in SQLite; bytes remain in `attachmentsDir`. */
   attachments?: AttachmentStore;
   close(): void;
@@ -51,6 +53,7 @@ export function openAppDatabase(dbPath: string, attachmentsDir?: string): AppDat
     providerConfigs: new ProviderConfigStore(db),
     threadActivity: new ThreadActivityStore(db),
     capabilityPreferences: new CapabilityPreferencesStore(db),
+    localFolders: new LocalFolderStore(db),
     ...(attachmentsDir ? { attachments: new AttachmentStore(db, attachmentsDir) } : {}),
     close() {
       db.close();

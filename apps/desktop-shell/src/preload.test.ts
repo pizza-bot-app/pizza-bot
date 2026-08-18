@@ -82,4 +82,14 @@ describe("desktop preload notification bridge", () => {
       null,
     );
   });
+
+  it("exposes native local-folder selection through the sandboxed bridge", async () => {
+    electron.invoke.mockResolvedValueOnce("/tmp/project");
+    const bridge = electron.exposed.get("__PIZZA_LOCAL_FOLDERS__") as {
+      pickDirectory(): Promise<string | undefined>;
+    };
+
+    await expect(bridge.pickDirectory()).resolves.toBe("/tmp/project");
+    expect(electron.invoke).toHaveBeenCalledWith("pizza:local-folders:pick");
+  });
 });

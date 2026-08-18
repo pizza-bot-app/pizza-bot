@@ -1,6 +1,7 @@
 import {
   AIMessage,
   AIMessageChunk,
+  HumanMessage,
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
@@ -91,9 +92,13 @@ export function buildToolArgNames(tools: unknown): ToolArgNames {
  * ChatOllama only serializes `AIMessage.tool_calls` when assistant content is a
  * string. LangGraph v3 checkpoints the same turn as `tool_call` content blocks,
  * so passing it through unchanged silently drops the assistant tool-call turn
- * and leaves the following tool result orphaned.
+ * and leaves the following tool result orphaned. ChatOllama also accepts images
+ * only in user messages, so tool-returned images are projected into that role.
  */
-export function coerceOllamaMessageContent(messages: BaseMessage[]): BaseMessage[] {
+export function coerceOllamaMessageContent(
+  messages: BaseMessage[],
+  supportsVision: boolean,
+): BaseMessage[] {
   let rewritten: BaseMessage[] | undefined;
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index]!;
@@ -102,7 +107,7 @@ export function coerceOllamaMessageContent(messages: BaseMessage[]): BaseMessage
       Array.isArray(message.content) &&
       (message.tool_calls?.length ?? 0) > 0
     ) {
-      rewritten ??= [...messages];
+      rewritten ??= messages.slice(0, index);
       const clone = Object.assign(
         Object.create(Object.getPrototypeOf(message)) as AIMessage,
         message,
@@ -116,19 +121,79 @@ export function coerceOllamaMessageContent(messages: BaseMessage[]): BaseMessage
         )
         .map((block) => block.text)
         .join("");
-      rewritten[index] = clone;
+      rewritten.push(clone);
       continue;
     }
-    if (!ToolMessage.isInstance(message) || !Array.isArray(message.content)) continue;
-    rewritten ??= [...messages];
+    if (!ToolMessage.isInstance(message) || !Array.isArray(message.content)) {
+      rewritten?.push(message);
+      continue;
+    }
+    rewritten ??= messages.slice(0, index);
     const clone = Object.assign(
       Object.create(Object.getPrototypeOf(message)) as ToolMessage,
       message,
     );
-    clone.content = stringifyToolContent(message.content);
-    rewritten[index] = clone;
+    const images = message.content.filter(isImageBlock);
+    if (images.length === 0) {
+      clone.content = stringifyToolContent(message.content);
+      rewritten.push(clone);
+      continue;
+    }
+
+    clone.content = summarizeImageToolContent(
+      message.content,
+      images,
+      supportsVision,
+    );
+    rewritten.push(clone);
+    if (supportsVision) {
+      rewritten.push(new HumanMessage({
+        content: images.map((image) => ({
+          type: "image_url",
+          image_url: {
+            url: `data:${image.mimeType};base64,${image.data}`,
+          },
+        })),
+      }));
+    }
   }
   return rewritten ?? messages;
+}
+
+interface ImageBlock extends Record<string, unknown> {
+  type: "image";
+  mimeType: string;
+  data: string;
+}
+
+function isImageBlock(block: unknown): block is ImageBlock {
+  return (
+    typeof block === "object" &&
+    block !== null &&
+    (block as { type?: unknown }).type === "image" &&
+    typeof (block as { mimeType?: unknown }).mimeType === "string" &&
+    typeof (block as { data?: unknown }).data === "string"
+  );
+}
+
+function summarizeImageToolContent(
+  content: Array<Record<string, unknown>>,
+  images: ImageBlock[],
+  supportsVision: boolean,
+): string {
+  const text = content
+    .filter(
+      (block): block is Record<string, unknown> & { type: "text"; text: string } =>
+        block.type === "text" && typeof block.text === "string",
+    )
+    .map((block) => block.text)
+    .join("\n");
+  const formats = [...new Set(images.map((image) => image.mimeType))].join(", ");
+  const imageLabel = images.length === 1 ? "an image" : `${images.length} images`;
+  const notice = supportsVision
+    ? `The tool returned ${imageLabel} (${formats}); attached in the next user message.`
+    : `The tool returned ${imageLabel} (${formats}), but this model does not support image inputs. Select a vision-capable model to inspect it.`;
+  return text ? `${text}\n${notice}` : notice;
 }
 
 function stringifyToolContent(content: Array<Record<string, unknown>>): string {

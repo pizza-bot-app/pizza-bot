@@ -215,7 +215,7 @@ describe("coerceOllamaMessageContent", () => {
     const rewritten = coerceOllamaMessageContent([
       new HumanMessage("go"),
       toolMessage,
-    ]);
+    ], false);
 
     expect(rewritten[1]?.content).toBe("first\nsecond");
     expect(toolMessage.content).toEqual([
@@ -224,18 +224,45 @@ describe("coerceOllamaMessageContent", () => {
     ]);
   });
 
-  it("serializes non-text blocks for Ollama's string-only tool role", () => {
+  it("replaces image data with a capability warning for non-vision models", () => {
     const toolMessage = new ToolMessage({
       content: [{ type: "image", mimeType: "image/png", data: "abc" }],
       tool_call_id: "call_1",
       name: "read_file",
     });
 
-    const rewritten = coerceOllamaMessageContent([toolMessage]);
+    const rewritten = coerceOllamaMessageContent([toolMessage], false);
 
+    expect(rewritten).toHaveLength(1);
+    expect(rewritten[0]?.content).toContain("does not support image inputs");
+    expect(rewritten[0]?.content).not.toContain("abc");
+    expect(toolMessage.content).toEqual([
+      { type: "image", mimeType: "image/png", data: "abc" },
+    ]);
+  });
+
+  it("moves image data to an adjacent user message for vision models", () => {
+    const toolMessage = new ToolMessage({
+      content: [
+        { type: "text", text: "Screenshot contents" },
+        { type: "image", mimeType: "image/png", data: "abc" },
+      ],
+      tool_call_id: "call_1",
+      name: "read_file",
+    });
+
+    const rewritten = coerceOllamaMessageContent([toolMessage], true);
+
+    expect(rewritten).toHaveLength(2);
     expect(rewritten[0]?.content).toBe(
-      '[{"type":"image","mimeType":"image/png","data":"abc"}]',
+      "Screenshot contents\nThe tool returned an image (image/png); attached in the next user message.",
     );
+    expect(rewritten[1]).toBeInstanceOf(HumanMessage);
+    expect(rewritten[1]?.content).toEqual([{
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,abc" },
+    }]);
+    expect(toolMessage.content).toHaveLength(2);
   });
 });
 
@@ -401,6 +428,66 @@ describe("Ollama v3 streaming tool-arg coercion", () => {
     ]);
   });
 
+  it("sends tool-returned images through Ollama's native image field", async () => {
+    const model = await new OllamaLangChainModelProvider({
+      fetch: async () => Response.json({
+        capabilities: ["completion", "tools", "vision"],
+      }),
+    }).buildModel("vision-model");
+    let sentMessages: unknown;
+    stubOllamaClient(
+      model,
+      [{ message: { content: "complete" }, done: true, done_reason: "stop" }],
+      (messages) => {
+        sentMessages = messages;
+      },
+    );
+    const toolResult = new ToolMessage({
+      content: [{ type: "image", mimeType: "image/png", data: "abc" }],
+      tool_call_id: "call_1",
+      name: "read_file",
+    });
+
+    await model.invoke([
+      new HumanMessage("inspect it"),
+      new AIMessage({
+        content: "",
+        tool_calls: [{
+          id: "call_1",
+          name: "read_file",
+          args: { file_path: "/local/screenshots/example.png" },
+          type: "tool_call",
+        }],
+      }),
+      toolResult,
+    ]);
+
+    expect(sentMessages).toEqual([
+      { role: "user", content: "inspect it" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: { file_path: "/local/screenshots/example.png" },
+          },
+        }],
+      },
+      {
+        role: "tool",
+        content: "The tool returned an image (image/png); attached in the next user message.",
+      },
+      { role: "user", content: "", images: ["abc"] },
+    ]);
+    expect(JSON.stringify(sentMessages)).not.toContain("base64");
+    expect(toolResult.content).toEqual([
+      { type: "image", mimeType: "image/png", data: "abc" },
+    ]);
+  });
+
   it("replays v3 tool-call blocks as an assistant tool call, without reasoning", async () => {
     const model = await new OllamaLangChainModelProvider({
       fetch: async () => new Response(null, { status: 404 }),
@@ -557,8 +644,25 @@ describe("Ollama model capabilities", () => {
     expect(model.think).toBe(true);
     expect(model.profile).toMatchObject({
       maxInputTokens: 65_536,
+      imageInputs: false,
+      imageToolMessage: false,
       reasoningOutput: true,
       toolCalling: true,
+    });
+  });
+
+  it("advertises native image and adapted tool-image support for vision models", async () => {
+    const provider = new OllamaLangChainModelProvider({
+      fetch: async () => Response.json({
+        capabilities: ["completion", "tools", "vision"],
+      }),
+    });
+
+    const model = await provider.buildModel("vision-model");
+
+    expect(model.profile).toMatchObject({
+      imageInputs: true,
+      imageToolMessage: true,
     });
   });
 

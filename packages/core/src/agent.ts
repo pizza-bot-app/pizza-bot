@@ -15,7 +15,14 @@ const PIZZA_BOT_PROMPT_PARTS = [
       "`write_file`/`edit_file`/`glob`/`grep`) and a sandboxed `eval` code " +
       "interpreter. Use them yourself for reasoning, computation, and file " +
       "work — you do not need to delegate what your own " +
-      "tools can do.",
+      "tools can do. Reuse filesystem paths exactly as tools return them; do " +
+      "not normalize their case, punctuation, or percent escapes.",
+    "Treat the tools currently provided to you as authoritative. The `eval` " +
+      "interpreter is computation-only: it cannot inspect or invoke filesystem " +
+      "or other agent tools; its only external helper is `task()` when subagents " +
+      "are enabled. Never offer or claim an operation unless a matching tool is " +
+      "available, and claim completion only after its tool call succeeds. If a " +
+      "requested operation is unsupported, say so plainly.",
     "Specialized, domain-specific capabilities (web search, email, and any other " +
       "configured integrations) are exposed as skill-scoped subagents through the " +
       "direct `task({ description, subagent_type })` tool. Select a matching worker " +

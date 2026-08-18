@@ -32,6 +32,12 @@ const connection: PizzaConnectionBridge = {
 };
 contextBridge.exposeInMainWorld("__PIZZA_CONNECTION__", connection);
 
+const localFolders: PizzaLocalFoldersBridge = {
+  pickDirectory: () =>
+    ipcRenderer.invoke("pizza:local-folders:pick") as Promise<string | undefined>,
+};
+contextBridge.exposeInMainWorld("__PIZZA_LOCAL_FOLDERS__", localFolders);
+
 const logs: PizzaLogsBridge = {
   local: localLogs,
   write: (record) => ipcRenderer.send("pizza:logs:write", record),
@@ -105,6 +111,10 @@ interface PizzaConnectionBridge {
     token?: string | null;
   }): Promise<PizzaConnectionState>;
   useLocal(): Promise<PizzaConnectionState>;
+}
+
+interface PizzaLocalFoldersBridge {
+  pickDirectory(): Promise<string | undefined>;
 }
 
 interface PizzaNotificationsBridge {

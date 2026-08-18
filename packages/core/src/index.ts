@@ -11,3 +11,4 @@ export * from "./classify-error.js";
 export * from "./trigger.js";
 export * from "./settings.js";
 export * from "./thread-activity.js";
+export * from "./local-folder.js";
