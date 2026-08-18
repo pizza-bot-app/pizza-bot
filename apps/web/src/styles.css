@@ -1931,11 +1931,16 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
   .settings-row-adaptive .settings-theme-toggle,
   .settings-row-adaptive .settings-provider-default { width: 100%; max-width: none; }
   .settings-row-adaptive .settings-theme-toggle .segmented-btn { flex: 1 1 0; min-width: 0; }
-  .local-folder-row { flex-wrap: wrap; }
-  .local-folder-row .settings-row-text {
-    flex: 1 1 calc(100% - 42px); min-width: calc(100% - 42px);
+  .local-folder-row {
+    display: grid; grid-template-columns: 18px minmax(0, 1fr) 34px;
   }
-  .local-folder-remove { margin-left: auto; }
+  .local-folder-row .settings-row-text {
+    align-items: stretch; flex-direction: column; gap: 3px;
+  }
+  .local-folder-row .settings-row-label {
+    overflow-wrap: anywhere; white-space: normal;
+  }
+  .local-folder-remove { margin-left: 0; }
   .module-body.mobile-list .module-detail { display: none; }
   .module-body.mobile-detail .resource-list,
   .module-body.mobile-detail .schedules-list { display: none; }
