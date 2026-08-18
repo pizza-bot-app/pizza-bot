@@ -40,6 +40,7 @@ export class ApiError extends Error {
     readonly status: number,
     readonly statusText: string,
     detail?: string,
+    readonly code?: string,
   ) {
     super(`${action} failed: ${status} ${detail ?? statusText}`);
     this.name = "ApiError";
@@ -661,18 +662,27 @@ async function readSseChunk(
 export const SECRET_UNCHANGED = "__unchanged__";
 
 async function apiError(action: string, res: Response): Promise<ApiError> {
-  const detail = await res
+  const body = await res
     .clone()
     .json()
     .then((body: unknown) => {
       if (body && typeof body === "object") {
         const b = body as { detail?: string; error?: string; message?: string };
-        return b.detail ?? b.message ?? b.error;
+        return {
+          detail: b.detail ?? b.message ?? b.error,
+          code: b.error,
+        };
       }
       return undefined;
     })
     .catch(() => undefined);
-  return new ApiError(action, res.status, res.statusText, detail);
+  return new ApiError(
+    action,
+    res.status,
+    res.statusText,
+    body?.detail,
+    body?.code,
+  );
 }
 
 function deletedFlag(body: unknown): boolean {

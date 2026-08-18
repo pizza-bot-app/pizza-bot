@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import type { LocalFolder, LocalFolderList } from "@pizza-bot/core";
-import type { ApiClient } from "@/api-client";
+import { ApiError, type ApiClient } from "@/api-client";
 import { ConfirmationDialog } from "../ConfirmationDialog.js";
 import { BackendDirectoryPicker } from "./BackendDirectoryPicker.js";
 
@@ -40,7 +40,13 @@ function AddFolderDialog({
   const [readOnly, setReadOnly] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [dataRootWarning, setDataRootWarning] = useState(false);
   const [showBackendPicker, setShowBackendPicker] = useState(false);
+
+  const updatePath = (nextPath: string) => {
+    setPath(nextPath);
+    setDataRootWarning(false);
+  };
 
   const pickDirectory = async () => {
     setError(undefined);
@@ -51,7 +57,7 @@ function AddFolderDialog({
     try {
       const selected = await window.__PIZZA_LOCAL_FOLDERS__.pickDirectory();
       if (!selected) return;
-      setPath(selected);
+      updatePath(selected);
     } catch (cause) {
       setError(message(cause));
     }
@@ -64,11 +70,19 @@ function AddFolderDialog({
       await client.createLocalFolder({
         path: path.trim(),
         readOnly,
+        ...(dataRootWarning ? { acknowledgeDataRootAccess: true } : {}),
       });
       await onAdded();
       onClose();
     } catch (cause) {
-      setError(message(cause));
+      if (
+        cause instanceof ApiError &&
+        cause.code === "data_root_access_requires_confirmation"
+      ) {
+        setDataRootWarning(true);
+      } else {
+        setError(message(cause));
+      }
     } finally {
       setBusy(false);
     }
@@ -96,7 +110,7 @@ function AddFolderDialog({
               <input
                 aria-label="Folder path on backend"
                 value={path}
-                onChange={(event) => setPath(event.target.value)}
+                onChange={(event) => updatePath(event.target.value)}
                 placeholder="Absolute path on backend"
               />
               {((canPickDirectory && window.__PIZZA_LOCAL_FOLDERS__) ||
@@ -159,6 +173,17 @@ function AddFolderDialog({
               </p>
             )}
 
+            {dataRootWarning && (
+              <p className="local-folder-write-warning" role="note">
+                This folder overlaps Pizza Bot&apos;s private data. The agent may
+                access conversations, memories, attachments, configuration, logs,
+                and stored credentials
+                {readOnly
+                  ? "."
+                  : ", and may corrupt or delete application state."}
+              </p>
+            )}
+
             {error && (
               <div className="sidebar-modal-error" role="alert">
                 {error}
@@ -176,7 +201,7 @@ function AddFolderDialog({
                 disabled={busy || !path.trim()}
                 onClick={() => void add()}
               >
-                Add folder
+                {dataRootWarning ? "Add anyway" : "Add folder"}
               </button>
             </div>
           </DialogPrimitive.Content>
@@ -188,7 +213,7 @@ function AddFolderDialog({
           client={client}
           onCancel={() => setShowBackendPicker(false)}
           onSelect={(selected) => {
-            setPath(selected);
+            updatePath(selected);
             setShowBackendPicker(false);
           }}
         />
