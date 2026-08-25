@@ -27,6 +27,12 @@ export interface ProviderConfigPort {
   removeConfig(providerId: string): void;
   getDefaultModel(): string | undefined;
   setDefaultModel(qualified: string | null): void;
+  /**
+   * The model automatic selection last resolved to. Remembering it keeps a
+   * degraded catalog from re-pointing scheduled runs at a different model.
+   */
+  getAutomaticModel(): string | undefined;
+  setAutomaticModel(qualified: string | null): void;
   getModelPreferences(providerId: string): ProviderModelPreferences | undefined;
   setModelPreferences(providerId: string, preferences: ProviderModelPreferences): void;
   removeModelPreferences(providerId: string): void;

@@ -12,6 +12,7 @@ interface ConfigRow {
 }
 
 const DEFAULT_MODEL_KEY = "default_model";
+const AUTOMATIC_MODEL_KEY = "automatic_model";
 
 export class ProviderConfigStore implements ProviderConfigPort {
   private readonly db: Database.Database;
@@ -79,9 +80,25 @@ export class ProviderConfigStore implements ProviderConfigPort {
   }
 
   getDefaultModel(): string | undefined {
+    return this.getAppDefault(DEFAULT_MODEL_KEY);
+  }
+
+  setDefaultModel(qualified: string | null): void {
+    this.setAppDefault(DEFAULT_MODEL_KEY, qualified);
+  }
+
+  getAutomaticModel(): string | undefined {
+    return this.getAppDefault(AUTOMATIC_MODEL_KEY);
+  }
+
+  setAutomaticModel(qualified: string | null): void {
+    this.setAppDefault(AUTOMATIC_MODEL_KEY, qualified);
+  }
+
+  private getAppDefault(key: string): string | undefined {
     const row = this.db
       .prepare<[string], { value: string }>("SELECT value FROM app_defaults WHERE key = ?")
-      .get(DEFAULT_MODEL_KEY);
+      .get(key);
     if (!row) return undefined;
     try {
       const parsed = JSON.parse(row.value);
@@ -91,9 +108,9 @@ export class ProviderConfigStore implements ProviderConfigPort {
     }
   }
 
-  setDefaultModel(qualified: string | null): void {
-    if (qualified === null) {
-      this.db.prepare("DELETE FROM app_defaults WHERE key = ?").run(DEFAULT_MODEL_KEY);
+  private setAppDefault(key: string, value: string | null): void {
+    if (value === null) {
+      this.db.prepare("DELETE FROM app_defaults WHERE key = ?").run(key);
       return;
     }
     this.db
@@ -102,7 +119,7 @@ export class ProviderConfigStore implements ProviderConfigPort {
          VALUES (@key, @value, @updated_at)
          ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @updated_at`,
       )
-      .run({ key: DEFAULT_MODEL_KEY, value: JSON.stringify(qualified), updated_at: new Date().toISOString() });
+      .run({ key, value: JSON.stringify(value), updated_at: new Date().toISOString() });
   }
 
   getModelPreferences(providerId: string): ProviderModelPreferences | undefined {

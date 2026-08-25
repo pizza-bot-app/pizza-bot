@@ -581,6 +581,17 @@ The Ollama adapter reads daemon capabilities per model. For vision models it
 projects tool-returned images into Ollama's supported user-image representation;
 for other models it replaces the binary payload with a capability notice.
 
+A provider that fans out to several catalog APIs reports a lost source instead of
+a quietly shorter list. The Bedrock adapter logs every rejected source, keeps a
+per-source last-good list so one flaky API cannot shrink the session's catalog,
+and publishes `catalogDegradation()`; the registry turns that into
+`ModelCatalogStatus` `degraded` and — unlike a `ready` listing — never adopts a
+partial result as the last-good baseline. Automatic default selection goes
+through `recommendedModelCatalog`, and an incomplete or empty catalog keeps the
+remembered pick (`automatic_model` in `app_defaults`) at the head of the
+candidate list rather than re-resolving, so a degraded warm-up cannot re-point
+scheduled automations at a different model.
+
 Skill workers mark terminal responses whose provider metadata reports an
 output-token limit with an `OUTPUT_TRUNCATED` notice. DeepAgents carries that
 notice in the task result so Pizza Bot can distinguish incomplete delegated work

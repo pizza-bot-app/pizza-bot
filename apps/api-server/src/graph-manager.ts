@@ -1,6 +1,6 @@
 import {
   pizzaBotSystemPrompt,
-  recommendedModelCandidates,
+  recommendedModelCatalog,
   type ModelCatalogStatus,
   type ModelAvailability,
   type ModelRegistry,
@@ -134,11 +134,8 @@ export class GraphManager {
     };
   }
 
-  async recommendedModelIds(): Promise<string[]> {
-    const descriptors = await this.models.listAll();
-    return recommendedModelCandidates(descriptors).map(
-      (descriptor) => `${descriptor.provider}:${descriptor.id}`,
-    );
+  recommendedModels(): Promise<{ ids: string[]; healthy: boolean }> {
+    return recommendedModelCatalog(this.models);
   }
 
   async contextWindow(): Promise<number | undefined> {

@@ -3,7 +3,7 @@ import {
   ModelRegistry,
   ModelUnavailableError,
   projectSkillReadiness,
-  recommendedModelCandidates,
+  recommendedModelCatalog,
   selectModel,
   skillMcpServerIds,
   skillInfoOf,
@@ -778,6 +778,37 @@ export class AgentHost {
     });
   }
 
+  /**
+   * Automatic selection re-runs on every warm-up, so a catalog that is missing a
+   * source would otherwise silently re-point scheduled runs at another model.
+   * The remembered pick leads while the catalog is incomplete, and only a
+   * complete catalog is allowed to change it.
+   */
+  private async automaticCandidateIds(
+    catalog: () => Promise<{ ids: string[]; healthy: boolean }>,
+  ): Promise<{ candidateIds: string[]; healthy: boolean }> {
+    const { ids, healthy } = await catalog();
+    const remembered = this.providerConfigs.getAutomaticModel();
+    if (healthy || !remembered) return { candidateIds: ids, healthy };
+    console.warn(
+      `[model] model catalog is incomplete — keeping "${remembered}" as the automatic default`,
+    );
+    return {
+      candidateIds: [remembered, ...ids.filter((id) => id !== remembered)],
+      healthy,
+    };
+  }
+
+  private async selectAutomaticModel(
+    catalog: () => Promise<{ ids: string[]; healthy: boolean }>,
+    build: (qualified: string) => Promise<BaseChatModel>,
+  ): Promise<{ modelId: string; model: BaseChatModel }> {
+    const { candidateIds, healthy } = await this.automaticCandidateIds(catalog);
+    const selected = await this.buildAutomaticModel(candidateIds, build);
+    if (healthy) this.providerConfigs.setAutomaticModel(selected.modelId);
+    return selected;
+  }
+
   private async buildAutomaticModel(
     candidateIds: readonly string[],
     build: (qualified: string) => Promise<BaseChatModel>,
@@ -839,8 +870,8 @@ export class AgentHost {
             (modelId) => this.graphs!.buildModel(modelId),
           ),
         }
-      : await this.buildAutomaticModel(
-          await this.graphs!.recommendedModelIds(),
+      : await this.selectAutomaticModel(
+          () => this.graphs!.recommendedModels(),
           (modelId) => this.graphs!.buildModel(modelId),
         );
     this.providerConfigs.setDefaultModel(qualified);
@@ -1682,10 +1713,8 @@ export class AgentHost {
               (modelId) => registry.buildModel(modelId),
             ),
           }
-        : await host.buildAutomaticModel(
-            recommendedModelCandidates(await registry.listAll()).map(
-              (descriptor) => `${descriptor.provider}:${descriptor.id}`,
-            ),
+        : await host.selectAutomaticModel(
+            () => recommendedModelCatalog(registry),
             (modelId) => registry.buildModel(modelId),
           );
       host.modelId = selected.modelId;

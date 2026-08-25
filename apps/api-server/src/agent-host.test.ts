@@ -230,6 +230,90 @@ writeFileSync(
     });
   });
 
+  it("keeps the remembered automatic model while the catalog is incomplete", async () => {
+    const selectAutomaticModel = (
+      host as unknown as {
+        selectAutomaticModel(
+          catalog: () => Promise<{ ids: string[]; healthy: boolean }>,
+          build: (id: string) => Promise<unknown>,
+        ): Promise<{ modelId: string; model: unknown }>;
+      }
+    ).selectAutomaticModel.bind(host);
+    const build = async (modelId: string) => ({ modelId });
+
+    const healthy = await selectAutomaticModel(
+      async () => ({ ids: ["bedrock:global.anthropic.claude-sonnet-5", "bedrock:amazon.nova-pro"], healthy: true }),
+      build,
+    );
+    expect(healthy.modelId).toBe("bedrock:global.anthropic.claude-sonnet-5");
+    expect(host.providerConfigs.getAutomaticModel()).toBe(
+      "bedrock:global.anthropic.claude-sonnet-5",
+    );
+
+    // The Sonnet profiles are missing from the degraded catalog, but the
+    // remembered pick still builds, so scheduled runs keep their model.
+    const degraded = await selectAutomaticModel(
+      async () => ({ ids: ["bedrock:amazon.nova-pro"], healthy: false }),
+      build,
+    );
+
+    expect(degraded.modelId).toBe("bedrock:global.anthropic.claude-sonnet-5");
+  });
+
+  it("re-picks the automatic model once the catalog is complete again", async () => {
+    const selectAutomaticModel = (
+      host as unknown as {
+        selectAutomaticModel(
+          catalog: () => Promise<{ ids: string[]; healthy: boolean }>,
+          build: (id: string) => Promise<unknown>,
+        ): Promise<{ modelId: string; model: unknown }>;
+      }
+    ).selectAutomaticModel.bind(host);
+    const build = async (modelId: string) => ({ modelId });
+
+    await selectAutomaticModel(
+      async () => ({ ids: ["bedrock:amazon.nova-pro"], healthy: true }),
+      build,
+    );
+    const upgraded = await selectAutomaticModel(
+      async () => ({ ids: ["bedrock:global.anthropic.claude-sonnet-5"], healthy: true }),
+      build,
+    );
+
+    expect(upgraded.modelId).toBe("bedrock:global.anthropic.claude-sonnet-5");
+    expect(host.providerConfigs.getAutomaticModel()).toBe(
+      "bedrock:global.anthropic.claude-sonnet-5",
+    );
+  });
+
+  it("skips a remembered automatic model that no longer builds", async () => {
+    host.providerConfigs.setAutomaticModel("bedrock:global.anthropic.claude-sonnet-5");
+    const selectAutomaticModel = (
+      host as unknown as {
+        selectAutomaticModel(
+          catalog: () => Promise<{ ids: string[]; healthy: boolean }>,
+          build: (id: string) => Promise<unknown>,
+        ): Promise<{ modelId: string; model: unknown }>;
+      }
+    ).selectAutomaticModel.bind(host);
+
+    const selected = await selectAutomaticModel(
+      async () => ({ ids: ["bedrock:amazon.nova-pro"], healthy: false }),
+      async (modelId) => {
+        if (modelId === "bedrock:global.anthropic.claude-sonnet-5") {
+          throw new Error("not entitled");
+        }
+        return { modelId };
+      },
+    );
+
+    expect(selected.modelId).toBe("bedrock:amazon.nova-pro");
+    // A degraded catalog must not overwrite the remembered pick.
+    expect(host.providerConfigs.getAutomaticModel()).toBe(
+      "bedrock:global.anthropic.claude-sonnet-5",
+    );
+  });
+
   it("pins the resolved model to a thread and reuses it on later turns", async () => {
     const agentFor = vi.spyOn(host, "agentFor").mockResolvedValue(host.agent);
     const resolveTurn = (

@@ -21,6 +21,24 @@ describe("ProviderConfigStore model preferences", () => {
     db.close();
   });
 
+  it("keeps the remembered automatic pick separate from the explicit default", () => {
+    const db = new Database(":memory:");
+    const store = new ProviderConfigStore(db);
+
+    expect(store.getAutomaticModel()).toBeUndefined();
+
+    store.setDefaultModel("bedrock:global.anthropic.claude-opus-5");
+    store.setAutomaticModel("bedrock:global.anthropic.claude-sonnet-5");
+
+    expect(store.getDefaultModel()).toBe("bedrock:global.anthropic.claude-opus-5");
+    expect(store.getAutomaticModel()).toBe("bedrock:global.anthropic.claude-sonnet-5");
+
+    store.setAutomaticModel(null);
+    expect(store.getAutomaticModel()).toBeUndefined();
+    expect(store.getDefaultModel()).toBe("bedrock:global.anthropic.claude-opus-5");
+    db.close();
+  });
+
   it("ignores corrupt persisted preferences", () => {
     const db = new Database(":memory:");
     const store = new ProviderConfigStore(db);

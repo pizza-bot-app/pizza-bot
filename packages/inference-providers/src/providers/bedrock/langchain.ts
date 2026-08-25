@@ -1,11 +1,13 @@
 /** Amazon Bedrock provider with native Converse and Mantle protocol routing. */
 import type { BaseMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import type {
-  ModelProvider,
-  ModelDescriptor,
-  ProviderAuthMethod,
-  ResolvedProviderConfig,
+import {
+  ModelCatalogError,
+  type ModelProvider,
+  type ModelCatalogDegradation,
+  type ModelDescriptor,
+  type ProviderAuthMethod,
+  type ResolvedProviderConfig,
 } from "@pizza-bot/core";
 import {
   REASONING_REQUEST_FIELDS,
@@ -40,6 +42,15 @@ import { createSigV4Fetch, mantleEndpoint } from "./mantle.js";
 
 type BedrockProtocol = "converse" | "responses" | "chat-completions" | "messages";
 
+/**
+ * Every current Anthropic model is reachable only through an inference profile,
+ * so all three sources get the same deadline: a fast source must not be the only
+ * one that can time out.
+ */
+const CATALOG_TIMEOUT_MS = 15_000;
+
+type CatalogSource = "foundation models" | "inference profiles" | "Mantle";
+
 interface RoutedModel {
   descriptor: ModelDescriptor;
   protocol: BedrockProtocol;
@@ -68,7 +79,11 @@ export class BedrockLangChainModelProvider implements ModelProvider {
   private readonly descriptors = new Map<string, ModelDescriptor>();
   private readonly protocols = new Map<string, BedrockProtocol>();
   private readonly learnedMaxTokens = new Map<string, number>();
+  /** One failing source must not shrink the catalog for the rest of the session. */
+  private readonly lastGoodSources = new Map<CatalogSource, RoutedModel[]>();
+  private degradation: ModelCatalogDegradation | undefined;
   private mantleFetchPromise: Promise<typeof fetch> | undefined;
+  private credentialsPromise: Promise<AwsCredentialSource> | undefined;
   private region: string;
   private authMethod: "aws-profile" | "access-keys" | "bedrock-api-key" | undefined;
   private profile: string | undefined;
@@ -183,8 +198,17 @@ export class BedrockLangChainModelProvider implements ModelProvider {
       ? cfg.values.apiKey?.trim() || undefined
       : undefined;
     this.mantleFetchPromise = undefined;
+    this.credentialsPromise = undefined;
+    // Cached source lists belong to the previous credentials.
+    this.lastGoodSources.clear();
+    this.degradation = undefined;
     if (!this.models) this.descriptors.clear();
     if (!this.models) this.protocols.clear();
+  }
+
+  /** Set when the last `listModels` lost a source; read by the model registry. */
+  catalogDegradation(): ModelCatalogDegradation | undefined {
+    return this.degradation;
   }
 
   async listModels(): Promise<ModelDescriptor[]> {
@@ -206,22 +230,34 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         client.send(new ListInferenceProfilesCommand({ maxResults: 1000 })),
         this.listMantleModels(),
       ]);
-      const foundationModels = foundationResult.status === "fulfilled"
-        ? foundationDescriptors(foundationResult.value).map(withDefaultProtocol)
-        : [];
-      const inferenceProfiles = profileResult.status === "fulfilled"
-        ? profileDescriptors(profileResult.value).map(withConverseProtocol)
-        : [];
-      const mantleModels = mantleResult.status === "fulfilled"
-        ? mantleResult.value
-        : [];
       if (
         foundationResult.status === "rejected" &&
         profileResult.status === "rejected" &&
         mantleResult.status === "rejected"
       ) {
-        throw foundationResult.reason;
+        throw credentialFailure([foundationResult, profileResult, mantleResult]) ??
+          foundationResult.reason;
       }
+      const failures: SourceFailure[] = [];
+      const foundationModels = this.sourceModels(
+        "foundation models",
+        foundationResult,
+        (value) => foundationDescriptors(value).map(withDefaultProtocol),
+        failures,
+      );
+      const inferenceProfiles = this.sourceModels(
+        "inference profiles",
+        profileResult,
+        (value) => profileDescriptors(value).map(withConverseProtocol),
+        failures,
+      );
+      const mantleModels = this.sourceModels(
+        "Mantle",
+        mantleResult,
+        (value) => value,
+        failures,
+      );
+      this.degradation = describeDegradation(failures);
       const routed = mergeRoutedModels([
         ...inferenceProfiles,
         ...foundationModels,
@@ -391,6 +427,27 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     });
   }
 
+  private sourceModels<T>(
+    source: CatalogSource,
+    result: PromiseSettledResult<T>,
+    project: (value: T) => RoutedModel[],
+    failures: SourceFailure[],
+  ): RoutedModel[] {
+    if (result.status === "fulfilled") {
+      const models = project(result.value);
+      this.lastGoodSources.set(source, models);
+      return models;
+    }
+    const cached = this.lastGoodSources.get(source);
+    console.warn(
+      `[model] bedrock ${source} catalog unavailable` +
+        (cached ? ` — serving ${cached.length} cached model(s)` : "") +
+        `: ${errorText(result.reason)}`,
+    );
+    failures.push({ source, reason: result.reason, servedFromCache: cached !== undefined });
+    return cached ?? [];
+  }
+
   private async listMantleModels(): Promise<RoutedModel[]> {
     const response = await (await this.mantleFetch())(
       `${mantleEndpoint(this.region)}/v1/models`,
@@ -398,7 +455,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         ...(this.bedrockApiKey
           ? { headers: { authorization: `Bearer ${this.bedrockApiKey}` } }
           : {}),
-        signal: AbortSignal.timeout(5_000),
+        signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
       },
     );
     if (!response.ok) throw catalogHttpError("Amazon Bedrock Mantle", response.status);
@@ -424,7 +481,11 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     return this.mantleFetchPromise;
   }
 
-  private async credentials() {
+  /**
+   * One provider instance for every catalog source and model, so all of them see
+   * the same credential state instead of resolving the chain independently.
+   */
+  private async credentials(): Promise<AwsCredentialSource> {
     if (this.accessKeyId && this.secretAccessKey) {
       return {
         accessKeyId: this.accessKeyId,
@@ -432,22 +493,33 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         ...(this.sessionToken ? { sessionToken: this.sessionToken } : {}),
       };
     }
-    const { fromIni, fromNodeProviderChain } = await import("@aws-sdk/credential-providers");
-    return this.profile ? fromIni({ profile: this.profile }) : fromNodeProviderChain();
+    this.credentialsPromise ??= (async () => {
+      const { fromIni, fromNodeProviderChain } = await import("@aws-sdk/credential-providers");
+      return this.profile ? fromIni({ profile: this.profile }) : fromNodeProviderChain();
+    })();
+    return this.credentialsPromise;
   }
 
   private async clientConfig() {
+    // Control-plane calls have no deadline of their own; without one a hung
+    // request outlives the Mantle source and looks like a shrunken catalog.
+    const requestHandler = {
+      requestTimeout: CATALOG_TIMEOUT_MS,
+      connectionTimeout: CATALOG_TIMEOUT_MS,
+    };
     if (this.bedrockApiKey) {
       const token = this.bedrockApiKey;
       return {
         region: this.region,
         authSchemePreference: ["httpBearerAuth"],
         token: async () => ({ token }),
+        requestHandler,
       };
     }
     return {
       region: this.region,
       credentials: await this.credentials(),
+      requestHandler,
     };
   }
 
@@ -459,6 +531,58 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     if (this.authMethod === "bedrock-api-key") return Boolean(this.bedrockApiKey);
     return false;
   }
+}
+
+type AwsCredentialSource =
+  | { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
+  | (() => Promise<{ accessKeyId: string; secretAccessKey: string; sessionToken?: string }>);
+
+interface SourceFailure {
+  source: CatalogSource;
+  reason: unknown;
+  servedFromCache: boolean;
+}
+
+function errorText(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}
+
+const EXPIRED_CREDENTIALS_HINT =
+  "AWS credentials are expired or invalid — refresh them (for SSO, run `aws sso login`).";
+
+/** Losing every source to expired credentials must not read as a network fault. */
+function credentialFailure(
+  results: readonly PromiseSettledResult<unknown>[],
+): ModelCatalogError | undefined {
+  const expired = results.find(
+    (result) =>
+      result.status === "rejected" && translateBedrockError(result.reason) === "AUTH_EXPIRED",
+  );
+  if (!expired || expired.status !== "rejected") return undefined;
+  return new ModelCatalogError("authentication", EXPIRED_CREDENTIALS_HINT, false, {
+    cause: expired.reason,
+  });
+}
+
+function describeDegradation(failures: readonly SourceFailure[]): ModelCatalogDegradation | undefined {
+  if (failures.length === 0) return undefined;
+  const sources = failures.map((failure) => failure.source).join(" and ");
+  const expired = failures.some(
+    (failure) => translateBedrockError(failure.reason) === "AUTH_EXPIRED",
+  );
+  const timedOut = failures.some(
+    (failure) =>
+      failure.reason instanceof Error &&
+      (failure.reason.name === "TimeoutError" || failure.reason.name === "AbortError"),
+  );
+  return {
+    code: expired ? "authentication" : timedOut ? "network" : "unavailable",
+    retryable: !expired,
+    stale: failures.some((failure) => failure.servedFromCache),
+    message:
+      `Amazon Bedrock ${sources} could not be listed, so some models are missing. ` +
+      (expired ? EXPIRED_CREDENTIALS_HINT : errorText(failures[0]?.reason)),
+  };
 }
 
 interface FoundationModelsResponse {

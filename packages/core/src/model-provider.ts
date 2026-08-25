@@ -40,6 +40,16 @@ export type ModelCatalogStatus =
     }
   | {
       provider: string;
+      /** Some models were listed, but at least one catalog source failed. */
+      status: "degraded";
+      modelCount: number;
+      stale: boolean;
+      code: ModelCatalogErrorCode;
+      message: string;
+      retryable: boolean;
+    }
+  | {
+      provider: string;
       status: "error";
       modelCount: number;
       stale: boolean;
@@ -47,6 +57,18 @@ export type ModelCatalogStatus =
       message: string;
       retryable: boolean;
     };
+
+/**
+ * Reported by providers that fan out to several catalog APIs, so one failing
+ * source degrades loudly instead of silently shrinking the model list.
+ */
+export interface ModelCatalogDegradation {
+  code: ModelCatalogErrorCode;
+  message: string;
+  retryable: boolean;
+  /** Some listed models come from an earlier response rather than this one. */
+  stale: boolean;
+}
 
 export interface ModelCatalogSnapshot {
   models: ModelDescriptor[];
@@ -70,6 +92,30 @@ export function recommendedModelCandidates(
       qualifiedModelId(a.model).localeCompare(qualifiedModelId(b.model))
     )
     .map(({ model }) => model);
+}
+
+/**
+ * Recommendation order plus whether this catalog is trustworthy enough to
+ * re-pick an automatic default from.
+ */
+export async function recommendedModelCatalog(
+  registry: Pick<ModelRegistry, "listCatalog">,
+): Promise<{ ids: string[]; healthy: boolean }> {
+  const snapshot = await registry.listCatalog();
+  const ids = recommendedModelCandidates(snapshot.models).map(qualifiedModelId);
+  return {
+    ids,
+    healthy: ids.length > 0 && snapshot.providers.every(providerCatalogIsComplete),
+  };
+}
+
+/**
+ * Most installations leave several providers unconfigured, so a provider that
+ * lists nothing is normal and has nothing to lose. One serving a partial or
+ * last-known list is what makes the catalog too incomplete to re-pick from.
+ */
+function providerCatalogIsComplete(status: ModelCatalogStatus): boolean {
+  return status.status === "ready" || status.modelCount === 0;
 }
 
 function bedrockGlobalPreference(model: ModelDescriptor): number {
@@ -152,6 +198,8 @@ export interface ModelProvider {
   readonly authSchema?: readonly ProviderAuthMethod[];
   /** The provider can use ambient credentials or defaults without saved config. */
   readonly availableWithoutConfig?: boolean;
+  /** Set when the last `listModels` served an incomplete catalog. */
+  catalogDegradation?(): ModelCatalogDegradation | undefined;
   /** Applies persisted configuration at registration and on later settings updates. */
   configure?(cfg: ResolvedProviderConfig): void;
   /**
@@ -323,6 +371,23 @@ export class ModelRegistry {
       [...this.providers.values()].map(async (provider) => {
         try {
           const models = await provider.listModels();
+          const degradation = provider.catalogDegradation?.();
+          if (degradation) {
+            // A partial catalog must never become the last-good baseline.
+            return {
+              models,
+              fresh: false,
+              status: {
+                provider: provider.id,
+                status: "degraded",
+                modelCount: models.length,
+                stale: degradation.stale,
+                code: degradation.code,
+                message: degradation.message,
+                retryable: degradation.retryable,
+              } satisfies ModelCatalogStatus,
+            };
+          }
           return {
             models,
             fresh: true,
