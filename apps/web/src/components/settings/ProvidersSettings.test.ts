@@ -100,6 +100,23 @@ describe("getProviderStatus", () => {
     ).toEqual({ label: "Unavailable", tone: "unavailable" });
   });
 
+  it("keeps a partially listed provider usable while surfacing the gap separately", () => {
+    expect(
+      getProviderStatus(
+        provider({ id: "bedrock", config: { method: "aws-profile", values: {} } }),
+        {
+          provider: "bedrock",
+          status: "degraded",
+          modelCount: 55,
+          stale: true,
+          code: "unavailable",
+          message: "Amazon Bedrock inference profiles could not be listed.",
+          retryable: true,
+        },
+      ),
+    ).toEqual({ label: "Configured", tone: "configured" });
+  });
+
   it("uses live health before catalog status is available", () => {
     expect(
       getProviderStatus(

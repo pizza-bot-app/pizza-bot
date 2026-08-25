@@ -4,6 +4,7 @@ import {
   ModelCatalogError,
   ModelRegistry,
   ModelUnavailableError,
+  automaticModelCatalog,
   recommendedModelCandidates,
   type ModelDescriptor,
   type ModelProvider,
@@ -269,6 +270,233 @@ describe("ModelRegistry.listAll", () => {
     });
     await expect(registry.listCatalog()).resolves.toMatchObject({
       models: [expect.objectContaining({ id: "new" })],
+    });
+  });
+});
+
+describe("ModelRegistry degraded catalogs", () => {
+  it("reports a provider that lost a catalog source without discarding its models", async () => {
+    const provider = stubProvider({});
+    provider.catalogDegradation = () => ({
+      code: "unavailable",
+      message: "Amazon Bedrock inference profiles could not be listed.",
+      retryable: true,
+      stale: false,
+    });
+    const registry = new ModelRegistry();
+    registry.register(provider);
+
+    const snapshot = await registry.listCatalog();
+
+    expect(snapshot.models).toEqual([expect.objectContaining({ id: "model-a" })]);
+    expect(snapshot.providers).toEqual([
+      expect.objectContaining({
+        status: "degraded",
+        code: "unavailable",
+        modelCount: 1,
+        stale: false,
+        retryable: true,
+      }),
+    ]);
+  });
+
+  it("asks about the exact listing it received rather than provider-wide state", async () => {
+    const provider = stubProvider({});
+    const listing = [{ id: "model-a", provider: "stub", displayName: "Model A" }];
+    provider.listModels = async () => listing;
+    const asked: unknown[] = [];
+    provider.catalogDegradation = (models) => {
+      asked.push(models);
+      return undefined;
+    };
+    const registry = new ModelRegistry();
+    registry.register(provider);
+
+    await registry.listCatalog();
+
+    expect(asked).toEqual([listing]);
+    expect(asked[0]).toBe(listing);
+  });
+
+  it("never lets a partial catalog become the last-good fallback", async () => {
+    let degraded = false;
+    const provider = stubProvider({});
+    provider.listModels = async () =>
+      degraded
+        ? [{ id: "model-a", provider: "stub", displayName: "Model A" }]
+        : [
+            { id: "model-a", provider: "stub", displayName: "Model A" },
+            { id: "model-b", provider: "stub", displayName: "Model B" },
+          ];
+    provider.catalogDegradation = () =>
+      degraded
+        ? { code: "network", message: "One source timed out.", retryable: true, stale: false }
+        : undefined;
+    const registry = new ModelRegistry();
+    registry.register(provider);
+
+    await registry.listCatalog();
+    degraded = true;
+    await registry.listCatalog({ refresh: true });
+    provider.listModels = async () => {
+      throw new ModelCatalogError("network", "Temporarily offline.", true);
+    };
+    const stale = await registry.listCatalog({ refresh: true });
+
+    expect(stale.models.map((model) => model.id)).toEqual(["model-a", "model-b"]);
+    expect(stale.providers).toEqual([
+      expect.objectContaining({ status: "error", stale: true, modelCount: 2 }),
+    ]);
+  });
+});
+
+describe("automaticModelCatalog", () => {
+  function sonnetProvider(id: string): ModelProvider {
+    return stubProvider({
+      id,
+      models: [{ id: "claude-sonnet-5", provider: id, displayName: "Claude Sonnet 5" }],
+    });
+  }
+
+  it("reports a complete catalog when every listing provider is ready", async () => {
+    const registry = new ModelRegistry();
+    registry.register(sonnetProvider("stub"));
+
+    await expect(automaticModelCatalog(registry)).resolves.toEqual({
+      ids: ["stub:claude-sonnet-5"],
+      complete: true,
+    });
+  });
+
+  it("treats an unconfigured provider that lists nothing as no loss", async () => {
+    const registry = new ModelRegistry();
+    registry.register(sonnetProvider("stub"));
+    const unconfigured = stubProvider({ id: "openai" });
+    unconfigured.listModels = async () => {
+      throw new ModelCatalogError("credentials", "OpenAI credentials are not available.", false);
+    };
+    registry.register(unconfigured);
+
+    await expect(automaticModelCatalog(registry)).resolves.toEqual({
+      ids: ["stub:claude-sonnet-5"],
+      complete: true,
+    });
+  });
+
+  it("keeps the remembered pick while a provider serves its last known models", async () => {
+    let fail = false;
+    const provider = stubProvider({
+      id: "stub",
+      models: [
+        { id: "claude-sonnet-5", provider: "stub", displayName: "Claude Sonnet 5" },
+        { id: "claude-opus-5", provider: "stub", displayName: "Claude Opus 5" },
+      ],
+    });
+    const listModels = provider.listModels.bind(provider);
+    provider.listModels = async () => {
+      if (fail) throw new ModelCatalogError("authentication", "Credentials expired.", false);
+      return listModels();
+    };
+    const registry = new ModelRegistry();
+    registry.register(provider);
+
+    await registry.listCatalog();
+    fail = true;
+    await registry.listCatalog({ refresh: true });
+
+    await expect(automaticModelCatalog(registry, "stub:claude-opus-5")).resolves.toEqual({
+      ids: ["stub:claude-opus-5", "stub:claude-sonnet-5"],
+      complete: false,
+      keeping: "stub:claude-opus-5",
+    });
+  });
+
+  it("reports an empty catalog as incomplete", async () => {
+    const provider = stubProvider({ id: "stub" });
+    provider.listModels = async () => {
+      throw new ModelCatalogError("authentication", "Credentials expired.", false);
+    };
+    const registry = new ModelRegistry();
+    registry.register(provider);
+
+    await expect(automaticModelCatalog(registry)).resolves.toEqual({
+      ids: [],
+      complete: false,
+    });
+  });
+
+  it("reports an incomplete catalog while a provider is degraded", async () => {
+    const provider = sonnetProvider("stub");
+    provider.catalogDegradation = () => ({
+      code: "authentication",
+      message: "Credentials expired.",
+      retryable: false,
+      stale: true,
+    });
+    const registry = new ModelRegistry();
+    registry.register(provider);
+
+    await expect(automaticModelCatalog(registry)).resolves.toMatchObject({
+      complete: false,
+    });
+  });
+
+  it("does not repick when the remembered provider failed outright beside a healthy one", async () => {
+    const registry = new ModelRegistry();
+    registry.register(sonnetProvider("anthropic"));
+    const bedrock = stubProvider({ id: "bedrock" });
+    bedrock.listModels = async () => {
+      throw new ModelCatalogError("authentication", "The security token is expired.", true);
+    };
+    registry.register(bedrock);
+
+    await expect(
+      automaticModelCatalog(registry, "bedrock:global.anthropic.claude-sonnet-5"),
+    ).resolves.toEqual({
+      ids: ["bedrock:global.anthropic.claude-sonnet-5", "anthropic:claude-sonnet-5"],
+      complete: false,
+      keeping: "bedrock:global.anthropic.claude-sonnet-5",
+    });
+  });
+
+  it("lets an unconfigured remembered provider void its own pick", async () => {
+    const registry = new ModelRegistry();
+    registry.register(sonnetProvider("anthropic"));
+    const bedrock = stubProvider({ id: "bedrock" });
+    bedrock.listModels = async () => {
+      throw new ModelCatalogError("credentials", "Bedrock credentials are not available.", false);
+    };
+    registry.register(bedrock);
+
+    await expect(
+      automaticModelCatalog(registry, "bedrock:global.anthropic.claude-sonnet-5"),
+    ).resolves.toEqual({
+      ids: ["anthropic:claude-sonnet-5"],
+      complete: true,
+    });
+  });
+
+  it("does not resurrect a remembered model the user has since disabled", async () => {
+    const registry = new ModelRegistry();
+    const provider = stubProvider({
+      id: "stub",
+      models: [
+        { id: "claude-sonnet-5", provider: "stub", displayName: "Claude Sonnet 5" },
+        { id: "claude-opus-5", provider: "stub", displayName: "Claude Opus 5" },
+      ],
+    });
+    provider.catalogDegradation = () => ({
+      code: "network",
+      message: "One source timed out.",
+      retryable: true,
+      stale: false,
+    });
+    registry.register(provider);
+    registry.setEnabledModels("stub", ["claude-sonnet-5"]);
+
+    await expect(automaticModelCatalog(registry, "stub:claude-opus-5")).resolves.toEqual({
+      ids: ["stub:claude-sonnet-5"],
+      complete: false,
     });
   });
 });

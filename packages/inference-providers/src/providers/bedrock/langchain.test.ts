@@ -110,10 +110,10 @@ describe("BedrockLangChainModelProvider authentication", () => {
 
     await provider.buildModel("global.anthropic.claude-sonnet-5");
 
-    expect(sdk.fromIni).toHaveBeenCalledTimes(3);
-    expect(sdk.fromIni).toHaveBeenNthCalledWith(1, { profile: "production" });
-    expect(sdk.fromIni).toHaveBeenNthCalledWith(2, { profile: "production" });
-    expect(sdk.fromIni).toHaveBeenNthCalledWith(3, { profile: "production" });
+    // Catalog sources and models share one credential source, so they cannot
+    // disagree about whether the credentials are still valid.
+    expect(sdk.fromIni).toHaveBeenCalledTimes(1);
+    expect(sdk.fromIni).toHaveBeenCalledWith({ profile: "production" });
     expect(sdk.fromNodeProviderChain).not.toHaveBeenCalled();
     expect(sdk.chatConfig?.credentials).toBe(sdk.iniCredentials);
   });
@@ -284,7 +284,7 @@ describe("BedrockLangChainModelProvider authentication", () => {
     });
   });
 
-  it("reuses the Mantle signer until provider configuration changes", async () => {
+  it("reuses the Mantle signer and credential source until configuration changes", async () => {
     sdk.fromIni.mockReturnValue({
       accessKeyId: "access-key",
       secretAccessKey: "secret-key",
@@ -298,16 +298,16 @@ describe("BedrockLangChainModelProvider authentication", () => {
     provider.configure({ method: "aws-profile", values: { profile: "production" } });
 
     await provider.listModels();
-    expect(sdk.fromIni).toHaveBeenCalledTimes(2);
+    expect(sdk.fromIni).toHaveBeenCalledTimes(1);
 
     await provider.buildModel("openai.gpt-5.6-sol");
 
-    expect(sdk.fromIni).toHaveBeenCalledTimes(2);
+    expect(sdk.fromIni).toHaveBeenCalledTimes(1);
 
     provider.configure({ method: "aws-profile", values: { profile: "production" } });
     await provider.listModels();
 
-    expect(sdk.fromIni).toHaveBeenCalledTimes(4);
+    expect(sdk.fromIni).toHaveBeenCalledTimes(2);
   });
 
   it("clears credentials from the previously selected method", async () => {
@@ -411,6 +411,147 @@ describe("BedrockLangChainModelProvider authentication", () => {
         supportsVision: true,
       }),
     ]);
+  });
+});
+
+describe("Bedrock catalog source failures", () => {
+  const profileSummaries = {
+    inferenceProfileSummaries: [
+      {
+        inferenceProfileId: "global.anthropic.claude-sonnet-5",
+        inferenceProfileName: "Global Claude Sonnet 5",
+        status: "ACTIVE",
+        models: [{ modelArn: "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5" }],
+      },
+    ],
+  };
+  const foundationSummaries = {
+    modelSummaries: [{ modelId: "amazon.nova-pro-v1:0", modelName: "Nova Pro", inputModalities: ["TEXT"] }],
+  };
+
+  function configuredProvider(
+    send: (command: unknown) => Promise<unknown>,
+  ): BedrockLangChainModelProvider {
+    const provider = new BedrockLangChainModelProvider({
+      profiles: ["production"],
+      client: { send },
+      modelsDevFetch: vi.fn(async () => new Response("{}", { status: 200 })),
+    });
+    provider.configure({ method: "aws-profile", values: { profile: "production" } });
+    return provider;
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    sdk.fromIni.mockReset().mockReturnValue({
+      accessKeyId: "access-key",
+      secretAccessKey: "secret-key",
+    });
+    // A Response body reads once, so every catalog pass needs a fresh one.
+    sdk.mantleFetch.mockReset().mockImplementation(
+      async () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", sdk.mantleFetch);
+  });
+
+  it("keeps models from a previously listed source and reports the gap", async () => {
+    let failProfiles = false;
+    const provider = configuredProvider(async (command) => {
+      if (command?.constructor.name === "ListInferenceProfilesCommand") {
+        if (failProfiles) throw Object.assign(new Error("ThrottlingException"), { name: "ThrottlingException" });
+        return profileSummaries;
+      }
+      return foundationSummaries;
+    });
+
+    const first = await provider.listModels();
+    expect(first.map((model) => model.id)).toEqual([
+      "global.anthropic.claude-sonnet-5",
+      "amazon.nova-pro-v1:0",
+    ]);
+    expect(provider.catalogDegradation(first)).toBeUndefined();
+
+    failProfiles = true;
+    const second = await provider.listModels();
+
+    expect(second.map((model) => model.id)).toEqual(first.map((model) => model.id));
+    expect(provider.catalogDegradation(second)).toMatchObject({
+      code: "unavailable",
+      retryable: true,
+      stale: true,
+    });
+    expect(provider.catalogDegradation(second)?.message).toContain("inference profiles");
+    expect(provider.catalogDegradation(first)).toBeUndefined();
+  });
+
+  it("reports a partial catalog when a source fails before ever succeeding", async () => {
+    const provider = configuredProvider(async (command) => {
+      if (command?.constructor.name === "ListInferenceProfilesCommand") {
+        throw new Error("ExpiredTokenException: token expired");
+      }
+      return foundationSummaries;
+    });
+
+    const models = await provider.listModels();
+
+    expect(models).toMatchObject([expect.objectContaining({ id: "amazon.nova-pro-v1:0" })]);
+    expect(provider.catalogDegradation(models)).toMatchObject({
+      code: "authentication",
+      retryable: false,
+      stale: false,
+    });
+  });
+
+  it("clears the degradation once every source answers again", async () => {
+    let failProfiles = true;
+    const provider = configuredProvider(async (command) => {
+      if (command?.constructor.name === "ListInferenceProfilesCommand") {
+        if (failProfiles) throw new Error("ThrottlingException");
+        return profileSummaries;
+      }
+      return foundationSummaries;
+    });
+
+    const degraded = await provider.listModels();
+    expect(provider.catalogDegradation(degraded)).toBeDefined();
+
+    failProfiles = false;
+    const whole = await provider.listModels();
+
+    expect(provider.catalogDegradation(whole)).toBeUndefined();
+  });
+
+  it("binds a lost source to the listing it belongs to when calls overlap", async () => {
+    let profileCalls = 0;
+    const provider = configuredProvider(async (command) => {
+      if (command?.constructor.name === "ListInferenceProfilesCommand") {
+        profileCalls += 1;
+        if (profileCalls === 1) throw new Error("ThrottlingException");
+        return profileSummaries;
+      }
+      return foundationSummaries;
+    });
+
+    const [degraded, whole] = await Promise.all([
+      provider.listModels(),
+      provider.listModels(),
+    ]);
+
+    expect(provider.catalogDegradation(degraded)).toMatchObject({ code: "unavailable" });
+    expect(provider.catalogDegradation(whole)).toBeUndefined();
+  });
+
+  it("classifies expired credentials when every source fails", async () => {
+    sdk.mantleFetch.mockImplementation(async () => new Response("{}", { status: 403 }));
+    const provider = configuredProvider(async () => {
+      throw new Error("ExpiredTokenException: the security token included in the request is expired");
+    });
+
+    await expect(provider.listModels()).rejects.toMatchObject({
+      name: "ModelCatalogError",
+      code: "authentication",
+      retryable: false,
+    });
   });
 });
 

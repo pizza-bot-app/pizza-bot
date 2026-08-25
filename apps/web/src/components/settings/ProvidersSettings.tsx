@@ -396,7 +396,7 @@ function ProviderRow({
           onQueryChange={setModelQuery}
           onChange={setModelPreferences}
           onRetry={
-            catalog?.status === "error" && catalog.retryable
+            catalog && catalog.status !== "ready" && catalog.retryable
               ? async () => {
                   setRetrying(true);
                   try {
@@ -484,12 +484,17 @@ function ProviderModelsField({
     <div className="provider-models-field">
       <div className="provider-models-heading">
         <div className="field-label">Models</div>
-        {catalog?.status === "error" && catalog.stale && (
+        {catalog && catalog.status !== "ready" && catalog.stale && (
           <span className="provenance-badge">{L.modelCatalogStaleBadge}</span>
         )}
       </div>
-      {catalog?.status === "error" && (
-        <div className={`provider-model-catalog-error ${catalogTone}`} role="status">
+      {catalog && catalog.status !== "ready" && (
+        <div
+          className={`provider-model-catalog-error ${
+            catalog.status === "degraded" ? "unavailable" : catalogTone
+          }`}
+          role="status"
+        >
           <span>{catalog.message}</span>
           {onRetry && (
             <button
