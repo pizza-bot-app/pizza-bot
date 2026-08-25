@@ -1,6 +1,7 @@
 import {
   pizzaBotSystemPrompt,
-  recommendedModelCatalog,
+  automaticModelCatalog,
+  type AutomaticModelCatalog,
   type ModelCatalogStatus,
   type ModelAvailability,
   type ModelRegistry,
@@ -134,8 +135,8 @@ export class GraphManager {
     };
   }
 
-  recommendedModels(): Promise<{ ids: string[]; healthy: boolean }> {
-    return recommendedModelCatalog(this.models);
+  automaticModels(remembered?: string): Promise<AutomaticModelCatalog> {
+    return automaticModelCatalog(this.models, remembered);
   }
 
   async contextWindow(): Promise<number | undefined> {

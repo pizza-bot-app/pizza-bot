@@ -54,6 +54,33 @@ function materializerPlugin(
   };
 }
 
+type AutomaticCatalog = (
+  remembered?: string,
+) => Promise<{ ids: string[]; complete: boolean; keeping?: string }>;
+
+/** Mirrors how `automaticModelCatalog` leads with the remembered pick. */
+function catalogOf(ids: string[], complete: boolean): AutomaticCatalog {
+  return async (remembered) =>
+    complete || !remembered
+      ? { ids, complete }
+      : {
+          ids: [remembered, ...ids.filter((id) => id !== remembered)],
+          complete,
+          keeping: remembered,
+        };
+}
+
+function automaticSelector(host: AgentHost) {
+  return (
+    host as unknown as {
+      selectAutomaticModel(
+        catalog: AutomaticCatalog,
+        build: (id: string) => Promise<unknown>,
+      ): Promise<{ modelId: string; model: unknown }>;
+    }
+  ).selectAutomaticModel.bind(host);
+}
+
 describe("AgentHost lifecycle and identity", () => {
   let dataRoot: string;
   let pluginsDir: string;
@@ -231,21 +258,14 @@ writeFileSync(
   });
 
   it("keeps the remembered automatic model while the catalog is incomplete", async () => {
-    const selectAutomaticModel = (
-      host as unknown as {
-        selectAutomaticModel(
-          catalog: () => Promise<{ ids: string[]; healthy: boolean }>,
-          build: (id: string) => Promise<unknown>,
-        ): Promise<{ modelId: string; model: unknown }>;
-      }
-    ).selectAutomaticModel.bind(host);
+    const selectAutomaticModel = automaticSelector(host);
     const build = async (modelId: string) => ({ modelId });
 
-    const healthy = await selectAutomaticModel(
-      async () => ({ ids: ["bedrock:global.anthropic.claude-sonnet-5", "bedrock:amazon.nova-pro"], healthy: true }),
+    const whole = await selectAutomaticModel(
+      catalogOf(["bedrock:global.anthropic.claude-sonnet-5", "bedrock:amazon.nova-pro"], true),
       build,
     );
-    expect(healthy.modelId).toBe("bedrock:global.anthropic.claude-sonnet-5");
+    expect(whole.modelId).toBe("bedrock:global.anthropic.claude-sonnet-5");
     expect(host.providerConfigs.getAutomaticModel()).toBe(
       "bedrock:global.anthropic.claude-sonnet-5",
     );
@@ -253,30 +273,23 @@ writeFileSync(
     // The Sonnet profiles are missing from the degraded catalog, but the
     // remembered pick still builds, so scheduled runs keep their model.
     const degraded = await selectAutomaticModel(
-      async () => ({ ids: ["bedrock:amazon.nova-pro"], healthy: false }),
+      catalogOf(["bedrock:amazon.nova-pro"], false),
       build,
     );
 
     expect(degraded.modelId).toBe("bedrock:global.anthropic.claude-sonnet-5");
+    expect(host.providerConfigs.getAutomaticModel()).toBe(
+      "bedrock:global.anthropic.claude-sonnet-5",
+    );
   });
 
   it("re-picks the automatic model once the catalog is complete again", async () => {
-    const selectAutomaticModel = (
-      host as unknown as {
-        selectAutomaticModel(
-          catalog: () => Promise<{ ids: string[]; healthy: boolean }>,
-          build: (id: string) => Promise<unknown>,
-        ): Promise<{ modelId: string; model: unknown }>;
-      }
-    ).selectAutomaticModel.bind(host);
+    const selectAutomaticModel = automaticSelector(host);
     const build = async (modelId: string) => ({ modelId });
 
-    await selectAutomaticModel(
-      async () => ({ ids: ["bedrock:amazon.nova-pro"], healthy: true }),
-      build,
-    );
+    await selectAutomaticModel(catalogOf(["bedrock:amazon.nova-pro"], true), build);
     const upgraded = await selectAutomaticModel(
-      async () => ({ ids: ["bedrock:global.anthropic.claude-sonnet-5"], healthy: true }),
+      catalogOf(["bedrock:global.anthropic.claude-sonnet-5"], true),
       build,
     );
 
@@ -288,17 +301,10 @@ writeFileSync(
 
   it("skips a remembered automatic model that no longer builds", async () => {
     host.providerConfigs.setAutomaticModel("bedrock:global.anthropic.claude-sonnet-5");
-    const selectAutomaticModel = (
-      host as unknown as {
-        selectAutomaticModel(
-          catalog: () => Promise<{ ids: string[]; healthy: boolean }>,
-          build: (id: string) => Promise<unknown>,
-        ): Promise<{ modelId: string; model: unknown }>;
-      }
-    ).selectAutomaticModel.bind(host);
+    const selectAutomaticModel = automaticSelector(host);
 
     const selected = await selectAutomaticModel(
-      async () => ({ ids: ["bedrock:amazon.nova-pro"], healthy: false }),
+      catalogOf(["bedrock:amazon.nova-pro"], false),
       async (modelId) => {
         if (modelId === "bedrock:global.anthropic.claude-sonnet-5") {
           throw new Error("not entitled");

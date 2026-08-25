@@ -94,18 +94,36 @@ export function recommendedModelCandidates(
     .map(({ model }) => model);
 }
 
+export interface AutomaticModelCatalog {
+  /** Recommendation order, led by the remembered pick on an incomplete catalog. */
+  ids: string[];
+  /** The catalog may be trusted to record a new automatic default. */
+  complete: boolean;
+  /** Set when the remembered pick leads because the catalog is incomplete. */
+  keeping?: string;
+}
+
 /**
- * Recommendation order plus whether this catalog is trustworthy enough to
- * re-pick an automatic default from.
+ * Candidate order for automatic selection. A catalog missing models it should
+ * have keeps the remembered pick rather than resolving a different default.
  */
-export async function recommendedModelCatalog(
-  registry: Pick<ModelRegistry, "listCatalog">,
-): Promise<{ ids: string[]; healthy: boolean }> {
+export async function automaticModelCatalog(
+  registry: Pick<ModelRegistry, "listCatalog" | "isModelEnabled">,
+  remembered?: string,
+): Promise<AutomaticModelCatalog> {
   const snapshot = await registry.listCatalog();
   const ids = recommendedModelCandidates(snapshot.models).map(qualifiedModelId);
+  const complete =
+    ids.length > 0 &&
+    snapshot.providers.every(providerCatalogIsComplete) &&
+    mayReplaceRemembered(snapshot.providers, remembered);
+  if (complete || !remembered || !registry.isModelEnabled(remembered)) {
+    return { ids, complete };
+  }
   return {
-    ids,
-    healthy: ids.length > 0 && snapshot.providers.every(providerCatalogIsComplete),
+    ids: [remembered, ...ids.filter((id) => id !== remembered)],
+    complete,
+    keeping: remembered,
   };
 }
 
@@ -116,6 +134,22 @@ export async function recommendedModelCatalog(
  */
 function providerCatalogIsComplete(status: ModelCatalogStatus): boolean {
   return status.status === "ready" || status.modelCount === 0;
+}
+
+/**
+ * A provider whose own listing failed may simply be hiding the remembered
+ * model, so only a ready provider — or one holding no credentials at all, which
+ * voids the pick — may resolve a different default.
+ */
+function mayReplaceRemembered(
+  statuses: readonly ModelCatalogStatus[],
+  remembered: string | undefined,
+): boolean {
+  if (!remembered) return true;
+  const provider = remembered.slice(0, remembered.indexOf(":"));
+  const status = statuses.find((candidate) => candidate.provider === provider);
+  if (!status || status.status === "ready") return true;
+  return status.code === "credentials" && status.modelCount === 0;
 }
 
 function bedrockGlobalPreference(model: ModelDescriptor): number {
@@ -198,8 +232,10 @@ export interface ModelProvider {
   readonly authSchema?: readonly ProviderAuthMethod[];
   /** The provider can use ambient credentials or defaults without saved config. */
   readonly availableWithoutConfig?: boolean;
-  /** Set when the last `listModels` served an incomplete catalog. */
-  catalogDegradation?(): ModelCatalogDegradation | undefined;
+  /** Set when the given listing was served with at least one source missing. */
+  catalogDegradation?(
+    models: readonly ModelDescriptor[],
+  ): ModelCatalogDegradation | undefined;
   /** Applies persisted configuration at registration and on later settings updates. */
   configure?(cfg: ResolvedProviderConfig): void;
   /**
@@ -279,6 +315,14 @@ export class ModelRegistry {
   setEnabledModels(providerId: string, modelIds: readonly string[] | undefined): void {
     if (modelIds === undefined) this.enabledModels.delete(providerId);
     else this.enabledModels.set(providerId, new Set(modelIds));
+  }
+
+  /** Preference-filtered availability for callers that bypass `listCatalog`. */
+  isModelEnabled(qualified: string): boolean {
+    const parsed = this.parse(qualified);
+    if (!parsed) return false;
+    const enabled = this.enabledModels.get(parsed.provider);
+    return enabled === undefined || enabled.has(parsed.modelId);
   }
 
   private parse(qualified: string): { provider: string; modelId: string } | undefined {
@@ -371,7 +415,7 @@ export class ModelRegistry {
       [...this.providers.values()].map(async (provider) => {
         try {
           const models = await provider.listModels();
-          const degradation = provider.catalogDegradation?.();
+          const degradation = provider.catalogDegradation?.(models);
           if (degradation) {
             // A partial catalog must never become the last-good baseline.
             return {

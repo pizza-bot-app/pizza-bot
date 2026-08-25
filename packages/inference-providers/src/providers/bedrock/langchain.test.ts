@@ -469,18 +469,19 @@ describe("Bedrock catalog source failures", () => {
       "global.anthropic.claude-sonnet-5",
       "amazon.nova-pro-v1:0",
     ]);
-    expect(provider.catalogDegradation()).toBeUndefined();
+    expect(provider.catalogDegradation(first)).toBeUndefined();
 
     failProfiles = true;
     const second = await provider.listModels();
 
     expect(second.map((model) => model.id)).toEqual(first.map((model) => model.id));
-    expect(provider.catalogDegradation()).toMatchObject({
+    expect(provider.catalogDegradation(second)).toMatchObject({
       code: "unavailable",
       retryable: true,
       stale: true,
     });
-    expect(provider.catalogDegradation()?.message).toContain("inference profiles");
+    expect(provider.catalogDegradation(second)?.message).toContain("inference profiles");
+    expect(provider.catalogDegradation(first)).toBeUndefined();
   });
 
   it("reports a partial catalog when a source fails before ever succeeding", async () => {
@@ -491,10 +492,10 @@ describe("Bedrock catalog source failures", () => {
       return foundationSummaries;
     });
 
-    await expect(provider.listModels()).resolves.toMatchObject([
-      expect.objectContaining({ id: "amazon.nova-pro-v1:0" }),
-    ]);
-    expect(provider.catalogDegradation()).toMatchObject({
+    const models = await provider.listModels();
+
+    expect(models).toMatchObject([expect.objectContaining({ id: "amazon.nova-pro-v1:0" })]);
+    expect(provider.catalogDegradation(models)).toMatchObject({
       code: "authentication",
       retryable: false,
       stale: false,
@@ -511,13 +512,33 @@ describe("Bedrock catalog source failures", () => {
       return foundationSummaries;
     });
 
-    await provider.listModels();
-    expect(provider.catalogDegradation()).toBeDefined();
+    const degraded = await provider.listModels();
+    expect(provider.catalogDegradation(degraded)).toBeDefined();
 
     failProfiles = false;
-    await provider.listModels();
+    const whole = await provider.listModels();
 
-    expect(provider.catalogDegradation()).toBeUndefined();
+    expect(provider.catalogDegradation(whole)).toBeUndefined();
+  });
+
+  it("binds a lost source to the listing it belongs to when calls overlap", async () => {
+    let profileCalls = 0;
+    const provider = configuredProvider(async (command) => {
+      if (command?.constructor.name === "ListInferenceProfilesCommand") {
+        profileCalls += 1;
+        if (profileCalls === 1) throw new Error("ThrottlingException");
+        return profileSummaries;
+      }
+      return foundationSummaries;
+    });
+
+    const [degraded, whole] = await Promise.all([
+      provider.listModels(),
+      provider.listModels(),
+    ]);
+
+    expect(provider.catalogDegradation(degraded)).toMatchObject({ code: "unavailable" });
+    expect(provider.catalogDegradation(whole)).toBeUndefined();
   });
 
   it("classifies expired credentials when every source fails", async () => {

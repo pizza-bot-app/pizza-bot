@@ -81,7 +81,14 @@ export class BedrockLangChainModelProvider implements ModelProvider {
   private readonly learnedMaxTokens = new Map<string, number>();
   /** One failing source must not shrink the catalog for the rest of the session. */
   private readonly lastGoodSources = new Map<CatalogSource, RoutedModel[]>();
-  private degradation: ModelCatalogDegradation | undefined;
+  /**
+   * Keyed by the listing it describes: concurrent `listModels` calls overlap, so
+   * a single field would report one call's gap against another call's models.
+   */
+  private readonly degradations = new WeakMap<
+    readonly ModelDescriptor[],
+    ModelCatalogDegradation
+  >();
   private mantleFetchPromise: Promise<typeof fetch> | undefined;
   private credentialsPromise: Promise<AwsCredentialSource> | undefined;
   private region: string;
@@ -201,14 +208,15 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     this.credentialsPromise = undefined;
     // Cached source lists belong to the previous credentials.
     this.lastGoodSources.clear();
-    this.degradation = undefined;
     if (!this.models) this.descriptors.clear();
     if (!this.models) this.protocols.clear();
   }
 
-  /** Set when the last `listModels` lost a source; read by the model registry. */
-  catalogDegradation(): ModelCatalogDegradation | undefined {
-    return this.degradation;
+  /** Set when the listing lost a source; read by the model registry. */
+  catalogDegradation(
+    models: readonly ModelDescriptor[],
+  ): ModelCatalogDegradation | undefined {
+    return this.degradations.get(models);
   }
 
   async listModels(): Promise<ModelDescriptor[]> {
@@ -257,7 +265,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         (value) => value,
         failures,
       );
-      this.degradation = describeDegradation(failures);
+      const degradation = describeDegradation(failures);
       const routed = mergeRoutedModels([
         ...inferenceProfiles,
         ...foundationModels,
@@ -278,6 +286,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         const protocol = routed[index]?.protocol;
         if (protocol) this.protocols.set(descriptor.id, protocol);
       }
+      if (degradation) this.degradations.set(descriptors, degradation);
       return descriptors;
     } catch (cause) {
       throw catalogConnectionError("Amazon Bedrock", cause);
