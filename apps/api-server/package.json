@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.0",
-    "@langchain/core": "^1.2.1",
+    "@langchain/core": "^1.2.9",
     "@langchain/langgraph-sdk": "~1.9.28",
     "@pizza-bot/core": "*",
     "@pizza-bot/logging": "*",
