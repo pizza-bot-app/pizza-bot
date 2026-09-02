@@ -17,6 +17,7 @@ const STATUS_SERVER = resolve(
 );
 const EMPTY_DESC_SERVER = resolve(__dirname, "__fixtures__/mcp-empty-desc-server.mjs");
 const DELAYED_SERVER = resolve(__dirname, "__fixtures__/mcp-delayed-server.mjs");
+const UNION_SCHEMA_SERVER = resolve(__dirname, "__fixtures__/mcp-union-schema-server.mjs");
 
 describe("connectMcpServers", () => {
   it("returns an empty result (no client) for no entries", async () => {
@@ -79,6 +80,43 @@ describe("connectMcpServers", () => {
           value: { type: "string" },
         },
       });
+    } finally {
+      await r.client?.close().catch(() => {});
+    }
+  }, 20_000);
+
+  it("calls a tool with either branch of a union its server accepts", async () => {
+    const r = await connectMcpServers(
+      { union: { command: "node", args: [UNION_SCHEMA_SERVER] } },
+      undefined,
+    );
+    try {
+      const tool = r.tools["mcp:union:search_records"];
+      expect(tool).toBeDefined();
+
+      const leaf = { condition: { field: "accountId", operator: "EXACT_MATCH", value: "a-1" } };
+      const compound = {
+        condition: { operator: "AND", conditions: [leaf.condition] },
+      };
+      await expect(tool!.invoke(leaf)).resolves.toContain("EXACT_MATCH");
+      await expect(tool!.invoke(compound)).resolves.toContain("AND");
+      await expect(tool!.invoke({ aliases: "solo" })).resolves.toContain("solo");
+      await expect(tool!.invoke({ aliases: ["a", "b"] })).resolves.toContain("b");
+    } finally {
+      await r.client?.close().catch(() => {});
+    }
+  }, 20_000);
+
+  it("names the failing constraint when a tool call really is malformed", async () => {
+    const r = await connectMcpServers(
+      { union: { command: "node", args: [UNION_SCHEMA_SERVER] } },
+      undefined,
+    );
+    try {
+      const tool = r.tools["mcp:union:search_records"];
+      await expect(
+        tool!.invoke({ condition: { field: "accountId", operator: "NOPE", value: "a-1" } }),
+      ).rejects.toThrow(/operator/);
     } finally {
       await r.client?.close().catch(() => {});
     }

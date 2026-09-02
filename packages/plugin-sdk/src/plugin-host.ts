@@ -27,7 +27,7 @@ import {
   materializePlugin,
   type PluginMaterializationStatus,
 } from "./materializer.js";
-import { restoreNullableSchemaTypes } from "./mcp-schema.js";
+import { restoreFlattenedUnions } from "./mcp-schema.js";
 import {
   evaluatePluginCompatibility,
   type PluginHostContract,
@@ -468,11 +468,14 @@ export async function connectMcpServers(
               const originalName = originalNames[index]!;
               const sourceSchema = sourceSchemas.get(originalName);
               if (sourceSchema) {
-                (tool as { schema: unknown }).schema = restoreNullableSchemaTypes(
+                (tool as { schema: unknown }).schema = restoreFlattenedUnions(
                   tool.schema,
                   sourceSchema,
                 );
               }
+              // Without this, a rejected call reaches the model as a bare "did not match
+              // expected schema" and it can only guess, so it retries identical arguments.
+              (tool as unknown as { verboseParsingErrors: boolean }).verboseParsingErrors = true;
               // Bedrock rejects the entire request if any tool description is blank.
               if (
                 typeof tool.description !== "string" ||

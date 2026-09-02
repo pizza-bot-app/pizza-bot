@@ -10,6 +10,16 @@ const RATE_LIMIT_GUIDANCE =
   "partial results with a clear coverage disclaimer.";
 
 /**
+ * Deliberately does not blame the arguments: a tool fails just as often on
+ * credentials or configuration, and telling the model to fix arguments that were
+ * already correct sends it into identical retries.
+ */
+const FAILURE_GUIDANCE =
+  "If the error names something to fix — arguments, credentials, or configuration " +
+  "— apply it and try again. Otherwise stop calling this tool for this run and " +
+  "tell the user what failed and what would unblock it.";
+
+/**
  * In langchain@1.5.2/deepagents@1.12.1, inner wrappers turn tool failures into
  * `MiddlewareError`, which @langchain/langgraph@1.4.7 rethrows instead of handing
  * to the model. This outer wrapper preserves tool-result parity and self-recovery.
@@ -28,9 +38,7 @@ export function toolErrorRecoveryMiddleware() {
         const { id, name } = request.toolCall;
         const detail = toolErrorDetail(err);
         const guidance =
-          toolErrorCode(err) === "RATE_LIMIT"
-            ? RATE_LIMIT_GUIDANCE
-            : "Please fix the arguments and try again.";
+          toolErrorCode(err) === "RATE_LIMIT" ? RATE_LIMIT_GUIDANCE : FAILURE_GUIDANCE;
         return new ToolMessage({
           status: "error",
           content: `Error running tool "${name}": ${detail}\n${guidance}`,
