@@ -333,12 +333,16 @@ export class ProtocolStreamStore {
         delegationId: s.id,
         subagent: s.name,
         ...(s.taskInput ? { title: s.taskInput } : {}),
+        // A pending interrupt halts the whole graph, so no in-flight delegation
+        // is making progress: it is blocked on the user, not merely running.
         status:
           taskError !== undefined || s.status === "error"
             ? "error"
             : s.status === "complete"
               ? "completed"
-              : "running",
+              : root.interrupt
+                ? "awaiting-input"
+                : "running",
         ...(s.output !== undefined ? { output: s.output } : {}),
         ...(s.error || taskError ? { errorText: s.error ?? taskError } : {}),
         ...(live && s.startedAt ? { startedAt: s.startedAt.getTime() } : {}),

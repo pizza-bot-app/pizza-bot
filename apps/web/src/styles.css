@@ -547,6 +547,7 @@ button.sidebar-folder-row:hover,
 .activity-icon-done { color: var(--brand); }
 .activity-icon-active { color: var(--brand); }
 .activity-icon-error { color: var(--danger, #f87171); }
+.activity-icon-await { color: var(--warning, #f5a623); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

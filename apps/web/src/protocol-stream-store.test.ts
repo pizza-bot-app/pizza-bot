@@ -580,6 +580,74 @@ describe("ProtocolStreamStore steering-enqueue", () => {
     });
   });
 
+  it("marks an in-flight delegation as awaiting input while an approval is pending", async () => {
+    await store.attach(TID, false);
+    last.subagents = new Map([[
+      "task-1",
+      {
+        id: "task-1",
+        name: "mail-assistant",
+        status: "running",
+        taskInput: "send the note",
+        namespace: [],
+        parentId: null,
+        depth: 0,
+      },
+    ]]);
+    last.notify();
+
+    expect(store.getSlice(TID).delegations["task-1"]).toMatchObject({ status: "running" });
+
+    last.interrupt = { id: "int-1", value: { action_requests: [] } };
+    last.notify();
+
+    expect(store.getSlice(TID).delegations["task-1"]).toMatchObject({ status: "awaiting-input" });
+    expect(store.getSlice(TID).delegations["task-1"]!.errorText).toBeUndefined();
+
+    // Approval resolves the pause; the delegation resumes as ordinary work.
+    last.interrupt = undefined;
+    last.notify();
+
+    expect(store.getSlice(TID).delegations["task-1"]).toMatchObject({ status: "running" });
+  });
+
+  it("keeps a settled delegation's own outcome while an approval is pending", async () => {
+    await store.attach(TID, false);
+    last.subagents = new Map([
+      [
+        "task-1",
+        {
+          id: "task-1",
+          name: "mail-assistant",
+          status: "complete",
+          taskInput: "send the note",
+          namespace: [],
+          parentId: null,
+          depth: 0,
+        },
+      ],
+      [
+        "task-2",
+        {
+          id: "task-2",
+          name: "sfdc-assistant",
+          status: "error",
+          error: "search_accounts rejected its arguments",
+          taskInput: "look up accounts",
+          namespace: [],
+          parentId: null,
+          depth: 0,
+        },
+      ],
+    ]);
+    last.interrupt = { id: "int-1", value: { action_requests: [] } };
+    last.notify();
+
+    const { delegations } = store.getSlice(TID);
+    expect(delegations["task-1"]).toMatchObject({ status: "completed" });
+    expect(delegations["task-2"]).toMatchObject({ status: "error" });
+  });
+
   it("acquires a hydrated subagent transcript after namespace resolution", async () => {
     await store.attach(TID, true);
     let resolveNamespace!: () => void;

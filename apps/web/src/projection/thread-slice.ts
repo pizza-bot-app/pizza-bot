@@ -8,7 +8,7 @@ export interface DelegationInfo {
   delegationId: string;
   subagent: string;
   title?: string;
-  status: "running" | "completed" | "error";
+  status: "running" | "awaiting-input" | "completed" | "error";
   output?: unknown;
   errorText?: string;
   startedAt?: number;

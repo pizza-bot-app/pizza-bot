@@ -107,6 +107,7 @@ export async function* streamProtocolEvents(
   drainProjectionRejections(stream);
   const reindexer = new ContentBlockReindexer();
   for await (const event of stream) {
+    if (isInterruptBubbleUpFrame(event)) continue;
     yield reindexer.process(event);
   }
   // Cancellation takes precedence over an interrupt observed during teardown.
@@ -118,6 +119,37 @@ export async function* streamProtocolEvents(
     }
     yield interruptedLifecycleFrame();
   }
+}
+
+/**
+ * A worker's approval pause bubbles a `GraphInterrupt` out through the parent
+ * `task` tool, which LangGraph reports as `tool-error` carrying the serialized
+ * interrupts as its message. Forwarding that tells every consumer the delegation
+ * failed, when the run is only waiting for the user; the terminal
+ * `input.requested` + `interrupted` frames carry the pause instead.
+ */
+function isInterruptBubbleUpFrame(event: ProtocolEvent): boolean {
+  if (event.method !== "tools") return false;
+  const data = event.params.data as { event?: unknown; message?: unknown } | undefined;
+  if (data?.event !== "tool-error" || typeof data.message !== "string") return false;
+  return isSerializedInterrupts(data.message);
+}
+
+/** `GraphInterrupt`'s message is `JSON.stringify` of its `Interrupt[]`. */
+function isSerializedInterrupts(message: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message);
+  } catch {
+    return false;
+  }
+  return (
+    Array.isArray(parsed) &&
+    parsed.length > 0 &&
+    parsed.every(
+      (entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry) && "value" in entry,
+    )
+  );
 }
 
 /**
