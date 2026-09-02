@@ -39,6 +39,27 @@ Skill API represents binary content as base64 with `encoding: "base64"`.
 2. Add any nested scripts, references, or assets the body references; relative
    paths are preserved and resources load on demand.
 
+## Write the description for two readers
+
+The `description` is the **only** part of a skill Pizza Bot ever sees — it does
+not read `SKILL.md` before delegating. So it does two jobs, and most descriptions
+only do the first:
+
+1. **Selection** — when should this worker be picked? Name the domain and the
+   phrases a user would actually say ("my notes", "my vault").
+2. **Expectation** — what does the worker decide for itself, and what does it
+   return? Without this, Pizza Bot has to guess, and it guesses by writing a spec
+   into the dispatch: an output format, a field list, a time range the user never
+   asked for. Stating that the worker already picks its own time window, or that
+   a task review comes back with source notes and due dates, removes the gap it
+   would otherwise fill.
+
+A live ablation on two skills measured 36% shorter dispatches from adding one
+"decides X itself, returns Y" sentence, and it stopped one request from being
+split across redundant workers. Describe only what the worker really does —
+a description that overpromises makes Pizza Bot dispatch work the skill cannot
+deliver.
+
 The built-in catalog is discovered automatically; there is no orchestrator list
 to edit. A skill with MCP dependencies becomes callable after every declared
 server and tool is enabled and connected.

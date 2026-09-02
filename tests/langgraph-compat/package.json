@@ -14,9 +14,9 @@
     "@pizza-bot/runtime-langgraph": "*"
   },
   "devDependencies": {
-    "@langchain/core": "^1.2.1",
-    "@langchain/langgraph": "^1.4.9",
-    "deepagents": "^1.12.3",
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.10",
+    "deepagents": "^1.13.2",
     "vitest": "^4.1.10"
   }
 }

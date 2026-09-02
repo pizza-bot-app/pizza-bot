@@ -70,7 +70,7 @@ describe("Pizza Bot graph assembly", () => {
     mocks.toolCallLimitMiddleware.mockReturnValue({ name: "ToolCallLimitMiddleware" });
   });
 
-  it("keeps default delegation and dynamic eval available without skills", async () => {
+  it("keeps eval available without skills, with nothing to dispatch to", async () => {
     await createPizzaBotAgent("prompt", { model: { modelId: "test" } as never });
 
     const params = mocks.createDeepAgent.mock.calls[0]![0] as {
@@ -96,7 +96,7 @@ describe("Pizza Bot graph assembly", () => {
     });
     expect(params.subagents).toBeUndefined();
     expect(mocks.createCodeInterpreterMiddleware).toHaveBeenCalledWith(
-      expect.objectContaining({ subagents: true }),
+      expect.objectContaining({ subagents: false }),
     );
   });
 

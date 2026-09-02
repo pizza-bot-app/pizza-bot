@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-/** API surface pins for deepagents@1.12.2 and @langchain/langgraph@1.4.9. */
+/** API surface pins for deepagents@1.13.2 and @langchain/langgraph@1.4.13. */
 describe("DeepAgents API surface pins", () => {
   it("deepagents exports createDeepAgent + the four backends", async () => {
     const m = await import("deepagents");

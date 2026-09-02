@@ -43,6 +43,23 @@ describe("PIZZA_BOT_AGENT", () => {
     expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
       "claim completion only after its tool call succeeds",
     );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain("ROUTING, not rewriting");
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "copy it verbatim whenever it stands on its own",
+    );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "do not restate what the worker should return",
+    );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "keeping each item's original wording",
+    );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "RELAY the worker's report as the body of your reply",
+    );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "repeat it rather than compressing it",
+    );
+    expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain("in your own words");
     expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain("write_todos");
     expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain(
       "when a task matches one, read its SKILL.md",

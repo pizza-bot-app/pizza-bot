@@ -121,8 +121,8 @@ async function boundTools(skills?: SkillCatalog): Promise<string[]> {
 }
 
 describe("Pizza Bot delegation", () => {
-  it("exposes the default general-purpose task worker without skills", async () => {
-    expect(await boundTools()).toContain("task");
+  it("withholds task without skills, since no worker could receive a dispatch", async () => {
+    expect(await boundTools()).not.toContain("task");
   });
 
   it("keeps task available when a skill worker exists", async () => {
@@ -133,6 +133,12 @@ describe("Pizza Bot delegation", () => {
     const model = await captureModel(workerSkill);
     const task = model.boundToolDescriptions[0]?.find((tool) => tool.name === "task");
     expect(task?.description).toContain("- worker: Handles delegated work.");
+  });
+
+  it("offers only skill workers, never DeepAgents' capability-free general-purpose one", async () => {
+    const model = await captureModel(workerSkill);
+    const task = model.boundToolDescriptions[0]?.find((tool) => tool.name === "task");
+    expect(task?.description).not.toContain("general-purpose");
   });
 
   it("keeps run-limit counters local when skill workers run in parallel", async () => {

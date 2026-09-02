@@ -41,6 +41,7 @@ import {
 import { attachmentInlineMiddleware } from "./attachment-inline-middleware.js";
 import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
 import { localFolderContextMiddleware } from "./local-folder-context-middleware.js";
+import { taskDispatchMiddleware } from "./task-dispatch-middleware.js";
 import { streamProtocolEvents, toLangGraphInput, type ProtocolCapableGraph } from "./stream-protocol.js";
 
 // The built-in Codex profile otherwise restores the opt-in planning middleware.
@@ -327,9 +328,6 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   if (deps.attachmentResolver) {
     middleware.push(attachmentInlineMiddleware(deps.attachmentResolver));
   }
-  // DeepAgents always provides its synchronous general-purpose subagent, so the
-  // root interpreter can dispatch through task() even when no skills are loaded.
-  middleware.push(await codeInterpreterMiddleware(true));
 
   const model = deps.model;
   const resolvedSubagents = await resolveSkillSubagents(deps.skills, deps);
@@ -354,6 +352,13 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
       ),
     };
   });
+
+  middleware.push(taskDispatchMiddleware({
+    ...(model ? { model } : {}),
+    subagents: subagents ?? [],
+  }));
+  // The sandbox's task() global only has somewhere to dispatch when workers exist.
+  middleware.push(await codeInterpreterMiddleware(Boolean(subagents?.length)));
 
   const params: Record<string, unknown> = {
     systemPrompt,
