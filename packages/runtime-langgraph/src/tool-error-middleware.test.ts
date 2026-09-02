@@ -37,6 +37,19 @@ describe("toolErrorRecoveryMiddleware", () => {
     expect(String(out.content)).toContain("try again");
   });
 
+  it("does not blame the arguments when the tool failed on authorization", async () => {
+    const wrap = wrapToolCall();
+    const out = (await wrap(request("web_search", "call_auth"), async () => {
+      throw new Error(
+        "Authorization error - Insufficient permissions. Open Settings → AWS to authenticate.",
+      );
+    })) as ToolMessage;
+
+    expect(String(out.content)).toContain("Insufficient permissions");
+    expect(String(out.content)).toContain("credentials");
+    expect(String(out.content)).not.toMatch(/fix the arguments/);
+  });
+
   it("tells the model to stop retrying a persistently rate-limited source", async () => {
     const wrap = wrapToolCall();
     const rateLimit = Object.assign(new Error("request rejected"), {
