@@ -215,9 +215,17 @@ in `core/src/protocol-types.ts`:
   a `ResumeCommand` → `Command({ resume })`. Because a node re-runs from the
   top on resume, pre-interrupt tool side effects must be idempotent.
 - **Skill workers**: there is one selectable identity, the built-in **Pizza Bot**.
-  DeepAgents' synchronous `general-purpose` worker and `task` tool remain
-  available by default, including when no skills are installed. The root
-  QuickJS interpreter also exposes `task()` for programmatic fan-out.
+  The `task` roster is exactly the ready skill workers: DeepAgents'
+  `general-purpose` worker is disabled, because it heads the roster claiming
+  "access to all tools as the main agent" while holding only the filesystem — the
+  runtime passes no `tools` to `createDeepAgent`, so its `defaultTools` are empty
+  and it receives no skill, no `eval`, and none of the per-worker guardrails.
+  Dropping it costs no capability: Pizza Bot holds the same filesystem tools and
+  `eval` directly, so the only loss is an isolated context to do noisy filesystem
+  work in. With no ready skills there is nothing to route to, so the `task` tool
+  and the QuickJS `task()` bridge are both absent; readiness is dynamic, so an
+  installed-but-unavailable skill also withholds them. With skills, the root
+  QuickJS interpreter exposes `task()` for programmatic fan-out.
   Each skill catalog entry compiles directly into one worker invoked through the
   `task` tool. Its `SKILL.md` body is the system prompt, its description is the
   routing signal, and its declared `mcp:server:tool` refs are its complete tool
@@ -228,6 +236,25 @@ in `core/src/protocol-types.ts`:
   subagent list and summarized in the root prompt. Workers share the selected
   conversation model and each receive only their own skill bundle. Synchronous
   worker graphs do not contain subagent middleware, so only Pizza Bot can delegate.
+
+Delegation is **routing, not rewriting**: the skill owns the procedure and the
+output shape, so a dispatch extracts the user's ask rather than composing a brief
+around it, and the reply relays the worker's report instead of re-summarizing it.
+That contract lives in exactly one place — the `task` tool description
+(`TASK_USAGE_NOTES`) — because it sits in the schema the model is filling out, and
+because it must displace DeepAgents' own usage notes, which tell the model to put
+full detail in the dispatch, state exactly what to get back, and relay a summary
+(advice for a generic subagent, not a skill-scoped worker). Restating it in the
+orchestrator prompt or in each worker's prompt bought nothing and cost tokens, so
+neither does. `taskDispatchMiddleware` owns the tool outright: it passes
+its own `createSubAgentMiddleware({ taskDescription, generalPurposeAgent: false })`
+in the `middleware` array, which replaces DeepAgents' entry because
+`mergeMiddlewareStack` matches on the middleware name (`subAgentMiddleware`).
+Nothing is written to state, so the Activity drill-down still renders the plain
+dispatch a human could have written. That name match is the one fragile joint: if
+a DeepAgents release renames the entry, theirs survives alongside ours and the
+briefing notes come back, so `skill-dispatch.test.ts` asserts the upstream
+phrasing is absent.
 
 ---
 

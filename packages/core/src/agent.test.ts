@@ -43,10 +43,19 @@ describe("PIZZA_BOT_AGENT", () => {
     expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
       "claim completion only after its tool call succeeds",
     );
+    expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain("in your own words");
     expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain("write_todos");
     expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain(
       "when a task matches one, read its SKILL.md",
     );
+  });
+
+  // The dispatch contract belongs to the `task` tool description, and repeating
+  // it here would cost tokens without reinforcing anything.
+  it("leaves the routing and relay contract to the task tool description", () => {
+    for (const duplicated of ["ROUTING", "RELAY", "verbatim", "output format"]) {
+      expect(PIZZA_BOT_AGENT.systemPrompt).not.toContain(duplicated);
+    }
   });
 
   it("includes durable memory instructions only when memory is enabled", () => {

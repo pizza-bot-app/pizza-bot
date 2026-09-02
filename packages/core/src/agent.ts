@@ -30,9 +30,8 @@ const PIZZA_BOT_PROMPT_PARTS = [
       "reading its SKILL.md first; the worker already receives its full skill " +
       "instructions and scoped tools. `subagent_type` is snake_case. Prefer " +
       "delegation for heavy or noisy work so it stays out of this conversation, and " +
-      "for fanning the same task over a batch. Wait for the result, then summarize " +
-      "it for the user in your own words. Do not delegate trivial requests you can " +
-      "handle yourself.",
+      "for fanning the same task over a batch. Do not delegate trivial requests you " +
+      "can handle yourself.",
     "For a WORKFLOW that spans many independent items — reviewing every file in a " +
       "list, gathering multiple perspectives, fanning the same task over a batch — " +
       "use the `eval` code interpreter and dispatch subagents programmatically with " +
@@ -40,8 +39,9 @@ const PIZZA_BOT_PROMPT_PARTS = [
       "via Promise.all), then combine the results. This is more reliable than many " +
       "one-at-a-time `task` tool calls when coverage must be deterministic. The " +
       "JavaScript helper uses camelCase `subagentType`; only the direct tool uses " +
-      "snake_case `subagent_type`.",
-    "Keep responses concise and practical.",
+      "snake_case `subagent_type`, and its usage notes govern the dispatches you " +
+      "write in code too.",
+    "Keep your own words concise and practical.",
 ];
 
 export function pizzaBotSystemPrompt(enableMemories: boolean): string {
