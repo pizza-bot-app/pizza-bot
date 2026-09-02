@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from "react";
-import { CheckCircle2, ChevronDown, ChevronRight, Loader2, X, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Clock, Loader2, X, XCircle } from "lucide-react";
 import type { DelegationInfo, UIMessageLike, UIPartLike } from "@/projection";
 import { Avatar } from "./Avatar.js";
 import { useSubagentTranscript } from "../use-thread-slice.js";
@@ -74,6 +74,10 @@ export function ActivityRail({
   );
 }
 
+function inFlight(status: DelegationInfo["status"]): boolean {
+  return status === "running" || status === "awaiting-input";
+}
+
 interface Batch {
   key: string;
   items: DelegationInfo[];
@@ -113,14 +117,21 @@ function DelegationBatch({
   const names = [...new Set(items.map((i) => i.subagent))];
   const label = names.join(" · ");
   const showCount = items.length !== names.length;
+  const awaiting = items.some((i) => i.status === "awaiting-input");
   const running = items.some((i) => i.status === "running");
   const errored = items.some((i) => i.status === "error");
-  const status: DelegationInfo["status"] = running ? "running" : errored ? "error" : "completed";
+  const status: DelegationInfo["status"] = awaiting
+    ? "awaiting-input"
+    : running
+      ? "running"
+      : errored
+        ? "error"
+        : "completed";
   const starts = items.map((i) => i.startedAt).filter((n): n is number => n !== undefined);
   const ends = items.map((i) => i.completedAt).filter((n): n is number => n !== undefined);
   // SDK completion timestamps can move until the parent run settles.
   const duration =
-    !runSettled || running || !starts.length || ends.length < items.length
+    !runSettled || inFlight(status) || !starts.length || ends.length < items.length
       ? undefined
       : formatDuration(Math.min(...starts), Math.max(...ends));
 
@@ -183,10 +194,10 @@ function DelegationGroup({
   const transcript = useSubagentTranscript(threadId ?? "", g.delegationId, open && !!threadId);
   const detail = g.status === "error" ? g.errorText : outputText(g.output);
   const canExpand =
-    g.status === "running" || (transcript?.length ?? 0) > 0 || (detail !== undefined && detail.length > 0);
+    inFlight(g.status) || (transcript?.length ?? 0) > 0 || (detail !== undefined && detail.length > 0);
   // Batch rows own their shared duration; solo timestamps settle with the run.
   const duration =
-    inBatch || !runSettled || g.status === "running"
+    inBatch || !runSettled || inFlight(g.status)
       ? undefined
       : formatDuration(g.startedAt, g.completedAt);
   const rel = (g.depth ?? 0) - baseDepth;
@@ -232,12 +243,16 @@ function DelegationGroup({
       )}
       {open &&
         (transcript && transcript.length > 0 ? (
-          <SubagentTranscript messages={transcript} settled={g.status !== "running"} />
+          <SubagentTranscript messages={transcript} settled={!inFlight(g.status)} />
         ) : detail !== undefined && detail.length > 0 ? (
           <pre className={`delegation-detail${g.status === "error" ? " error" : ""}`}>{detail}</pre>
         ) : (
           <div className="delegation-detail muted">
-            {g.status === "running" ? "Waiting for the subagent to report…" : "No transcript available."}
+            {g.status === "awaiting-input"
+              ? "Waiting for your approval…"
+              : g.status === "running"
+                ? "Waiting for the subagent to report…"
+                : "No transcript available."}
           </div>
         ))}
     </li>
@@ -332,6 +347,13 @@ function CallIndicator({ status }: { status: DelegationInfo["status"] }) {
   }
   if (status === "error") {
     return <XCircle className="activity-icon activity-icon-error" size={13} />;
+  }
+  if (status === "awaiting-input") {
+    return (
+      <Clock className="activity-icon activity-icon-await" size={13} aria-label="Awaiting approval">
+        <title>Awaiting approval</title>
+      </Clock>
+    );
   }
   return <Loader2 className="activity-icon activity-icon-active spin" size={13} />;
 }

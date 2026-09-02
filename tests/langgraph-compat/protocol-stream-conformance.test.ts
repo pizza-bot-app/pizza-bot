@@ -2,8 +2,9 @@
 import { describe, it, expect } from "vitest";
 import { createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
 import { PIZZA_BOT_AGENT } from "@pizza-bot/core";
-import type { RunInput, RunOptions, SkillCatalog } from "@pizza-bot/core";
+import type { RunInput, RunOptions, SkillCatalog, SkillInterruptOn } from "@pizza-bot/core";
 import type { ProtocolEvent } from "@langchain/langgraph";
+import { MemorySaver } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { tool } from "@langchain/core/tools";
@@ -45,6 +46,7 @@ function skillCatalog(
   description: string,
   body: string,
   declaredTools: string[],
+  interruptOn: SkillInterruptOn = {},
 ): SkillCatalog {
   return new Map([[
     id,
@@ -54,7 +56,7 @@ function skillCatalog(
       description,
       source: "user",
       declaredTools,
-      interruptOn: {},
+      interruptOn,
       files: [{
         path: `/skills/${id}/SKILL.md`,
         content: `---\nname: ${id}\ndescription: ${description}\n---\n\n${body}\n`,
@@ -247,6 +249,84 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
         channelOf(e) === "lifecycle" &&
         e.params.namespace.length === 0 &&
         (e.params.data as { event?: string }).event === "failed",
+    )).toBe(false);
+  });
+
+  it("a worker's approval pause reports no error on the delegating task call", async () => {
+    const sendTool = tool(() => "sent", {
+      name: "mailer__send",
+      description: "send mail",
+      schema: z.object({}),
+    });
+    const skills = skillCatalog(
+      "specialist",
+      "Handles delegated sends.",
+      "Send the mail.",
+      ["mcp:mailer:send"],
+      { "mcp:mailer:send": { allowedDecisions: ["approve", "reject"] } },
+    );
+    const agent = await createPizzaBotAgent(PIZZA_BOT_AGENT.systemPrompt, {
+      model: new ScriptedModel([
+        new AIMessage({
+          content: "",
+          tool_calls: [{
+            id: "task-1",
+            name: "task",
+            args: { description: "send the mail", subagent_type: "specialist" },
+            type: "tool_call",
+          }],
+        }),
+        new AIMessage({
+          content: "",
+          tool_calls: [{ id: "send-1", name: "mailer__send", args: {}, type: "tool_call" }],
+        }),
+        new AIMessage({ content: "Sent." }),
+        new AIMessage({ content: "Delegation completed." }),
+      ]),
+      tools: { "mcp:mailer:send": sendTool },
+      catalog: { mailer: ["send"] },
+      skills,
+      checkpointer: new MemorySaver(),
+    });
+
+    const threadId = `proto_subagent_hitl_${Math.random().toString(36).slice(2)}`;
+    const paused: ProtocolEvent[] = [];
+    for await (const ev of agent.streamProtocol(
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "send it" }] }] },
+      { threadId },
+    )) {
+      paused.push(ev);
+    }
+
+    const toolErrors = paused.filter(
+      (e) => channelOf(e) === "tools" && (e.params.data as { event?: string }).event === "tool-error",
+    );
+    expect(toolErrors).toEqual([]);
+    const requested = paused.find((e) => channelOf(e) === "input.requested");
+    expect(requested).toBeDefined();
+    const interruptId = (requested!.params.data as { interrupt_id: string }).interrupt_id;
+    expect(paused.some(
+      (e) =>
+        channelOf(e) === "lifecycle" &&
+        (e.params.data as { event?: string }).event === "interrupted",
+    )).toBe(true);
+
+    // Approving finishes the same task call, so the delegation reads as completed.
+    const resumed: ProtocolEvent[] = [];
+    for await (const ev of agent.streamProtocol(
+      { command: { interruptId, decisions: [{ decision: "approve" }] } },
+      { threadId },
+    )) {
+      resumed.push(ev);
+    }
+    expect(resumed.some(
+      (e) =>
+        channelOf(e) === "tools" &&
+        (e.params.data as { event?: string; tool_call_id?: string }).event === "tool-finished" &&
+        (e.params.data as { tool_call_id?: string }).tool_call_id === "task-1",
+    )).toBe(true);
+    expect(resumed.some(
+      (e) => channelOf(e) === "tools" && (e.params.data as { event?: string }).event === "tool-error",
     )).toBe(false);
   });
 

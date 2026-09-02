@@ -135,6 +135,54 @@ describe("streamProtocolEvents — content-block reindex", () => {
   });
 });
 
+function toolErrorFrame(message: string, toolCallId = "task-1"): ProtocolEvent {
+  return {
+    type: "event",
+    seq: 0,
+    method: "tools",
+    params: {
+      namespace: ["tools:abc"],
+      timestamp: 0,
+      data: { event: "tool-error", tool_call_id: toolCallId, message },
+    },
+  } as ProtocolEvent;
+}
+
+describe("streamProtocolEvents — interrupt bubble-up", () => {
+  async function collect(frames: ProtocolEvent[]): Promise<ProtocolEvent[]> {
+    const out: ProtocolEvent[] = [];
+    for await (const ev of streamProtocolEvents(fakeGraphYielding(frames), { messages: [] }, { threadId: "t" })) {
+      out.push(ev);
+    }
+    return out;
+  }
+
+  it("drops the parent task tool-error a worker's approval pause raises", async () => {
+    const interrupts = JSON.stringify(
+      [{
+        id: "int-1",
+        value: { actionRequests: [{ name: "mailer__send", args: {} }] },
+      }],
+      null,
+      2,
+    );
+    const out = await collect([toolErrorFrame(interrupts), COMPLETED]);
+    expect(out).toEqual([COMPLETED]);
+  });
+
+  it("keeps a genuine tool failure on the tools channel", async () => {
+    const failure = toolErrorFrame("kaboom inside subagent", "boom-1");
+    const out = await collect([failure, COMPLETED]);
+    expect(out).toEqual([failure, COMPLETED]);
+  });
+
+  it("keeps a tool failure whose message merely parses as JSON", async () => {
+    const failure = toolErrorFrame('["retry", "later"]', "boom-2");
+    const out = await collect([failure, COMPLETED]);
+    expect(out).toEqual([failure, COMPLETED]);
+  });
+});
+
 describe("streamProtocolEvents — tool-call rejection drain", () => {
   const seen: unknown[] = [];
   const onReject = (reason: unknown) => seen.push(reason);
