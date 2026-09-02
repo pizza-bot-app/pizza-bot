@@ -240,13 +240,31 @@ in `core/src/protocol-types.ts`:
 Delegation is **routing, not rewriting**: the skill owns the procedure and the
 output shape, so a dispatch extracts the user's ask rather than composing a brief
 around it, and the reply relays the worker's report instead of re-summarizing it.
-That contract lives in exactly one place — the `task` tool description
-(`TASK_USAGE_NOTES`) — because it sits in the schema the model is filling out, and
-because it must displace DeepAgents' own usage notes, which tell the model to put
-full detail in the dispatch, state exactly what to get back, and relay a summary
-(advice for a generic subagent, not a skill-scoped worker). Restating it in the
-orchestrator prompt or in each worker's prompt bought nothing and cost tokens, so
-neither does. `taskDispatchMiddleware` owns the tool outright: it passes
+Two layers state it, and a live 2x2 ablation says both earn their place. The
+`task` tool description (`TASK_USAGE_NOTES`) has to, because it must displace
+DeepAgents' own usage notes, which tell the model to put full detail in the
+dispatch, state exactly what to get back, and relay a summary — advice for a
+generic subagent, not a skill-scoped worker — and because it sits in the schema
+the model is filling out. The orchestrator prompt
+(`packages/core/src/agent.ts`) also has to, for the **return** half: measured over
+three runs each, dropping its relay paragraph cut the share of the worker's report
+that reached the user from 0.67 to 0.34, losing exactly the specifics a skill
+exists to produce (attendee names, case ages, identifiers). No tool description
+can reach that path, because by then the tool call is over. A third layer, a
+preamble prepended to each worker's own prompt, was deleted: a worker cannot tell
+the user's own words from the orchestrator's invention, so it can only defer to
+its skill instructions, which is what they already say.
+
+A skill's `description` is the third lever and the strongest one on the dispatch
+itself. It is the only per-skill text the orchestrator ever sees — it never reads
+a `SKILL.md` — so a description that states what the worker decides for itself and
+what it returns removes the uncertainty that makes the orchestrator invent a spec.
+In the same ablation, expanding two descriptions that way cut dispatch length 36%
+(45 to 29 words) and stopped a request from being split across redundant workers.
+Skill authors own that text; see the skill-authoring guidance in
+[skills/README.md](../skills/README.md).
+
+`taskDispatchMiddleware` owns the tool outright: it passes
 its own `createSubAgentMiddleware({ taskDescription, generalPurposeAgent: false })`
 in the `middleware` array, which replaces DeepAgents' entry because
 `mergeMiddlewareStack` matches on the middleware name (`subAgentMiddleware`).
