@@ -108,8 +108,7 @@ bindings.
 - **[Architecture](docs/ARCHITECTURE.md)** - system boundaries, event model,
   persistence, transports, and design decisions.
 - **[Standalone backend](docs/STANDALONE_BACKEND.md)** - authentication, remote
-  Electron, static browser deployment, Docker, Compose, Kubernetes, systemd, and
-  Caddy.
+  Electron, static browser deployment, Docker, Compose, and Kubernetes.
 - **[Contributing](CONTRIBUTING.md)** - development setup, CI checks, worktrees,
   releases, and layering rules.
 - **[Security](SECURITY.md)** - network defaults, credentials, local data, and

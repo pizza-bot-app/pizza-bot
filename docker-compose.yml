@@ -4,7 +4,6 @@ services:
     image: ghcr.io/pizza-bot-app/pizza-bot:latest
     build:
       context: .
-      dockerfile: deploy/linux/Dockerfile
       target: runtime
     restart: unless-stopped
     init: true
