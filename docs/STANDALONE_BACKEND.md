@@ -153,6 +153,10 @@ The Vite proxy does not inject authentication.
 
 ### Static browser deployment
 
+Use this when the browser app is hosted separately from the API. A container
+built from [`deploy/linux/Dockerfile`](#docker) already serves both on one
+origin and needs none of this.
+
 Build the web workspace from the repository root:
 
 ```bash
@@ -246,14 +250,17 @@ configured there.
 
 ## Deploy on Linux
 
-The provided examples use this topology:
+Every example puts a TLS endpoint in front of a listener that is not otherwise
+reachable:
 
 ```text
-Electron -> HTTPS -> Caddy -> 127.0.0.1:8080 -> Pizza Bot
+Electron or browser -> HTTPS -> reverse proxy -> Pizza Bot
 ```
 
-Keep the API listener private. Caddy supplies the public TLS endpoint and sends
-streaming responses without proxy buffering.
+The Docker and systemd examples use Caddy for that endpoint and publish the
+listener on loopback only; a Kubernetes deployment uses its Ingress and a
+`ClusterIP` service instead. Whichever fronts it must stream responses without
+proxy buffering.
 
 ### Docker
 

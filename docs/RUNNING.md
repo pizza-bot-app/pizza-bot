@@ -104,4 +104,4 @@ behavior.
 The production backend bundle can serve the CLI, browser, or an Electron client
 on another machine. See [Running a standalone backend](STANDALONE_BACKEND.md)
 for authentication, remote Electron setup, static browser deployment, Docker,
-systemd, Caddy, backups, and troubleshooting.
+Compose, Kubernetes, systemd, Caddy, backups, and troubleshooting.
