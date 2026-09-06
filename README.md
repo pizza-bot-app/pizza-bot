@@ -57,7 +57,7 @@ CLI development, desktop packages, and remote backends.
 | Electron desktop | Local inbox with an embedded backend | `npm run dev` |
 | Browser | Web development or static deployment | [Browser development](docs/RUNNING.md#browser-development) |
 | Terminal CLI | Scripts, terminals, and remote backends | [CLI](docs/RUNNING.md#cli) |
-| Standalone backend | Remote Electron, Docker, or Linux services | [Backend guide](docs/STANDALONE_BACKEND.md) |
+| Standalone backend | Remote Electron, browsers, containers, or Linux services | [Backend guide](docs/STANDALONE_BACKEND.md) |
 
 A running api-server needs access to at least one model provider; HTTP clients
 do not. Configure Amazon Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter,
@@ -108,7 +108,7 @@ bindings.
 - **[Architecture](docs/ARCHITECTURE.md)** - system boundaries, event model,
   persistence, transports, and design decisions.
 - **[Standalone backend](docs/STANDALONE_BACKEND.md)** - authentication, remote
-  Electron, static browser deployment, Docker, systemd, and Caddy.
+  Electron, static browser deployment, Docker, Compose, and Kubernetes.
 - **[Contributing](CONTRIBUTING.md)** - development setup, CI checks, worktrees,
   releases, and layering rules.
 - **[Security](SECURITY.md)** - network defaults, credentials, local data, and

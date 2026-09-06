@@ -153,27 +153,15 @@ The Vite proxy does not inject authentication.
 
 ### Static browser deployment
 
-Build the web workspace from the repository root:
+The browser app can be hosted separately from the API: build it with
+`npm run build -w @pizza-bot/web`, deploy `apps/web/dist`, and replace
+`pizza-config.js` with an `apiBase` and `apiToken` for the API's origin, which
+must also appear in that server's `PIZZA_ALLOWED_ORIGINS`. Serve it with
+`Cache-Control: no-store`.
 
-```bash
-npm run build -w @pizza-bot/web
-```
-
-Deploy the contents of `apps/web/dist`, replacing
-`apps/web/dist/pizza-config.js` at deploy time:
-
-```js
-window.__PIZZA_CONFIG__ = {
-  apiBase: "https://api.pizza.example",
-  apiToken: "the-same-value-as-PIZZA_API_TOKEN",
-};
-```
-
-Set `PIZZA_ALLOWED_ORIGINS` on the API server to the browser application's exact
-origin. Serve both endpoints over TLS and configure `pizza-config.js` with
-`Cache-Control: no-store`. The shared bearer token is visible to anyone who can
-load the application and to scripts running in that origin, so access to the
-static app must be restricted. Credentials are never accepted through URL query
+The container serves both on one origin and needs none of that, so prefer it.
+Either way the bearer token is readable by anyone who can load the application,
+so restrict access to it. Credentials are never accepted through URL query
 parameters.
 
 ## Configure the backend
@@ -246,29 +234,31 @@ configured there.
 
 ## Deploy on Linux
 
-The provided examples use this topology:
+Every example puts a TLS endpoint in front of a listener that is not otherwise
+reachable:
 
 ```text
-Electron -> HTTPS -> Caddy -> 127.0.0.1:8080 -> Pizza Bot
+Electron or browser -> HTTPS -> reverse proxy -> Pizza Bot
 ```
 
-Keep the API listener private. Caddy supplies the public TLS endpoint and sends
-streaming responses without proxy buffering.
+A Kubernetes deployment uses its Ingress and a `ClusterIP` service; a single
+host publishes the container on loopback behind a TLS proxy. Whichever fronts
+it must stream responses without proxy buffering — the API emits
+`X-Accel-Buffering: no` for proxies that honor it.
 
 ### Docker
 
 Build the multi-stage image from the repository root:
 
 ```bash
-docker build -f deploy/linux/Dockerfile -t pizza-bot-backend .
+docker build -t pizza-bot-backend .
 ```
 
 The default image omits Chromium. To include it for the Browser Automation
 Plugin, build the optional target:
 
 ```bash
-docker build -f deploy/linux/Dockerfile \
-  --target runtime-with-browser \
+docker build --target runtime-with-browser \
   -t pizza-bot-backend-browser .
 ```
 
@@ -277,22 +267,31 @@ native Linux architecture or cross-build an AMD64 server image:
 
 ```bash
 finch vm init
-finch build -f deploy/linux/Dockerfile -t pizza-bot-backend .
+finch build -t pizza-bot-backend .
 finch build --platform linux/amd64 \
-  -f deploy/linux/Dockerfile -t pizza-bot-backend:linux-amd64 .
+  -t pizza-bot-backend:linux-amd64 .
 ```
 
-Create a root-owned environment file and replace the token before starting the
-container:
+The image serves the browser app and the API on one port: a browser navigating
+to `/` receives the app, every other path stays the API, and non-browser clients
+still read the service identity from `/`. `PIZZA_WEB_DIR` points at the bundled
+app; unset it for an API-only container.
+
+The server generates `/pizza-config.js` per request, so one image works at any
+origin without a rebuild. That response carries `PIZZA_API_TOKEN`, so every
+client that can reach the listener can read the token. Restrict access to the
+port, not to the application.
+
+Put the token and provider credentials in a root-owned environment file.
+[`.env.example`](../.env.example) documents every setting the server reads:
 
 ```bash
 sudo install -d -m 700 /etc/pizza-bot
-sudo install -m 600 deploy/linux/pizza-bot.env.example \
-  /etc/pizza-bot/pizza-bot.env
+sudo install -m 600 /dev/null /etc/pizza-bot/pizza-bot.env
 sudoedit /etc/pizza-bot/pizza-bot.env
 ```
 
-Publish the container only on the host loopback address for Caddy:
+Publish the container on loopback only, and let a TLS proxy reach it there:
 
 ```bash
 sudo docker volume create pizza-bot-data
@@ -311,79 +310,88 @@ The image runs as an unprivileged user. Its startup fails when the container's
 non-loopback listener lacks a token of at least 32 characters or an explicit
 origin allowlist.
 
-### systemd
+### Host data and credentials in a container
 
-Build and transfer `dist/backend`, then install Node.js 24. Install Chrome,
-Edge, or Chromium when the Browser Automation Plugin is needed. The provided
-unit expects `/usr/bin/node`; edit `ExecStart` if the host installs it elsewhere.
+The image runs as UID 10001, so bind-mounting a data root that a host account
+owns needs `--user "$(id -u):$(id -g)"`. Run the container as the owning
+account rather than relaxing the directory's permissions.
 
-Create the service account and directories:
+That UID then has no entry in the container's `/etc/passwd`, so set `HOME`
+explicitly: the server resolves an external plugins directory from `homedir()`
+at startup. Point `HOME` somewhere other than `PIZZA_DATA_ROOT` if you also
+mount credential directories under it, so they do not appear inside the data
+root on the host.
 
-```bash
-sudo useradd --system --home-dir /var/lib/pizza-bot \
-  --create-home --shell /usr/sbin/nologin pizza-bot
-sudo install -d -o root -g root /opt/pizza-bot/backend /etc/pizza-bot
-sudo install -d -o pizza-bot -g pizza-bot -m 700 /var/lib/pizza-bot
-sudo cp -a dist/backend/. /opt/pizza-bot/backend/
-sudo chown -R root:root /opt/pizza-bot/backend
-```
-
-Install the unit and environment file:
+Provider credentials that a host CLI wrote are not visible to the container. The
+AWS SDK reads its configuration and SSO cache from `$HOME/.aws`, so a Bedrock
+backend needs that directory mounted:
 
 ```bash
-sudo install -m 644 deploy/linux/pizza-bot.service \
-  /etc/systemd/system/pizza-bot.service
-sudo install -m 600 deploy/linux/pizza-bot.env.example \
-  /etc/pizza-bot/pizza-bot.env
-sudoedit /etc/pizza-bot/pizza-bot.env
+docker run -d \
+  --user "$(id -u):$(id -g)" \
+  --env HOME=/home/pizza \
+  --env PIZZA_DATA_ROOT=/data \
+  --env PIZZA_HOST=0.0.0.0 \
+  --env-file /etc/pizza-bot/pizza-bot.env \
+  --publish 127.0.0.1:8080:8080 \
+  --volume "$HOME/.pizza-bot-oss:/data" \
+  --volume "$HOME/.aws:/home/pizza/.aws:ro" \
+  pizza-bot-backend
 ```
 
-Replace `PIZZA_API_TOKEN` with `openssl rand -hex 32` output before enabling the
-service. A loopback listener cannot detect that Caddy will expose it, so the
-systemd configuration does not provide the non-loopback startup guard.
+Values passed with `--env` override the same names in `--env-file`.
 
-The launcher checks common browser locations outside the service `PATH`. Set an
-explicit path in `/etc/pizza-bot/pizza-bot.env` when needed:
+Only one API process may run against a data root at a time. Stop a host service
+before starting a container against the same directory, and back the directory
+up first. Automations stored there run as soon as the server starts.
+
+### Compose
+
+[`docker-compose.yml`](../docker-compose.yml) runs the same image with a named
+data volume and a loopback-only published port, reading provider credentials
+from an optional `.env` beside it:
 
 ```bash
-PIZZA_PLAYWRIGHT_BROWSER_PATH=/opt/google/chrome/chrome
+PIZZA_API_TOKEN="$(openssl rand -hex 32)" \
+PIZZA_ALLOWED_ORIGINS=https://pizza.example.com \
+docker compose up --detach
 ```
 
-Start and inspect the service:
+### Published images
+
+[`publish-image.yml`](../.github/workflows/publish-image.yml) builds the
+`runtime` target for `linux/amd64`, smokes it with
+[`smoke-container.sh`](../scripts/smoke-container.sh), and pushes to
+`ghcr.io/<owner>/<repo>` for pushes to `main` and for `v*` tags. It publishes
+`latest`, `sha-<commit>`, and the release version. The package inherits the
+repository's visibility, so a private repository needs registry credentials
+wherever the image is pulled:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now pizza-bot
-sudo systemctl status pizza-bot
-sudo journalctl -u pizza-bot -f
+kubectl create secret docker-registry ghcr \
+  --namespace pizza-bot \
+  --docker-server=ghcr.io \
+  --docker-username="<github-user>" \
+  --docker-password="<token-with-read:packages>"
 ```
 
-The unit restricts writes to `/var/lib/pizza-bot`. Trusted MCP servers that must
-write elsewhere need those paths added to `ReadWritePaths`; relax `ProtectHome`
-as well if a server must access a path under `/home`.
+### Kubernetes
 
-### Caddy and HTTPS
+Beyond the image reference and its pull secret, a deployment needs:
 
-Replace `pizza.example.com` in [the example Caddyfile](../deploy/linux/Caddyfile)
-with a DNS name pointing at the server, then merge the site block into
-`/etc/caddy/Caddyfile` and reload Caddy:
-
-```bash
-sudo caddy validate --config /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-```
-
-Caddy obtains and renews the certificate. Its `flush_interval -1` setting
-forwards SSE frames immediately. The API also emits `X-Accel-Buffering: no` for
-proxies that honor that header.
-
-Connect packaged Electron to `https://pizza.example.com`. Packaged Electron
-sends `Origin: null`, so `PIZZA_ALLOWED_ORIGINS` must include `null`. A deployed
-browser UI needs its exact `https://...` origin added as a comma-separated
-value.
-
-The API process itself serves plain HTTP. Desktop connections outside loopback
-reject plain HTTP, and bearer tokens must never cross an unencrypted network.
+- `PIZZA_HOST=0.0.0.0`, so the listener accepts cluster traffic. That binding
+  requires `PIZZA_API_TOKEN` of at least 32 characters and
+  `PIZZA_ALLOWED_ORIGINS` naming the external origin the browser loads.
+- `PIZZA_DATA_ROOT` on a `ReadWriteOnce` volume, with one replica and the
+  `Recreate` strategy. The backend owns local SQLite databases and does not
+  scale horizontally.
+- A volume the unprivileged user can write. Set `securityContext.fsGroup: 10001`
+  on the pod unless the provisioner already creates world-writable directories.
+- Provider credentials the pod can obtain without a person present. An AWS SSO
+  profile is not one: its cached token expires and is refreshed by an
+  interactive login, so a restarted pod loses access to Bedrock. Use credentials
+  the pod can hold — an API-key provider, or an IAM principal scoped to
+  `bedrock:InvokeModel*` whose keys live in the deployment's Secret.
 
 ### SSH tunnel alternative
 
@@ -453,4 +461,4 @@ private network, or use an SSH tunnel. See [SECURITY.md](../SECURITY.md).
 | Backend green, provider red | Configure a model provider and credentials on the backend. |
 | Playwright reports `browser_not_found` | Install a browser where the backend runs, or set `PIZZA_PLAYWRIGHT_BROWSER_PATH`; a host browser is not visible inside a container. |
 | Skill unavailable | Configure the required server-side MCP server and tools. |
-| systemd cannot write a path | Add the trusted path to `ReadWritePaths` or keep it under the data root. |
+| Container cannot write the data root | Run it as the account that owns the directory, or set `fsGroup` on the pod. |

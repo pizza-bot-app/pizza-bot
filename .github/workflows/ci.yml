@@ -55,7 +55,7 @@ jobs:
 
       # A clean image build catches build-stage dependencies the artifact smoke cannot.
       - name: Build backend container
-        run: docker build --file deploy/linux/Dockerfile --tag pizza-bot-backend:ci .
+        run: docker build --tag pizza-bot-backend:ci .
 
       - name: Smoke backend container
         run: >-
@@ -66,10 +66,13 @@ jobs:
           --expect-playwright-unavailable
           /opt/pizza-bot
 
+      # The published image serves the browser app beside the API on one origin.
+      - name: Smoke browser app in backend container
+        run: scripts/smoke-container.sh pizza-bot-backend:ci
+
       - name: Build browser-enabled backend container
         run: >-
           docker build
-          --file deploy/linux/Dockerfile
           --target runtime-with-browser
           --tag pizza-bot-backend-browser:ci
           .
