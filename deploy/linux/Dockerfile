@@ -10,12 +10,15 @@ RUN apt-get update \
 COPY . .
 RUN npm ci
 RUN npm run backend:bundle
+# The browser app ships in the same image so it and the API share one origin.
+RUN TURBO_TELEMETRY_DISABLED=1 npx turbo run build --filter=@pizza-bot/web
 
 FROM node:24-bookworm-slim AS runtime-base
 
 ENV NODE_ENV=production \
     PIZZA_DATA_ROOT=/var/lib/pizza-bot \
     PIZZA_HOST=0.0.0.0 \
+    PIZZA_WEB_DIR=/opt/pizza-bot/web \
     PORT=8080
 
 RUN groupadd --gid 10001 pizza-bot \
@@ -25,6 +28,7 @@ RUN groupadd --gid 10001 pizza-bot \
 
 WORKDIR /opt/pizza-bot
 COPY --from=build /src/dist/backend/ ./
+COPY --from=build /src/apps/web/dist/ ./web/
 
 VOLUME ["/var/lib/pizza-bot"]
 EXPOSE 8080

@@ -66,6 +66,10 @@ jobs:
           --expect-playwright-unavailable
           /opt/pizza-bot
 
+      # The published image serves the browser app beside the API on one origin.
+      - name: Smoke browser app in backend container
+        run: deploy/linux/smoke-container.sh pizza-bot-backend:ci
+
       - name: Build browser-enabled backend container
         run: >-
           docker build

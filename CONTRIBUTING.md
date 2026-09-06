@@ -58,7 +58,9 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs for pushes to
 5. **`npm run backend:bundle && npm run backend:smoke`** — builds and exercises
    the standalone artifact.
 6. **`docker build --file deploy/linux/Dockerfile --tag pizza-bot-backend:ci .`**
-   — validates the Linux container.
+   — validates the Linux container, then
+   **`deploy/linux/smoke-container.sh pizza-bot-backend:ci`** exercises its
+   browser app and bearer boundary over a published port.
 7. **`npm audit --omit=dev --audit-level=high`** — blocks high-severity
    production dependency advisories.
 

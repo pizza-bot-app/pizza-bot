@@ -28,6 +28,7 @@ import { attachmentRoutes } from "./routes-attachments.js";
 import { folderRoutes } from "./routes-folders.js";
 import { logRoutes } from "./routes-logs.js";
 import { localFolderRoutes } from "./routes-local-folders.js";
+import { mountWebApp } from "./routes-web.js";
 import { limitJsonBody, MAX_JSON_BODY_BYTES } from "./request-limits.js";
 import {
   configureLogging,
@@ -56,6 +57,10 @@ export interface ApiSecurityOptions {
 
 export interface ApiLoggingOptions {
   dataRoot?: string;
+}
+
+export interface ApiWebOptions {
+  dir?: string;
 }
 
 export interface ServerNetworkConfig extends ApiSecurityOptions {
@@ -110,10 +115,15 @@ export function resolveServerNetworkConfig(
   };
 }
 
+export function resolveWebDir(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.PIZZA_WEB_DIR?.trim() || undefined;
+}
+
 export function buildApp(
   host: AgentHost,
   security: ApiSecurityOptions = {},
   logging: ApiLoggingOptions = {},
+  web: ApiWebOptions = {},
 ): Hono {
   const app = new Hono();
   const httpLog = getLogger("http");
@@ -170,6 +180,12 @@ export function buildApp(
     else if (c.res.status >= 400) httpLog.warn("HTTP request", context);
     else httpLog.info("HTTP request", context);
   });
+  if (web.dir) {
+    mountWebApp(app, {
+      dir: web.dir,
+      ...(security.apiToken ? { apiToken: security.apiToken } : {}),
+    });
+  }
   if (security.apiToken) {
     const expected = security.apiToken;
     app.use("*", async (c, next) => {
@@ -241,10 +257,18 @@ export async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 8080);
   const network = resolveServerNetworkConfig();
 
+  const webDir = resolveWebDir();
+  if (webDir && network.apiToken) {
+    logger.warn("Browser app publishes the API token to anyone who can reach this listener", {
+      event: "api.web.token_published",
+      webDir,
+    });
+  }
+
   // Listen while initialization continues; interactive runs await the model and
   // automations await the bounded initial MCP connection pass.
   const host = AgentHost.createPhased({ dataRoot });
-  const app = buildApp(host, network, { dataRoot });
+  const app = buildApp(host, network, { dataRoot }, { ...(webDir ? { dir: webDir } : {}) });
   void host
     .startAutomations()
     .catch((err) => console.error("[trigger-service] startup failed:", err));

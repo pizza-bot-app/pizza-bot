@@ -282,6 +282,16 @@ finch build --platform linux/amd64 \
   -f deploy/linux/Dockerfile -t pizza-bot-backend:linux-amd64 .
 ```
 
+The image serves the browser app and the API on one port: a browser navigating
+to `/` receives the app, every other path stays the API, and non-browser clients
+still read the service identity from `/`. `PIZZA_WEB_DIR` points at the bundled
+app; unset it for an API-only container.
+
+The server generates `/pizza-config.js` per request, so one image works at any
+origin without a rebuild. That response carries `PIZZA_API_TOKEN`, so every
+client that can reach the listener can read the token. Restrict access to the
+port, not to the application.
+
 Create a root-owned environment file and replace the token before starting the
 container:
 
@@ -310,6 +320,49 @@ sudo docker run -d \
 The image runs as an unprivileged user. Its startup fails when the container's
 non-loopback listener lacks a token of at least 32 characters or an explicit
 origin allowlist.
+
+### Compose
+
+[`docker-compose.yml`](../docker-compose.yml) runs the same image with a named
+data volume and a loopback-only published port, reading provider credentials
+from an optional `.env` beside it:
+
+```bash
+PIZZA_API_TOKEN="$(openssl rand -hex 32)" \
+PIZZA_ALLOWED_ORIGINS=https://pizza.example.com \
+docker compose up --detach
+```
+
+### Published images
+
+[`publish-image.yml`](../.github/workflows/publish-image.yml) builds the
+`runtime` target for `linux/amd64`, smokes it with
+[`smoke-container.sh`](../deploy/linux/smoke-container.sh), and pushes to
+`ghcr.io/<owner>/<repo>` for pushes to `main` and for `v*` tags. It publishes
+`latest`, `sha-<commit>`, and the release version. The package inherits the
+repository's visibility, so a private repository needs registry credentials
+wherever the image is pulled:
+
+```bash
+kubectl create secret docker-registry ghcr \
+  --namespace pizza-bot \
+  --docker-server=ghcr.io \
+  --docker-username="<github-user>" \
+  --docker-password="<token-with-read:packages>"
+```
+
+### Kubernetes
+
+Beyond the image reference and its pull secret, a deployment needs:
+
+- `PIZZA_HOST=0.0.0.0`, so the listener accepts cluster traffic. That binding
+  requires `PIZZA_API_TOKEN` of at least 32 characters and
+  `PIZZA_ALLOWED_ORIGINS` naming the external origin the browser loads.
+- `PIZZA_DATA_ROOT` on a `ReadWriteOnce` volume, with one replica and the
+  `Recreate` strategy. The backend owns local SQLite databases and does not
+  scale horizontally.
+- A volume the unprivileged user can write. Set `securityContext.fsGroup: 10001`
+  on the pod unless the provisioner already creates world-writable directories.
 
 ### systemd
 

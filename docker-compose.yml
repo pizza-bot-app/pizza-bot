@@ -1,0 +1,26 @@
+# One container serving the browser app and the API on a single origin.
+services:
+  pizza-bot:
+    image: ghcr.io/pizza-bot-app/pizza-bot:latest
+    build:
+      context: .
+      dockerfile: deploy/linux/Dockerfile
+      target: runtime
+    restart: unless-stopped
+    init: true
+    environment:
+      # A non-loopback listener is refused without a token of at least 32
+      # characters and an explicit origin allowlist.
+      PIZZA_API_TOKEN: "${PIZZA_API_TOKEN:?generate one with openssl rand -hex 32}"
+      PIZZA_ALLOWED_ORIGINS: "${PIZZA_ALLOWED_ORIGINS:-http://127.0.0.1:8080}"
+    # Provider credentials come from an optional .env beside this file.
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - pizza-bot-data:/var/lib/pizza-bot
+
+volumes:
+  pizza-bot-data:
