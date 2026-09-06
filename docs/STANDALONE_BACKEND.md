@@ -321,6 +321,41 @@ The image runs as an unprivileged user. Its startup fails when the container's
 non-loopback listener lacks a token of at least 32 characters or an explicit
 origin allowlist.
 
+### Host data and credentials in a container
+
+The image runs as UID 10001, so bind-mounting a data root that a host account
+owns needs `--user "$(id -u):$(id -g)"`. Run the container as the owning
+account rather than relaxing the directory's permissions.
+
+That UID then has no entry in the container's `/etc/passwd`, so set `HOME`
+explicitly: the server resolves an external plugins directory from `homedir()`
+at startup. Point `HOME` somewhere other than `PIZZA_DATA_ROOT` if you also
+mount credential directories under it, so they do not appear inside the data
+root on the host.
+
+Provider credentials that a host CLI wrote are not visible to the container. The
+AWS SDK reads its configuration and SSO cache from `$HOME/.aws`, so a Bedrock
+backend needs that directory mounted:
+
+```bash
+docker run -d \
+  --user "$(id -u):$(id -g)" \
+  --env HOME=/home/pizza \
+  --env PIZZA_DATA_ROOT=/data \
+  --env PIZZA_HOST=0.0.0.0 \
+  --env-file /etc/pizza-bot/pizza-bot.env \
+  --publish 127.0.0.1:8080:8080 \
+  --volume "$HOME/.pizza-bot-oss:/data" \
+  --volume "$HOME/.aws:/home/pizza/.aws:ro" \
+  pizza-bot-backend
+```
+
+Values passed with `--env` override the same names in `--env-file`.
+
+Only one API process may run against a data root at a time. Stop a host service
+before starting a container against the same directory, and back the directory
+up first. Automations stored there run as soon as the server starts.
+
 ### Compose
 
 [`docker-compose.yml`](../docker-compose.yml) runs the same image with a named
@@ -363,6 +398,11 @@ Beyond the image reference and its pull secret, a deployment needs:
   scale horizontally.
 - A volume the unprivileged user can write. Set `securityContext.fsGroup: 10001`
   on the pod unless the provisioner already creates world-writable directories.
+- Provider credentials the pod can obtain without a person present. An AWS SSO
+  profile is not one: its cached token expires and is refreshed by an
+  interactive login, so a restarted pod loses access to Bedrock. Use credentials
+  the pod can hold — an API-key provider, or an IAM principal scoped to
+  `bedrock:InvokeModel*` whose keys live in the deployment's Secret.
 
 ### systemd
 
