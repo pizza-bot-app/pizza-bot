@@ -48,6 +48,7 @@ describe("OpenAI model discovery", () => {
   });
 
   it("reports missing credentials without calling discovery", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "");
     const fetchFn = vi.fn();
     const provider = new OpenAiLangChainModelProvider({ apiKey: "", fetch: fetchFn });
 
@@ -57,6 +58,36 @@ describe("OpenAI model discovery", () => {
       retryable: false,
     });
     expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("discovers models from a keyless endpoint without an authorization header", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    const fetchFn = vi.fn(async () => Response.json({ data: [{ id: "local-chat-model" }] }));
+    const provider = new OpenAiLangChainModelProvider({
+      baseUrl: "http://localhost:8080/v1",
+      fetch: fetchFn,
+    });
+
+    await expect(provider.listModels()).resolves.toMatchObject([{ id: "local-chat-model" }]);
+    expect(fetchFn).toHaveBeenCalledWith(
+      "http://localhost:8080/v1/models",
+      expect.objectContaining({ headers: {} }),
+    );
+  });
+
+  it("rejects a blank API key unless a custom endpoint is configured", () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("OPENAI_BASE_URL", "");
+    const provider = new OpenAiLangChainModelProvider({ fetch: vi.fn() });
+
+    expect(() => provider.configure({ method: "api-key", values: { apiKey: "" } }))
+      .toThrow(/Base URL/);
+    expect(() =>
+      provider.configure({
+        method: "api-key",
+        values: { apiKey: "", baseUrl: "http://localhost:8080/v1" },
+      })
+    ).not.toThrow();
   });
 
   it("excludes known non-chat model families", () => {
@@ -146,6 +177,29 @@ describe("OpenAI model construction", () => {
     });
 
     await expect(provider.buildModel("private-deployment")).resolves.toBeDefined();
+  });
+
+  it("sends a placeholder bearer token to a keyless endpoint", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    const authorizations: (string | null)[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      authorizations.push(new Headers(init?.headers).get("authorization"));
+      return openAiError("stop");
+    }));
+    const provider = new OpenAiLangChainModelProvider({
+      baseUrl: "http://localhost:8080/v1",
+      apiMode: "chat-completions",
+      models: [{
+        id: "local-chat-model",
+        provider: "openai",
+        displayName: "Local Chat Model",
+      }],
+    });
+
+    const model = await provider.buildModel("local-chat-model");
+    await expect(consume(model.stream("hello"))).rejects.toThrow();
+
+    expect(authorizations).toEqual(["Bearer none"]);
   });
 
   it("keeps catalog context windows model-specific", async () => {

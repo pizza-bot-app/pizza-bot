@@ -27,6 +27,9 @@ import {
 import { normalizeMultimodalToolResultsForOpenAiResponses } from "./openai-multimodal-fix.js";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+// The `openai` SDK refuses to construct a client without a credential, so an
+// OpenAI-compatible endpoint that authenticates nobody still needs a bearer token.
+const KEYLESS_API_KEY = "none";
 const FETCH_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_TOKENS = 8_192;
 
@@ -93,7 +96,7 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
     id: "api-key",
     label: "API key",
     fields: [
-      { key: "apiKey", label: "API key", type: "password", required: true },
+      { key: "apiKey", label: "API key", type: "password", required: false },
       { key: "baseUrl", label: "Base URL", type: "text", required: false },
       {
         key: "apiMode",
@@ -156,6 +159,13 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
     const key = cfg.values.apiKey?.trim();
     if (key) this.apiKey = key;
     this.baseUrl = cfg.values.baseUrl?.trim() || undefined;
+    // Only a custom endpoint may go keyless; api.openai.com without a key is a
+    // config that could never run, so reject it while the user can still fix it.
+    if (!this.resolvedApiKey() && !this.resolvedBaseUrl()) {
+      throw new Error(
+        "An API key is required unless you set a Base URL for an OpenAI-compatible endpoint.",
+      );
+    }
     this.maxTokens = positiveInteger(cfg.values.maxTokens) ?? DEFAULT_MAX_TOKENS;
     this.catalogProvider = cfg.values.catalogProvider?.trim() || undefined;
     this.apiMode = parseApiMode(cfg.values.apiMode);
@@ -164,14 +174,14 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
 
   async listModels(): Promise<ModelDescriptor[]> {
     if (this.models) return this.models;
-    const apiKey = this.apiKey ?? process.env.OPENAI_API_KEY;
-    if (!apiKey) throw missingCatalogCredentials("OpenAI");
-    const baseUrl =
-      (this.baseUrl ?? process.env.OPENAI_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+    const apiKey = this.resolvedApiKey();
+    const configuredBaseUrl = this.resolvedBaseUrl();
+    if (!apiKey && !configuredBaseUrl) throw missingCatalogCredentials("OpenAI");
+    const baseUrl = (configuredBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
 
     try {
       const response = await this.fetchFn(`${baseUrl}/models`, {
-        headers: { authorization: `Bearer ${apiKey}` },
+        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       if (!response.ok) throw catalogHttpError("OpenAI", response.status);
@@ -201,6 +211,14 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
     }
   }
 
+  private resolvedApiKey(): string | undefined {
+    return this.apiKey || process.env.OPENAI_API_KEY || undefined;
+  }
+
+  private resolvedBaseUrl(): string | undefined {
+    return this.baseUrl || process.env.OPENAI_BASE_URL || undefined;
+  }
+
   async buildModel(modelId: string): Promise<BaseChatModel> {
     try {
       return await this.construct(modelId);
@@ -213,11 +231,11 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
   }
 
   private async construct(modelId: string): Promise<BaseChatModel> {
-    const apiKey = this.apiKey ?? process.env.OPENAI_API_KEY;
+    const configuredBaseUrl = this.resolvedBaseUrl();
+    const apiKey = this.resolvedApiKey() ?? (configuredBaseUrl ? KEYLESS_API_KEY : undefined);
     if (!apiKey) {
       throw new OpenAiBuildError("No OpenAI API key configured (set OPENAI_API_KEY).", "AUTH_EXPIRED");
     }
-    const configuredBaseUrl = this.baseUrl ?? process.env.OPENAI_BASE_URL;
     if (!this.descriptors.has(modelId)) {
       await this.listModels().catch(() => []);
     }

@@ -140,7 +140,9 @@ export function providerRoutes(host: AgentHost): Hono {
         }
         // The server is the trust boundary: a secret may only be persisted as an
         // `${ENV_REF}`, never a raw value, so plaintext keys never reach SQLite.
-        if (!isEnvReference(value)) {
+        // An empty value is the absence of a credential, not a pasted literal —
+        // an endpoint that authenticates nobody has nothing to reference.
+        if (value !== "" && !isEnvReference(value)) {
           return c.json(
             {
               error: `Secret field "${key}" must be an \${ENV_REF} reference, not a literal value.`,
