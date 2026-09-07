@@ -18,3 +18,10 @@ inside the rounded-rect mask macOS applies; using the unpadded `icon` on macOS
 looks oversized next to other Dock icons. `apps/desktop-shell/forge.config.ts`
 picks the variant per platform and passes these extensionless to Forge, which
 appends the right extension per target.
+
+The browser favicon is the robot's head alone: the full illustration turns to
+mush at 16px, so the head is cut out of `icons/icon.png` with an elliptical mask
+(centre 524,336, radii 262,205 in the 1024 master) that also drops the pizzas and
+the antenna, then flattened onto the artwork's background colour. Regenerate it
+the same way if the master changes — the files live in `apps/web/public/` because
+Vite copies that directory into the built app.

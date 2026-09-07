@@ -40,6 +40,9 @@ grep -q "\"apiToken\":\"${token}\"" <<<"$config" || fail "pizza-config.js omits 
 shell="$(curl -sf -H 'accept: text/html' "${origin}/")" || fail "the image did not serve the app shell"
 grep -q 'id="root"' <<<"$shell" || fail "the app shell is not the built browser app"
 
+grep -q 'rel="icon"' <<<"$shell" || fail "the app shell links no favicon"
+curl -sf "${origin}/favicon.ico" >/dev/null || fail "the image did not serve the favicon"
+
 asset="$(grep -o 'assets/[A-Za-z0-9._-]*\.js' <<<"$shell" | head -1)"
 [[ -n "$asset" ]] || fail "the app shell references no built asset"
 curl -sf "${origin}/${asset}" >/dev/null || fail "the image did not serve ${asset}"

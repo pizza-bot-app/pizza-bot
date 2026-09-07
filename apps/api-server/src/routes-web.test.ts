@@ -26,6 +26,7 @@ describe("api-server: browser app", () => {
     writeFileSync(join(webDir, "pizza-config.js"), "window.__PIZZA_CONFIG__ = {};");
     mkdirSync(join(webDir, "assets"));
     writeFileSync(join(webDir, "assets", "app.js"), "export const app = 1;");
+    writeFileSync(join(webDir, "favicon.ico"), "icon-bytes");
   });
 
   afterAll(() => {
@@ -71,6 +72,15 @@ describe("api-server: browser app", () => {
     );
     expect((await app.request("/")).status).toBe(401);
     expect((await app.request("/status")).status).toBe(401);
+  });
+
+  // A browser asks for the favicon before it has read the token out of
+  // pizza-config.js, so it has to come back from the unauthenticated side.
+  it("serves the favicon without a token", async () => {
+    const app = buildApp(fakeHost(), { apiToken: "correct horse" }, {}, { dir: webDir });
+    const res = await app.request("/favicon.ico");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("icon-bytes");
   });
 
   it("serves nothing when no directory is configured", async () => {
