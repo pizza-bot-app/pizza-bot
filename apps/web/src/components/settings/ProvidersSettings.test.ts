@@ -4,6 +4,7 @@ import type { ProviderAuthMethod } from "@pizza-bot/core";
 import {
   getProviderStatus,
   secretKeysWithStoredValue,
+  secretReferenceValidationError,
   unavailableLocalSecretValidationError,
 } from "./ProvidersSettings.js";
 
@@ -187,5 +188,44 @@ describe("unavailableLocalSecretValidationError", () => {
     expect(
       unavailableLocalSecretValidationError(method, {}, unavailable, false),
     ).toBeUndefined();
+  });
+});
+
+describe("secretReferenceValidationError", () => {
+  const method: ProviderAuthMethod = {
+    id: "api-key",
+    label: "API key",
+    fields: [
+      { key: "apiKey", label: "Google API key", type: "password", required: true },
+      { key: "platform", label: "Platform", type: "text", required: false },
+    ],
+  };
+
+  it("rejects a pasted credential before the server does", () => {
+    expect(
+      secretReferenceValidationError(method, { apiKey: "AQ.some-real-key" }, false),
+    ).toBe(
+      "Google API key must reference an environment variable, like ${MY_API_KEY} — not the value itself.",
+    );
+  });
+
+  it("accepts an environment reference", () => {
+    expect(
+      secretReferenceValidationError(method, { apiKey: "${GOOGLE_API_KEY}" }, false),
+    ).toBeUndefined();
+  });
+
+  it("leaves a blank field to the stored-secret path", () => {
+    expect(secretReferenceValidationError(method, { apiKey: "  " }, false)).toBeUndefined();
+  });
+
+  it("stays out of the way when the desktop store takes raw values", () => {
+    expect(
+      secretReferenceValidationError(method, { apiKey: "AQ.some-real-key" }, true),
+    ).toBeUndefined();
+  });
+
+  it("ignores non-secret fields", () => {
+    expect(secretReferenceValidationError(method, { platform: "auto" }, false)).toBeUndefined();
   });
 });

@@ -173,6 +173,91 @@ describe("Google Gemini model discovery", () => {
     expect(model.profile.maxInputTokens).toBe(1_048_576);
   });
 
+  it("falls through to Vertex when Google AI lists models but cannot generate", async () => {
+    const listing = () => new Response(JSON.stringify({
+      models: [{ name: "models/gemini-flash-lite", supportedGenerationMethods: ["generateContent"] }],
+    }), { status: 200 });
+    const fetchFn = vi.fn().mockImplementation((input: URL | string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve(new Response(JSON.stringify({
+            error: { message: "Requests to this API are blocked." },
+          }), { status: 403 }))
+        : Promise.resolve(listing()));
+    const provider = new GoogleLangChainModelProvider({
+      apiKey: "test-key",
+      aiApiBase: "https://google-ai.example",
+      fetch: fetchFn,
+      modelsDevFetch: vi.fn().mockResolvedValue(new Response("", { status: 503 })),
+    });
+
+    await expect(provider.listModels()).resolves.toEqual([
+      expect.objectContaining({ id: "gemini-2.5-flash" }),
+    ]);
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      2,
+      "https://google-ai.example/v1beta/models/gemini-flash-lite:generateContent",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("keeps Google AI when the verification probe only hits a rate limit", async () => {
+    const fetchFn = vi.fn().mockImplementation((input: URL | string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve(new Response(JSON.stringify({
+            error: { message: "Resource has been exhausted (e.g. check quota)." },
+          }), { status: 429 }))
+        : Promise.resolve(new Response(JSON.stringify({
+            models: [{ name: "models/gemini-2.5-flash", supportedGenerationMethods: ["generateContent"] }],
+          }), { status: 200 })));
+    const provider = new GoogleLangChainModelProvider({
+      apiKey: "test-key",
+      aiApiBase: "https://google-ai.example",
+      fetch: fetchFn,
+    });
+
+    await expect(provider.listModels()).resolves.toEqual([
+      expect.objectContaining({ id: "gemini-2.5-flash", displayName: "gemini-2.5-flash (Google)" }),
+    ]);
+  });
+
+  it("takes an explicit Google AI choice at its word without probing", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      models: [{ name: "models/gemini-2.5-flash", supportedGenerationMethods: ["generateContent"] }],
+    }), { status: 200 }));
+    const provider = new GoogleLangChainModelProvider({
+      apiKey: "test-key",
+      aiApiBase: "https://google-ai.example",
+      platform: "gai",
+      fetch: fetchFn,
+    });
+
+    await provider.listModels();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the resolved platform on the auto-detect option once it is known", async () => {
+    const fetchFn = vi.fn().mockImplementation((input: URL | string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve(new Response("{}", { status: 200 }))
+        : Promise.resolve(new Response(JSON.stringify({
+            models: [{ name: "models/gemini-2.5-flash", supportedGenerationMethods: ["generateContent"] }],
+          }), { status: 200 })));
+    const provider = new GoogleLangChainModelProvider({
+      apiKey: "test-key",
+      aiApiBase: "https://google-ai.example",
+      fetch: fetchFn,
+    });
+    const optionsOf = () => provider.authSchema[0]?.fields
+      .find((field) => field.key === "platform")?.options;
+
+    expect(optionsOf()).toContainEqual({ value: "auto", label: "Auto-detect" });
+    await provider.listModels();
+    expect(optionsOf()).toContainEqual({
+      value: "auto",
+      label: "Auto-detect (using Google AI Studio)",
+    });
+  });
+
   it("exposes explicit platform choices with auto-detection as the default", () => {
     const provider = new GoogleLangChainModelProvider();
     const platform = provider.authSchema[0]?.fields.find(
@@ -188,6 +273,23 @@ describe("Google Gemini model discovery", () => {
         { value: "gcp", label: "Vertex AI Express" },
       ],
     });
+  });
+});
+
+describe("Google Gemini error translation", () => {
+  it("does not blame credentials when the API is blocked for the key", () => {
+    const blocked = Object.assign(
+      new Error("Requests to this API generativelanguage.googleapis.com are blocked."),
+      { status: 403 },
+    );
+
+    expect(translateGoogleError(blocked)).toBeUndefined();
+  });
+
+  it("still reports a plain authorization failure as expired credentials", () => {
+    const denied = Object.assign(new Error("Permission denied"), { status: 403 });
+
+    expect(translateGoogleError(denied)).toBe("AUTH_EXPIRED");
   });
 });
 

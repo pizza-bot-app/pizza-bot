@@ -14,6 +14,7 @@ import {
   convertGoogleChunksToEvents,
   prepareGoogleMessages,
 } from "./google-tool-call-fix.js";
+import { sanitizeGeminiTools } from "./google-schema-fix.js";
 import {
   enrichModelDescriptor,
   resolveModelsDevCatalog,
@@ -31,6 +32,11 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_CATALOG_PAGES = 10;
 const VERTEX_FALLBACK_MODEL = "gemini-2.5-flash";
+
+const PLATFORM_LABELS: Record<GooglePlatform, string> = {
+  gai: "Google AI Studio",
+  gcp: "Vertex AI Express",
+};
 
 type GooglePlatform = "gai" | "gcp";
 type GooglePlatformSetting = GooglePlatform | "auto";
@@ -108,7 +114,6 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
 
 export class GoogleLangChainModelProvider implements ModelProvider {
   readonly id = "google";
-  readonly authSchema = AUTH_SCHEMA;
   private readonly aiApiBase: string;
   private readonly fetchFn: typeof fetch;
   private readonly modelsDev: ModelsDevCatalogLoader;
@@ -118,6 +123,28 @@ export class GoogleLangChainModelProvider implements ModelProvider {
   private maxOutputTokens: number;
   private platform: GooglePlatformSetting;
   private detectedPlatform: GooglePlatform | undefined;
+  private aiStudioGeneration: Promise<boolean> | undefined;
+
+  /** Auto-detect reports which platform it settled on; the field is otherwise silent about it. */
+  get authSchema(): readonly ProviderAuthMethod[] {
+    const detected = this.detectedPlatform;
+    if (!detected || this.platform !== "auto") return AUTH_SCHEMA;
+    return AUTH_SCHEMA.map((method) => ({
+      ...method,
+      fields: method.fields.map((field) =>
+        field.key === "platform" && field.options
+          ? {
+              ...field,
+              options: field.options.map((option) =>
+                option.value === "auto"
+                  ? { ...option, label: `${option.label} (using ${PLATFORM_LABELS[detected]})` }
+                  : option,
+              ),
+            }
+          : field,
+      ),
+    }));
+  }
 
   constructor(opts: GoogleProviderOptions = {}) {
     this.aiApiBase = (
@@ -144,6 +171,7 @@ export class GoogleLangChainModelProvider implements ModelProvider {
       positiveInteger(cfg.values.maxOutputTokens) ?? DEFAULT_MAX_OUTPUT_TOKENS;
     this.platform = validPlatform(cfg.values.platform) ?? "auto";
     this.detectedPlatform = undefined;
+    this.aiStudioGeneration = undefined;
     if (!this.models) this.descriptors.clear();
   }
 
@@ -204,6 +232,12 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     class ThoughtSignatureSafeChatGoogle extends ChatGoogle {
       override get profile() {
         return withContextWindow(super.profile, descriptor?.contextWindow);
+      }
+
+      override invocationParams(options: this["ParsedCallOptions"]) {
+        const params = super.invocationParams(options);
+        if (!params.tools) return params;
+        return { ...params, tools: sanitizeGeminiTools(params.tools) };
       }
 
       override async _generate(
@@ -274,7 +308,11 @@ export class GoogleLangChainModelProvider implements ModelProvider {
   private async discover(apiKey: string): Promise<DiscoveryResult | undefined> {
     if (this.platform !== "gcp") {
       const models = await this.discoverAiModels(apiKey);
-      if (models) return { platform: "gai", models };
+      // An explicit choice is honored as given; only auto-detect needs the evidence.
+      if (models && this.platform === "gai") return { platform: "gai", models };
+      if (models && (await this.aiStudioCanGenerate(apiKey, models))) {
+        return { platform: "gai", models };
+      }
       if (this.platform === "gai") return undefined;
     }
 
@@ -319,6 +357,49 @@ export class GoogleLangChainModelProvider implements ModelProvider {
       if (!pageToken) break;
     }
     return uniqueModels(discovered);
+  }
+
+  /**
+   * Listing models proves only that the key is known to AI Studio, not that the
+   * platform will serve a generation — depleted prepay credits and a key blocked
+   * for the API both list fine and then fail every run.
+   */
+  private async aiStudioCanGenerate(
+    apiKey: string,
+    models: readonly ModelDescriptor[],
+  ): Promise<boolean> {
+    this.aiStudioGeneration ??= this.probeAiGeneration(apiKey, models);
+    return this.aiStudioGeneration;
+  }
+
+  private async probeAiGeneration(
+    apiKey: string,
+    models: readonly ModelDescriptor[],
+  ): Promise<boolean> {
+    const probe = probeModelId(models);
+    if (!probe) return true;
+    try {
+      const response = await this.fetchFn(
+        `${this.aiApiBase}/v1beta/models/${probe}:generateContent`,
+        {
+          method: "POST",
+          headers: { "x-goog-api-key": apiKey, "content-type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: "hi" }] }],
+            generationConfig: { maxOutputTokens: 1 },
+          }),
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        },
+      );
+      if (response.ok) return true;
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: { message?: string };
+      };
+      return !platformRejected(response.status, body.error?.message ?? "");
+    } catch {
+      // A transient failure is no evidence about the platform; keep the listing's verdict.
+      return true;
+    }
   }
 
   private async discoverModelsDev(provider: string): Promise<ModelDescriptor[]> {
@@ -396,11 +477,13 @@ export function translateGoogleError(
   error: unknown,
 ): "AUTH_EXPIRED" | "RATE_LIMIT" | undefined {
   const status = statusOf(error);
-  if (status === 401 || status === 403) return "AUTH_EXPIRED";
-  if (status === 429) return "RATE_LIMIT";
   const message =
     error instanceof Error ? `${error.name} ${error.message}` : String(error);
   const normalized = message.toLowerCase();
+  // A key blocked for the API is valid; re-authenticating cannot enable the service.
+  if (serviceBlocked(normalized)) return undefined;
+  if (status === 401 || status === 403) return "AUTH_EXPIRED";
+  if (status === 429) return "RATE_LIMIT";
   if (
     normalized.includes("api key not valid") ||
     normalized.includes("api_key_invalid") ||
@@ -418,6 +501,32 @@ export function translateGoogleError(
     return "RATE_LIMIT";
   }
   return undefined;
+}
+
+/** Terminal for the platform, as opposed to a rate limit or a bad model id. */
+function platformRejected(status: number, message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (status === 403) return true;
+  return status === 429 && /credit|billing|prepay/.test(normalized);
+}
+
+function serviceBlocked(normalized: string): boolean {
+  return (
+    normalized.includes("api_key_service_blocked") ||
+    normalized.includes("are blocked") ||
+    normalized.includes("has not been used in project") ||
+    normalized.includes("it is disabled")
+  );
+}
+
+/** The cheapest model available, so verifying a platform costs as little as possible. */
+function probeModelId(models: readonly ModelDescriptor[]): string | undefined {
+  const byPreference = ["flash-lite", "flash"];
+  for (const hint of byPreference) {
+    const match = models.find((model) => model.id.includes(hint));
+    if (match) return match.id;
+  }
+  return models[0]?.id;
 }
 
 function validPlatform(value: string | undefined): GooglePlatformSetting | undefined {

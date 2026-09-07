@@ -13,6 +13,7 @@ import type {
   ProviderAuthField,
   ProviderAuthMethod,
 } from "@pizza-bot/core";
+import { isEnvReference } from "@pizza-bot/core";
 import { L } from "../../lexicon.js";
 import { groupModelsByProvider, providerLabel } from "../../model-options.js";
 import { useAppToast } from "../AppToast.js";
@@ -297,6 +298,12 @@ function ProviderRow({
         localSecretStore,
       );
       if (unavailableSecretError) throw new Error(unavailableSecretError);
+      const referenceError = secretReferenceValidationError(
+        method,
+        values,
+        localSecretStore,
+      );
+      if (referenceError) throw new Error(referenceError);
 
       const out: Record<string, string> = {};
       for (const field of method.fields) {
@@ -608,7 +615,7 @@ function FieldInput({
       ) : (
         <input
           className="field-input"
-          type={field.type === "password" ? "password" : "text"}
+          type={field.type === "password" && localSecretStore ? "password" : "text"}
           value={value}
           placeholder={
             field.type === "password"
@@ -618,7 +625,9 @@ function FieldInput({
                   : L.secretEnvUnavailablePlaceholder
                 : hasStored
                   ? L.secretStoredPlaceholder
-                  : field.default ?? ""
+                  : localSecretStore
+                    ? field.default ?? ""
+                    : L.secretRefPlaceholder
               : field.default ?? ""
           }
           onChange={(e) => onChange(e.target.value)}
@@ -630,7 +639,7 @@ function FieldInput({
             ? localSecretStore
               ? L.secretUnavailableHint
               : L.secretEnvUnavailableHint
-            : isDesktop()
+            : localSecretStore
               ? L.secretKeychainHint
               : L.secretRefHint}
         </span>
@@ -689,6 +698,25 @@ export function secretKeysWithStoredValue(
     }
   }
   return keys;
+}
+
+/**
+ * Without a desktop secret store the server accepts only an `${ENV_REF}`, so a
+ * pasted credential is rejected on save. Say so before it makes that round trip.
+ */
+export function secretReferenceValidationError(
+  method: ProviderAuthMethod | undefined,
+  values: Readonly<Record<string, string>>,
+  localSecretStore: boolean,
+): string | undefined {
+  if (localSecretStore) return undefined;
+  const literal = method?.fields.find((field) => {
+    const typed = values[field.key]?.trim();
+    return field.type === "password" && !!typed && !isEnvReference(typed);
+  });
+  return literal
+    ? `${literal.label} must reference an environment variable, like \${MY_API_KEY} — not the value itself.`
+    : undefined;
 }
 
 export function unavailableLocalSecretValidationError(
