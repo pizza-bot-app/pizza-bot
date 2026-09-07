@@ -380,7 +380,10 @@ button.sidebar-folder-row:hover,
   border-color: color-mix(in oklch, var(--brand) 40%, var(--border));
 }
 .rail-toggle.active:hover { background: color-mix(in oklch, var(--brand) 20%, transparent); }
-.rail-toggle.icon-only { width: 30px; padding: 0; justify-content: center; gap: 0; }
+.rail-toggle.icon-only { width: 30px; padding: 0; justify-content: center; gap: 0; position: relative; }
+/* Fixed-width icon button: overlay the badge instead of letting it consume
+   flex space and shove the icon off-centre. */
+.rail-toggle.icon-only .rail-toggle-indicator { position: absolute; top: 3px; right: 3px; }
 .rail-toggle-indicator {
   width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%;
   background: var(--brand);

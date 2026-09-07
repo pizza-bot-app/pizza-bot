@@ -575,6 +575,9 @@ export function App() {
                                   onClick={() => setShowRail((v) => !v)}
                                 >
                                   <Activity size={16} />
+                                  {Object.keys(delegations).length > 0 && (
+                                    <span className="rail-toggle-indicator" aria-hidden="true" />
+                                  )}
                                 </button>
                               ) : undefined
                             }
