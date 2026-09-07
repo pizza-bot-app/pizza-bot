@@ -8,10 +8,8 @@
 
 type JsonSchema = Record<string, unknown>;
 
-/** `Gemini.Schema`, plus the `$ref`/`$defs` pair the API resolves but LangChain's type omits. */
+/** The fields `Gemini.Schema` names; the parser rejects the request on anything else. */
 const SUPPORTED_KEYS = new Set([
-  "$defs",
-  "$ref",
   "anyOf",
   "default",
   "description",
@@ -36,7 +34,10 @@ const SUPPORTED_KEYS = new Set([
   "type",
 ]);
 
-/** The only `format` values Gemini acts on; it rejects the rest of JSON Schema's vocabulary. */
+/**
+ * The only `format` values Gemini documents. AI Studio's parser tolerates others,
+ * but Vertex is stricter, so an unhonored hint is not worth a hard failure there.
+ */
 const SUPPORTED_FORMATS: Record<string, ReadonlySet<string>> = {
   string: new Set(["enum", "date-time"]),
   number: new Set(["float", "double"]),
@@ -63,6 +64,10 @@ export function sanitizeGeminiTools<T>(tools: readonly T[]): T[] {
 }
 
 export function sanitizeGeminiSchema(schema: JsonSchema): JsonSchema {
+  return sanitizeNode(dereference(schema));
+}
+
+function sanitizeNode(schema: JsonSchema): JsonSchema {
   const merged = collapseAllOf(schema);
   const sanitized: JsonSchema = {};
 
@@ -111,11 +116,10 @@ export function sanitizeGeminiSchema(schema: JsonSchema): JsonSchema {
         }
         break;
       case "properties":
-      case "$defs":
-        if (isJsonSchema(value)) sanitized[key] = sanitizeProperties(value);
+        if (isJsonSchema(value)) sanitized.properties = sanitizeProperties(value);
         break;
       case "items":
-        if (isJsonSchema(value)) sanitized.items = sanitizeGeminiSchema(value);
+        if (isJsonSchema(value)) sanitized.items = sanitizeNode(value);
         break;
       default:
         if (SUPPORTED_KEYS.has(key)) sanitized[key] = value;
@@ -130,14 +134,14 @@ function sanitizeProperties(properties: JsonSchema): JsonSchema {
   return Object.fromEntries(
     Object.entries(properties).map(([name, value]) => [
       name,
-      isJsonSchema(value) ? sanitizeGeminiSchema(value) : value,
+      isJsonSchema(value) ? sanitizeNode(value) : value,
     ]),
   );
 }
 
 function sanitizeVariants(variants: unknown[]): unknown[] {
   return variants.map((variant) =>
-    isJsonSchema(variant) ? sanitizeGeminiSchema(variant) : variant,
+    isJsonSchema(variant) ? sanitizeNode(variant) : variant,
   );
 }
 
@@ -166,4 +170,41 @@ function collapseAllOf(schema: JsonSchema): JsonSchema {
   return allOf
     .filter(isJsonSchema)
     .reduce<JsonSchema>((merged, member) => ({ ...merged, ...collapseAllOf(member) }), base);
+}
+
+/**
+ * Gemini has no `$ref`/`$defs`, so a reference has to be inlined or the field it
+ * describes is dropped entirely. Recursion stops at a bare object, the most a
+ * self-referencing definition can say in a schema without references.
+ */
+function dereference(schema: JsonSchema): JsonSchema {
+  const definitions = isJsonSchema(schema.$defs)
+    ? schema.$defs
+    : isJsonSchema(schema.definitions)
+      ? schema.definitions
+      : {};
+
+  function resolve(node: unknown, seen: ReadonlySet<string>): unknown {
+    if (Array.isArray(node)) return node.map((item) => resolve(item, seen));
+    if (!isJsonSchema(node)) return node;
+
+    const ref = typeof node.$ref === "string" ? node.$ref : undefined;
+    const name = ref?.match(/^#\/(?:\$defs|definitions)\/(.+)$/)?.[1];
+    const definition = name === undefined ? undefined : definitions[name];
+    if (ref !== undefined && isJsonSchema(definition)) {
+      if (seen.has(ref)) return { type: "object" };
+      const { $ref: _ref, ...siblings } = node;
+      const resolved = resolve(definition, new Set([...seen, ref])) as JsonSchema;
+      return { ...resolved, ...siblings };
+    }
+
+    const result: JsonSchema = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "$defs" || key === "definitions") continue;
+      result[key] = resolve(value, seen);
+    }
+    return result;
+  }
+
+  return resolve(schema, new Set()) as JsonSchema;
 }

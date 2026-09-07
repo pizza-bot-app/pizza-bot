@@ -100,6 +100,49 @@ describe("Gemini tool schema compatibility", () => {
     });
   });
 
+  it("inlines the references Gemini has no field for", () => {
+    expect(
+      sanitizeGeminiSchema({
+        type: "object",
+        $defs: { Id: { type: "string", pattern: "^[a-z]+$" } },
+        properties: {
+          id: { $ref: "#/$defs/Id", description: "the id" },
+          ids: { type: "array", items: { $ref: "#/$defs/Id" } },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        id: { type: "string", pattern: "^[a-z]+$", description: "the id" },
+        ids: { type: "array", items: { type: "string", pattern: "^[a-z]+$" } },
+      },
+    });
+  });
+
+  it("degrades a self-referencing definition to a bare object", () => {
+    expect(
+      sanitizeGeminiSchema({
+        type: "object",
+        $defs: { Node: { type: "object", properties: { child: { $ref: "#/$defs/Node" } } } },
+        properties: { root: { $ref: "#/$defs/Node" } },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        root: { type: "object", properties: { child: { type: "object" } } },
+      },
+    });
+  });
+
+  it("drops a reference it cannot resolve rather than sending it", () => {
+    expect(
+      sanitizeGeminiSchema({
+        type: "object",
+        properties: { missing: { $ref: "#/$defs/Absent", description: "kept" } },
+      }),
+    ).toEqual({ type: "object", properties: { missing: { description: "kept" } } });
+  });
+
   it("sanitizes function declarations and leaves other Gemini tools untouched", () => {
     const tools = [
       { googleSearch: {} },
