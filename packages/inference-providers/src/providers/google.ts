@@ -14,6 +14,7 @@ import {
   convertGoogleChunksToEvents,
   prepareGoogleMessages,
 } from "./google-tool-call-fix.js";
+import { sanitizeGeminiTools } from "./google-schema-fix.js";
 import {
   enrichModelDescriptor,
   resolveModelsDevCatalog,
@@ -204,6 +205,12 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     class ThoughtSignatureSafeChatGoogle extends ChatGoogle {
       override get profile() {
         return withContextWindow(super.profile, descriptor?.contextWindow);
+      }
+
+      override invocationParams(options: this["ParsedCallOptions"]) {
+        const params = super.invocationParams(options);
+        if (!params.tools) return params;
+        return { ...params, tools: sanitizeGeminiTools(params.tools) };
       }
 
       override async _generate(
