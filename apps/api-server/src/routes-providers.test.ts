@@ -277,6 +277,28 @@ describe("provider routes", () => {
     expect(host.providerConfigs.getConfig("anthropic")?.values.apiKey).toBe("${ANTHROPIC_API_KEY}");
   });
 
+  it("saves a blank key for a custom OpenAI endpoint", async () => {
+    const res = await put("openai", {
+      method: "api-key",
+      values: { apiKey: "", baseUrl: "http://127.0.0.1:4599/v1" },
+    });
+
+    expect(res.status).toBe(200);
+    const openai = (await list()).find((p) => p.id === "openai")!;
+    expect(openai.config).toMatchObject({
+      method: "api-key",
+      values: { apiKey: { hasValue: false }, baseUrl: "http://127.0.0.1:4599/v1" },
+    });
+  });
+
+  it("still refuses a blank key without a custom endpoint", async () => {
+    const res = await put("openai", { method: "api-key", values: { apiKey: "", baseUrl: "" } });
+
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toContain("Base URL");
+    expect(host.providerConfigs.getConfig("openai")).toBeUndefined();
+  });
+
   it("the unchanged sentinel keeps the stored secret", async () => {
     await put("anthropic", { method: "api-key", values: { apiKey: "${ANTHROPIC_API_KEY}" } });
     await put("anthropic", { method: "api-key", values: { apiKey: "__unchanged__" } });
