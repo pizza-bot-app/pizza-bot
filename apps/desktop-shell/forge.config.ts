@@ -75,6 +75,10 @@ if (process.platform === "win32") {
 }
 
 const iconsDir = path.join(repoRoot, "assets", "icons");
+
+const LINUX_DESCRIPTION = "An inbox for asynchronous AI work";
+const LINUX_PRODUCT_DESCRIPTION =
+  "An inbox for asynchronous AI work, built on DeepAgents and LangGraph.";
 // Forge appends the per-platform extension, so these stay extensionless. macOS
 // uses its own variant, padded for the rounded-rect mask Apple applies.
 const appIcon = path.join(iconsDir, process.platform === "darwin" ? "icon-mac" : "icon");
@@ -149,11 +153,16 @@ const config: ForgeConfig = {
     }),
     new MakerZIP({}, ["darwin"]),
     new MakerDMG({ format: "ULFO", icon: path.join(iconsDir, "icon-mac.icns") }, ["darwin"]),
+    // Both Linux makers describe the app to a package manager. Left unset they
+    // inherit this workspace's package.json description, which documents the
+    // Electron main process for contributors rather than the app for users.
     new MakerRpm({
       options: {
         name: "pizza-bot-oss",
         bin: "pizza-bot-oss",
         icon: path.join(iconsDir, "icon.png"),
+        description: LINUX_DESCRIPTION,
+        productDescription: LINUX_PRODUCT_DESCRIPTION,
       },
     }),
     new MakerDeb({
@@ -161,6 +170,8 @@ const config: ForgeConfig = {
         name: "pizza-bot-oss",
         bin: "pizza-bot-oss",
         icon: path.join(iconsDir, "icon.png"),
+        description: LINUX_DESCRIPTION,
+        productDescription: LINUX_PRODUCT_DESCRIPTION,
       },
     }),
   ],
