@@ -74,14 +74,23 @@ cross-package hazard. Type-checking is still done by `tsc --noEmit` (the
 
 ## Packaging prerequisites (important)
 
-- **Use Node 24 to package** (`npm run make`/`package`). The repo requires Node
-  `>=24`; Node 26 is affected by an Electron Forge extraction hang
+- **Use Node 24 or 25 to package** (`npm run make`/`package`). The repo requires
+  Node `>=24`; Node 26 and newer are affected by an Electron Forge extraction hang
   ([electron/forge#4277]). On
   macOS the root
   `npm run desktop:package` / `desktop:make` scripts use Homebrew's `node@24`
   binary automatically. On other platforms they fail early unless the selected
   runtime is Node 24, so prefer those scripts. To invoke directly:
   `PATH="/opt/homebrew/opt/node@24/bin:$PATH" npm run make -w @pizza-bot/desktop-shell`.
+- **Linux packaging needs `dpkg` and `fakeroot` for deb, `rpmbuild` for rpm.**
+  Forge checks a maker's external binaries while resolving targets, so a host
+  missing one fails before packaging starts, naming the binary. Debian/Ubuntu:
+  `sudo apt install dpkg fakeroot rpm`. To build only what a host can produce,
+  pass the maker's **short** name — `npm run desktop:make -- --targets deb`.
+  Forge matches `--targets` against `maker.name` (`deb`, `rpm`, `zip`, `dmg`,
+  `squirrel`), and an unmatched value is treated as a fresh maker with default
+  options rather than an error, which silently discards this repo's `bin` and
+  `name` settings.
 - **No compiler toolchain required to package.** `better-sqlite3` (v13+) runs on
   N-API and bundles prebuilt binaries for every packaged platform, so packaging does
   not compile natives — it just stages the module into `dist-server/node_modules`.

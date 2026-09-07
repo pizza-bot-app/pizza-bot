@@ -25,9 +25,15 @@ if (nodeExecPath === brewNode) {
 const selectedVersion = spawnSync(nodeExecPath, ["--version"], {
   encoding: "utf8",
 }).stdout?.trim();
-if (!/^v24\./.test(selectedVersion ?? "")) {
+// Node 26 hangs extracting Electron inside Forge (electron/forge#4277); the
+// repo floor is 24. Verified: 24 and 25 both package cleanly.
+const selectedMajor = Number(/^v(\d+)\./.exec(selectedVersion ?? "")?.[1]);
+if (!(selectedMajor >= 24 && selectedMajor < 26)) {
   console.error(
-    `desktop packaging requires Node 24 (selected ${selectedVersion || nodeExecPath})`,
+    `desktop packaging requires Node 24 or 25 (selected ${selectedVersion || nodeExecPath}).`,
+  );
+  console.error(
+    "Node 26 and newer hang extracting Electron: https://github.com/electron/forge/issues/4277",
   );
   process.exit(1);
 }
