@@ -1,0 +1,51 @@
+name: Build on demand
+
+# Produces installers for a branch without publishing anything: the artifacts are
+# attached to the run and expire. Use it to hand someone a build to test.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-on-demand-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+    steps:
+      # The build number is the commit count, so the full history is required.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - id: compute
+        shell: bash
+        run: |
+          version="$(node scripts/build-version.mjs)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building $version from ${GITHUB_REF_NAME} (${GITHUB_SHA:0:7})" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+  package:
+    needs: version
+    permissions:
+      contents: read
+    uses: ./.github/workflows/package.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      # An environment with no secrets in it, so these builds cannot pick up a
+      # certificate even by accident. GitHub creates it on first use.
+      environment: unsigned
+      sign-macos: false
+      sign-windows: false
+      stamp-version: true

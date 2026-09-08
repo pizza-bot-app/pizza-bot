@@ -1,12 +1,14 @@
 version: 2
 
-# Grouped and monthly on purpose: a small team wants a handful of reviewable PRs,
-# not one per dependency. Security advisories arrive separately and immediately
-# through Dependabot alerts, which is what `npm audit` in CI would otherwise
-# catch only after it starts failing.
+# Grouped and monthly on purpose: a small team wants a handful of reviewable pull
+# requests, not one per dependency. Security advisories still arrive immediately
+# through Dependabot alerts.
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # The composite action pins its own actions and is not covered by `/`.
+    directories:
+      - /
+      - /.github/actions/backend-image
     schedule:
       interval: monthly
     groups:

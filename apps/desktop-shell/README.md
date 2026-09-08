@@ -126,8 +126,9 @@ When launching only this workspace, run `npm run dev -w @pizza-bot/web` (Vite on
      password), `APPLE_TEAM_ID`
    - Windows signing: `WINDOWS_CERTIFICATE_FILE` (a PFX path) and
      `WINDOWS_CERTIFICATE_PASSWORD`
-2. Bump the workspace versions together (for example,
-   `npm version 1.0.1 --workspaces --include-workspace-root --no-git-tag-version`).
+2. Bump the workspace versions and both lockfiles together with
+   `npm run release:prepare -- 1.0.1`. A release tag is rejected unless all of
+   them agree, which a bare `npm version` does not achieve.
 3. Run `npm run desktop:make` from the repository root on each target OS.
 
 Signing and notarization are gated independently. When their credentials are
@@ -139,12 +140,13 @@ ticket to the `.app` before the makers run, so the DMG and ZIP carry it too;
 verify the result with `spctl -a -vvv --type install <path>.app` (expect
 `source=Notarized Developer ID`).
 
-Tag-driven draft release publishing is configured in
-[`release.yml`](../../.github/workflows/release.yml); see
+A pushed `v*` tag drives [`release.yml`](../../.github/workflows/release.yml),
+which packages and verifies signatures through
+[`package.yml`](../../.github/workflows/package.yml); see
 [Contributing](../../CONTRIBUTING.md#releases) for signing secrets and the
 release process. Automatic updates are not configured, so installers must not be
-presented as self-updating. Automated releases require Authenticode signing and
-verify the installer signature and timestamp before uploading it.
+presented as self-updating. A release requires Authenticode signing and verifies
+the installer signature and timestamp before uploading it.
 
 ## Windows installer lifecycle
 

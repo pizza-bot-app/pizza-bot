@@ -32,6 +32,13 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 - **Grant local access explicitly.** Add individual read-only or writable folders
   under **Settings > Files**; Pizza Bot receives no default home-directory access.
 
+## Download
+
+Installers for macOS (Intel and Apple silicon), Windows, and Linux (x64 and
+arm64) are attached to every [release](../../releases), with a `SHA256SUMS` to
+check a download against. The macOS builds are signed and notarized; the Linux
+packages are not signed, so verify them against the checksums.
+
 ## Quick start
 
 Node.js 24 or newer is required.
