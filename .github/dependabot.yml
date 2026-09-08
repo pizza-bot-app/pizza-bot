@@ -1,0 +1,39 @@
+version: 2
+
+# Grouped and monthly on purpose: a small team wants a handful of reviewable PRs,
+# not one per dependency. Security advisories arrive separately and immediately
+# through Dependabot alerts, which is what `npm audit` in CI would otherwise
+# catch only after it starts failing.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      # Electron and Forge move together; a partial bump usually fails to package.
+      electron:
+        patterns: ["electron", "@electron/*", "@electron-forge/*"]
+      langchain:
+        patterns: ["@langchain/*", "deepagents", "langchain"]
+      dev-dependencies:
+        dependency-type: development
+      production:
+        dependency-type: production
+
+  - package-ecosystem: npm
+    directory: /plugins
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      plugins:
+        patterns: ["*"]
