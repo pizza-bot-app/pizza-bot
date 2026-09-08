@@ -1,4 +1,6 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.7-labs
+# The labs frontend is required for `COPY --parents`, below. A parser directive is
+# ignored unless it is the very first line, so keep this comment beneath it.
 
 FROM node:24-bookworm-slim AS build
 WORKDIR /src
@@ -7,8 +9,17 @@ RUN apt-get update \
     && apt-get install --no-install-recommends --yes g++ make python3 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY . .
+# Install from the manifests alone, so a source edit leaves this layer cached.
+# `--parents` keeps each manifest's directory, which npm workspaces need to
+# resolve the tree. It does not expand braces: `{apps,packages}/*/package.json`
+# matches nothing, silently.
+COPY --parents package.json package-lock.json \
+    plugins/package.json plugins/package-lock.json ./
+COPY --parents packages/*/package.json apps/*/package.json \
+    plugins/*/package.json tests/*/package.json ./
 RUN npm ci
+
+COPY . .
 RUN npm run backend:bundle
 # The browser app ships in the same image so it and the API share one origin.
 RUN TURBO_TELEMETRY_DISABLED=1 npx turbo run build --filter=@pizza-bot/web
