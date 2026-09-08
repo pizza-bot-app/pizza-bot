@@ -101,7 +101,7 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs for pushes to
 
 | Job | Covers | Reproduce locally |
 | --- | --- | --- |
-| `code` | compilation, types, lint, tests, advisories | `npm run build && npm run typecheck && npm run lint && npm test && npm audit --omit=dev --audit-level=high` |
+| `code` | compilation, types, lint, tests | `npm run build && npm run typecheck && npm run lint && npm test` |
 | `code-windows` | the same build, types, and tests on Windows | as above, minus lint and audit |
 | `backend` | the standalone artifact of [STANDALONE_BACKEND.md](docs/STANDALONE_BACKEND.md) | `npm run backend:bundle && npm run backend:smoke` |
 | `image` | both container images and their three smokes | see [`backend-image`](.github/actions/backend-image/action.yml); needs BuildKit for `COPY --parents` |
@@ -124,6 +124,15 @@ needs no certificates.
 `code`, `code-windows`, `backend`, `image`, and `desktop` are required by branch
 protection. Renaming one means updating that setting in the same change, or merges
 block on a check that no longer reports.
+
+Dependency advisories live in [`audit.yml`](.github/workflows/audit.yml) rather
+than in `code`, because an advisory is published against dependencies already
+pinned here — a code change cannot cause one, so it should not be blocked by one.
+It runs weekly, on demand, and on a pull request only when that pull request
+touches a manifest or lockfile, which is the case where the change itself is the
+cause. `code-windows` retries its test step once: nested `cmd.exe` processes
+intermittently die with `STATUS_DLL_INIT_FAILED`, and a real failure still fails
+both attempts.
 
 For a tight loop while iterating, run one workspace:
 

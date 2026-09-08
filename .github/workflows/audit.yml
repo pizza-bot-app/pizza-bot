@@ -1,0 +1,44 @@
+name: Audit
+
+# Advisories are published against dependencies this repository already pins, so
+# a code change cannot be responsible for one and should not be blocked by it.
+# This runs weekly to surface new advisories, and on a pull request only when it
+# touches a manifest or lockfile — the case where the change itself is the cause.
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  pull_request:
+    paths:
+      - package.json
+      - package-lock.json
+      - plugins/package.json
+      - plugins/package-lock.json
+      - "*/*/package.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Production only: a vulnerability reachable from a build tool is not
+      # shipped to anyone running the app.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
