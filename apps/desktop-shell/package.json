@@ -36,7 +36,7 @@
     "@electron-forge/maker-squirrel": "^8.0.0-alpha.10",
     "@electron-forge/maker-zip": "^8.0.0-alpha.10",
     "@electron-forge/plugin-auto-unpack-natives": "^8.0.0-alpha.10",
-    "electron": "^43.3.0",
+    "electron": "^44.2.0",
     "esbuild": "^0.28.2"
   }
 }
