@@ -15,8 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  code:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -47,50 +48,14 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Bundle standalone backend
-        run: npm run backend:bundle
-
-      - name: Smoke standalone backend
-        run: npm run backend:smoke
-
-      # A clean image build catches build-stage dependencies the artifact smoke cannot.
-      - name: Build backend container
-        run: docker build --tag pizza-bot-backend:ci .
-
-      - name: Smoke backend container
-        run: >-
-          docker run --rm
-          --volume "$PWD/scripts:/smoke:ro"
-          pizza-bot-backend:ci
-          node /smoke/smoke-remote-backend.mjs
-          --expect-playwright-unavailable
-          /opt/pizza-bot
-
-      # The published image serves the browser app beside the API on one origin.
-      - name: Smoke browser app in backend container
-        run: scripts/smoke-container.sh pizza-bot-backend:ci
-
-      - name: Build browser-enabled backend container
-        run: >-
-          docker build
-          --target runtime-with-browser
-          --tag pizza-bot-backend-browser:ci
-          .
-
-      - name: Smoke Playwright in browser-enabled container
-        run: >-
-          docker run --rm
-          --volume "$PWD/scripts:/smoke:ro"
-          pizza-bot-backend-browser:ci
-          node /smoke/smoke-playwright-mcp.mjs /opt/pizza-bot
-
-      # Keep the network-dependent registry check last so it cannot hide
-      # deterministic code, test, or build failures.
+      # Last, so a network-dependent registry check cannot hide a deterministic
+      # code, test, or build failure.
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
-  windows:
+  code-windows:
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -110,3 +75,108 @@ jobs:
 
       - name: Test
         run: npm test
+
+  # The only coverage for running the artifact on a host, which
+  # docs/STANDALONE_BACKEND.md documents as supported; the image smokes exercise
+  # the same bundle inside a container.
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Bundle standalone backend
+        run: npm run backend:bundle
+
+      - name: Smoke standalone backend
+        run: npm run backend:smoke
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/backend-image
+        with:
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
+
+  # Releases package off `main`, so a broken forge.config.ts would otherwise
+  # merge green and surface only when someone cuts one. `make` rather than
+  # `package`: it is the command a release runs, and it exercises the deb and rpm
+  # makers a release depends on.
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes fakeroot rpm
+
+      - name: Install
+        run: npm ci
+
+      # Proves the derived version reaches the artifact, not just that Forge runs.
+      - name: Stamp version
+        run: node scripts/build-version.mjs --write
+
+      - name: Build packages
+        run: npm run desktop:make -- --arch x64
+
+      - name: Verify packaged version and payload
+        shell: bash
+        run: |
+          expected="$(node -p "require('./apps/desktop-shell/package.json').version")"
+          root="$(find apps/desktop-shell/out -maxdepth 1 -type d -name 'Pizza Bot OSS-*' -print -quit)"
+          if [[ -z "$root" ]]; then
+            echo "::error::Forge did not produce a packaged application"
+            exit 1
+          fi
+
+          # `dist` is the browser app; extraResource copies each entry by basename.
+          resources="$root/resources"
+          for required in dist dist-server plugins skills \
+            LICENSE NOTICE THIRD_PARTY_LICENSES.txt; do
+            if [[ ! -e "$resources/$required" ]]; then
+              echo "::error::Packaged app is missing resources/$required"
+              exit 1
+            fi
+          done
+
+          # The manifest lives inside the asar, so read it the way Electron does.
+          # @electron/asar ships as a dependency of @electron/packager.
+          actual="$(node -e "
+            const asar = require('@electron/asar');
+            const manifest = asar.extractFile(process.argv[1], 'package.json');
+            console.log(JSON.parse(manifest.toString('utf8')).version);
+          " "$resources/app.asar")"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error::Packaged version is $actual, expected $expected"
+            exit 1
+          fi
+
+          for kind in deb rpm; do
+            if [[ -z "$(find apps/desktop-shell/out/make -type f -name "*.$kind" -print -quit)" ]]; then
+              echo "::error::Forge did not produce a .$kind package"
+              exit 1
+            fi
+          done
+          echo "packaged $expected with every expected resource, deb, and rpm"

@@ -359,13 +359,21 @@ docker compose up --detach
 
 ### Published images
 
-[`publish-image.yml`](../.github/workflows/publish-image.yml) builds the
-`runtime` target for `linux/amd64`, smokes it with
-[`smoke-container.sh`](../scripts/smoke-container.sh), and pushes to
-`ghcr.io/<owner>/<repo>` for pushes to `main` and for `v*` tags. It publishes
-`latest`, `sha-<commit>`, and the release version. The package inherits the
-repository's visibility, so a private repository needs registry credentials
-wherever the image is pulled:
+The [`backend-image`](../.github/actions/backend-image/action.yml) action builds
+the `runtime` target for
+`linux/amd64` and smokes it with
+[`smoke-container.sh`](../scripts/smoke-container.sh). CI runs it on every pull
+request without pushing; a `v*` tag release runs it again and pushes to
+`ghcr.io/<owner>/<repo>` as `latest`, the release version, `<major>.<minor>`, and
+`sha-<commit>`.
+
+Only a release publishes, so `latest` tracks releases rather than the tip of
+`main`. To run unreleased code, build the image from a checkout. Note that tags
+pushed before this policy took effect came from `main`, so `latest` points at an
+unreleased build until the first `v*` release moves it.
+
+The package inherits the repository's visibility, so a private repository needs
+registry credentials wherever the image is pulled:
 
 ```bash
 kubectl create secret docker-registry ghcr \

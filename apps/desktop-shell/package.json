@@ -3,6 +3,7 @@
   "productName": "Pizza Bot OSS",
   "version": "1.0.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist/main.js",
   "description": "Electron main process: sidecar supervisor (port negotiation, health checks, restart, graceful shutdown) + window. Talks to the sidecar over HTTP/SSE only.",
