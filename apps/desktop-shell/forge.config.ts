@@ -179,17 +179,20 @@ const config: ForgeConfig = {
   plugins: [new AutoUnpackNativesPlugin({})],
 
   hooks: {
-    generateAssets: async () => {
+    generateAssets: async (_config, platform, arch) => {
       console.log("[forge] staging plugins -> dist-plugins/plugins");
       execFileSync("node", [path.join(shellRoot, "scripts", "stage-plugins.mjs")], {
         stdio: "inherit",
         cwd: repoRoot,
       });
-      console.log("[forge] bundling api-server -> dist-server/index.js");
-      execFileSync("node", [path.join(shellRoot, "scripts", "bundle-server.mjs")], {
-        stdio: "inherit",
-        cwd: repoRoot,
-      });
+      // The target is forwarded so the sidecar carries only its own
+      // better-sqlite3 prebuild; see bundle-server.mjs for why that matters.
+      console.log(`[forge] bundling api-server -> dist-server/index.js (${platform}-${arch})`);
+      execFileSync(
+        "node",
+        [path.join(shellRoot, "scripts", "bundle-server.mjs"), platform, arch],
+        { stdio: "inherit", cwd: repoRoot },
+      );
       // Build through the root script, not `-w <pkg>`: a per-workspace build
       // skips turbo's dependency graph, so the renderer would compile against
       // whatever stale `dist/` its workspace deps happen to have on disk.
