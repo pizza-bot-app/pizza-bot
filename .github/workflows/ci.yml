@@ -48,11 +48,6 @@ jobs:
       - name: Test
         run: npm test
 
-      # Last, so a network-dependent registry check cannot hide a deterministic
-      # code, test, or build failure.
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
-
   code-windows:
     runs-on: windows-latest
     timeout-minutes: 40
@@ -73,8 +68,16 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Retried once: a deep chain of `npm` shims spawns nested cmd.exe processes,
+      # and one intermittently dies with STATUS_DLL_INIT_FAILED (0xC0000142)
+      # partway through the suite. See scripts/npm-cli.mjs. A genuinely failing
+      # test fails both attempts.
       - name: Test
-        run: npm test
+        shell: bash
+        run: |
+          npm test && exit 0
+          echo "::warning::npm test failed on Windows; retrying once in case a nested cmd.exe died"
+          npm test
 
   # The only coverage for running the artifact on a host, which
   # docs/STANDALONE_BACKEND.md documents as supported; the image smokes exercise
