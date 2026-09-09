@@ -18,12 +18,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: docker/setup-buildx-action@v3
+    - uses: docker/setup-buildx-action@v4
 
     # Loading the candidate locally means the smokes below and anything the
     # caller pushes resolve the same layers.
     - name: Build backend image
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: .
         target: runtime
@@ -50,7 +50,7 @@ runs:
     # Not published: chromium roughly doubles the image. It is built here so a
     # change cannot break it unnoticed.
     - name: Build browser-enabled image
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: .
         target: runtime-with-browser

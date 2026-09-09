@@ -62,11 +62,11 @@ jobs:
       APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -162,7 +162,7 @@ jobs:
           cp "$dmg_path" "release-assets/pizza-bot-oss-${VERSION}-macos-${ARCH}.dmg"
           cp "$zip_path" "release-assets/pizza-bot-oss-${VERSION}-macos-${ARCH}.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-macos-${{ matrix.arch }}
           path: release-assets/*
@@ -183,11 +183,11 @@ jobs:
     env:
       WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -286,7 +286,7 @@ jobs:
           Copy-Item $setup[0].FullName `
             "release-assets/pizza-bot-oss-$env:VERSION-windows-x64-setup.exe"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-windows-x64
           path: release-assets/*
@@ -316,11 +316,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -356,7 +356,7 @@ jobs:
           cp "$deb_path" "release-assets/pizza-bot-oss-${VERSION}-linux-${ARCH}.deb"
           cp "$rpm_path" "release-assets/pizza-bot-oss-${VERSION}-linux-${ARCH}.rpm"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-linux-${{ matrix.arch }}
           path: release-assets/*
