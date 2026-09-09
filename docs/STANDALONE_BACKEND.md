@@ -349,49 +349,48 @@ up first. Automations stored there run as soon as the server starts.
 
 [`docker-compose.yml`](../docker-compose.yml) runs the same image with a named
 data volume and a loopback-only published port, reading provider credentials
-from an optional `.env` beside it. Pass `--build` so Compose builds from this
-checkout instead of resolving the `image:` reference from a registry:
+from an optional `.env` beside it. It pulls the published image, which is
+`linux/amd64` only:
 
 ```bash
 PIZZA_API_TOKEN="$(openssl rand -hex 32)" \
 PIZZA_ALLOWED_ORIGINS=https://pizza.example.com \
-docker compose up --detach --build
+docker compose up --detach
 ```
 
-Rebuild after pulling with the same `--build`; without it Compose reuses the
-image it built earlier.
+Add `--build` on an arm64 host, or to run code that has not been released. That
+builds from this checkout and tags the result as the `image:` reference, so no pull
+happens; repeat it after every `git pull`, or Compose reuses the image it built
+before.
 
 ### Registry images
 
-**Build the image yourself — the published one is not available.** A release
-pushes `ghcr.io/pizza-bot-app/pizza-bot`, but that package is not currently
-available publicly, so pulling it anonymously fails with `403`. Everything
-needed to build it is in this repository; [Docker](#docker) above is the supported
-path, and it needs no registry at all.
+A release publishes `ghcr.io/pizza-bot-app/pizza-bot`, tagged `latest`, the release
+version, `<major>.<minor>`, and `sha-<commit>`. Only a release publishes, so
+`latest` is the newest release rather than the tip of `main`:
 
-A container registry is not required to deploy. Build once, then either run the
-image on that host or push it to a registry you control:
+```bash
+docker pull ghcr.io/pizza-bot-app/pizza-bot:1.0.0
+```
+
+Pin a version for a deployment. `latest` moves under you on the next release, and
+nothing coordinates that with a restart.
+
+**The image is `linux/amd64` only.** An arm64 host needs
+`--platform linux/amd64`, which runs it emulated and slower, or should build the
+image natively instead — [Docker](#docker) above builds for the host architecture
+and needs no registry.
+
+Build from a checkout to run code that has not been released, for an architecture
+the registry does not carry, or to keep the image in a registry you control:
 
 ```bash
 docker build -t registry.example.com/pizza-bot:1.0.0 .
 docker push registry.example.com/pizza-bot:1.0.0
 ```
 
-Tag it with the release version you built from — `git describe --tags` — so a
-deployed container can be traced back to a commit.
-
-If you do have access to the published package, a release pushes `latest`, the
-release version, `<major>.<minor>`, and `sha-<commit>`; only a release publishes,
-so `latest` tracks releases rather than the tip of `main`. Pulling it needs
-credentials wherever the image is used:
-
-```bash
-kubectl create secret docker-registry ghcr \
-  --namespace pizza-bot \
-  --docker-server=ghcr.io \
-  --docker-username="<github-user>" \
-  --docker-password="<token-with-read:packages>"
-```
+Tag it with the release you built from — `git describe --tags` — so a deployed
+container traces back to a commit.
 
 ### Kubernetes
 
