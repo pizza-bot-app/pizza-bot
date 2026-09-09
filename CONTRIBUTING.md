@@ -210,10 +210,9 @@ order:
    maintainer to inspect and publish.
 3. the [`backend-image`](.github/actions/backend-image/action.yml) action again,
    then a push of `ghcr.io/pizza-bot-app/pizza-bot` as `latest`, `1.1.0`, `1.1`,
-   and `sha-<sha>`. That package is not currently available publicly, so it is not
-   pullable without credentials;
-   [STANDALONE_BACKEND.md](docs/STANDALONE_BACKEND.md#registry-images) points users
-   at building the image instead.
+   and `sha-<sha>`. The package is public and needs no credentials to pull, but it
+   is `linux/amd64` only; see
+   [STANDALONE_BACKEND.md](docs/STANDALONE_BACKEND.md#registry-images).
 
 The registry push is last because it is the one step that cannot be undone:
 nothing reaches GHCR until signing has succeeded, its reviewer has approved, and
