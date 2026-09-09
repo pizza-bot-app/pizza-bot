@@ -349,31 +349,41 @@ up first. Automations stored there run as soon as the server starts.
 
 [`docker-compose.yml`](../docker-compose.yml) runs the same image with a named
 data volume and a loopback-only published port, reading provider credentials
-from an optional `.env` beside it:
+from an optional `.env` beside it. Pass `--build` so Compose builds from this
+checkout instead of resolving the `image:` reference from a registry:
 
 ```bash
 PIZZA_API_TOKEN="$(openssl rand -hex 32)" \
 PIZZA_ALLOWED_ORIGINS=https://pizza.example.com \
-docker compose up --detach
+docker compose up --detach --build
 ```
 
-### Published images
+Rebuild after pulling with the same `--build`; without it Compose reuses the
+image it built earlier.
 
-The [`backend-image`](../.github/actions/backend-image/action.yml) action builds
-the `runtime` target for
-`linux/amd64` and smokes it with
-[`smoke-container.sh`](../scripts/smoke-container.sh). CI runs it on every pull
-request without pushing; a `v*` tag release runs it again and pushes to
-`ghcr.io/<owner>/<repo>` as `latest`, the release version, `<major>.<minor>`, and
-`sha-<commit>`.
+### Registry images
 
-Only a release publishes, so `latest` tracks releases rather than the tip of
-`main`. To run unreleased code, build the image from a checkout. Note that tags
-pushed before this policy took effect came from `main`, so `latest` points at an
-unreleased build until the first `v*` release moves it.
+**Build the image yourself — the published one is not available.** A release
+pushes `ghcr.io/pizza-bot-app/pizza-bot`, but that package is not currently
+available publicly, so pulling it anonymously fails with `403`. Everything
+needed to build it is in this repository; [Docker](#docker) above is the supported
+path, and it needs no registry at all.
 
-The package inherits the repository's visibility, so a private repository needs
-registry credentials wherever the image is pulled:
+A container registry is not required to deploy. Build once, then either run the
+image on that host or push it to a registry you control:
+
+```bash
+docker build -t registry.example.com/pizza-bot:1.0.0 .
+docker push registry.example.com/pizza-bot:1.0.0
+```
+
+Tag it with the release version you built from — `git describe --tags` — so a
+deployed container can be traced back to a commit.
+
+If you do have access to the published package, a release pushes `latest`, the
+release version, `<major>.<minor>`, and `sha-<commit>`; only a release publishes,
+so `latest` tracks releases rather than the tip of `main`. Pulling it needs
+credentials wherever the image is used:
 
 ```bash
 kubectl create secret docker-registry ghcr \
@@ -385,7 +395,8 @@ kubectl create secret docker-registry ghcr \
 
 ### Kubernetes
 
-Beyond the image reference and its pull secret, a deployment needs:
+Beyond the image reference — and a pull secret, if it comes from a registry that
+needs one — a deployment needs:
 
 - `PIZZA_HOST=0.0.0.0`, so the listener accepts cluster traffic. That binding
   requires `PIZZA_API_TOKEN` of at least 32 characters and
