@@ -1818,6 +1818,7 @@ export class AgentHost {
         dependencies,
         getPersonaAddendum: () => host.settings.get().customPromptAddendum,
         getMaxToolCalls: () => host.settings.get().maxToolCalls,
+        getMaxSkillToolCalls: () => host.settings.get().maxSkillToolCalls,
       });
       await graphs.initialize(model);
       return graphs;

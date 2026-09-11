@@ -39,6 +39,8 @@ export interface UseSettingsResult {
   agent: {
     maxToolCalls: number;
     setMaxToolCalls: (value: number) => void;
+    maxSkillToolCalls: number;
+    setMaxSkillToolCalls: (value: number) => void;
   };
 }
 
@@ -169,6 +171,21 @@ export function useSettings(client: ApiClient): UseSettingsResult {
     [client, settings.maxToolCalls, toast],
   );
 
+  const setMaxSkillToolCalls = useCallback(
+    (value: number) => {
+      const previous = settings.maxSkillToolCalls;
+      setSettings((s) => ({ ...s, maxSkillToolCalls: value }));
+      void client
+        .updateSettings({ maxSkillToolCalls: value })
+        .then((saved) => setSettings(saved))
+        .catch((err) => {
+          setSettings((s) => ({ ...s, maxSkillToolCalls: previous }));
+          toast({ title: "Couldn't save skill tool call limit", description: errorMessage(err), tone: "error" });
+        });
+    },
+    [client, settings.maxSkillToolCalls, toast],
+  );
+
   const savedPersonaRef = useRef(settings.customPromptAddendum);
   savedPersonaRef.current = settings.customPromptAddendum;
   const savePersona = useCallback(() => {
@@ -200,6 +217,8 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       agent: {
         maxToolCalls: settings.maxToolCalls,
         setMaxToolCalls,
+        maxSkillToolCalls: settings.maxSkillToolCalls,
+        setMaxSkillToolCalls,
       },
     }),
     [
@@ -207,6 +226,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       settings.enableMemories,
       settings.enableAutomations,
       settings.maxToolCalls,
+      settings.maxSkillToolCalls,
       resolved,
       setPreference,
       personaDraft,
@@ -215,6 +235,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       savePersona,
       setFlag,
       setMaxToolCalls,
+      setMaxSkillToolCalls,
     ],
   );
 }

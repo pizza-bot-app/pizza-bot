@@ -224,7 +224,7 @@ export async function resolveSkillSubagents(
   const logger = deps.logger;
   const limits = {
     ...AGENT_RUN_LIMITS.subagent,
-    toolCalls: deps.maxToolCalls ?? AGENT_RUN_LIMITS.orchestrator.toolCalls,
+    toolCalls: deps.maxSkillToolCalls ?? AGENT_RUN_LIMITS.subagent.toolCalls,
   };
   const entries = [...skills.values()];
   const resolved = await Promise.all(entries.map(async (entry) => {

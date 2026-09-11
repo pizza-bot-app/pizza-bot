@@ -59,7 +59,8 @@ describe("DEFAULT_SETTINGS", () => {
     expect(DEFAULT_SETTINGS.enableAutomations).toBe(false);
   });
 
-  it("defaults the tool-call limit to 40", () => {
+  it("defaults the agent and skill tool-call limits", () => {
     expect(DEFAULT_SETTINGS.maxToolCalls).toBe(40);
+    expect(DEFAULT_SETTINGS.maxSkillToolCalls).toBe(80);
   });
 });

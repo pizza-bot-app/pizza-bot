@@ -53,6 +53,8 @@ export interface RuntimeDeps {
   attachmentResolver?: AttachmentResolver;
   /** Per-run root-agent tool-call limit; -1 disables the limiter. */
   maxToolCalls?: number;
+  /** Per-run skill-agent tool-call limit; -1 disables the limiter. */
+  maxSkillToolCalls?: number;
   model?: BaseChatModel;
   logger?: Logger;
 }

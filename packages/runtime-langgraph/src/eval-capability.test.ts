@@ -123,7 +123,21 @@ describe("Pizza Bot graph assembly", () => {
       .not.toContain("ToolCallLimitMiddleware");
   });
 
-  it("omits the tool-call limit for Pizza Bot and skill agents when unlimited", async () => {
+  it("uses the configured skill-agent limit and omits both limiters when unlimited", async () => {
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      checkpointer: {},
+      skills: mailSkill(),
+      tools: { "mcp:outlook:send": { name: "outlook__send" } },
+      catalog: { outlook: ["send"] },
+      maxSkillToolCalls: 73,
+    });
+    expect(mocks.toolCallLimitMiddleware.mock.calls).toEqual([
+      [{ runLimit: 40, exitBehavior: "error" }],
+      [{ runLimit: 73, exitBehavior: "error" }],
+    ]);
+
+    mocks.toolCallLimitMiddleware.mockClear();
     await createPizzaBotAgent("prompt", {
       model: { modelId: "test" } as never,
       checkpointer: {},
@@ -131,12 +145,13 @@ describe("Pizza Bot graph assembly", () => {
       tools: { "mcp:outlook:send": { name: "outlook__send" } },
       catalog: { outlook: ["send"] },
       maxToolCalls: -1,
+      maxSkillToolCalls: -1,
     });
 
-    const rootParams = mocks.createDeepAgent.mock.calls[0]![0] as {
+    const rootParams = mocks.createDeepAgent.mock.calls.at(-1)![0] as {
       middleware: Array<{ name?: string }>;
     };
-    const workerParams = mocks.createSubAgent.mock.calls[0]![0] as {
+    const workerParams = mocks.createSubAgent.mock.calls.at(-1)![0] as {
       middleware: Array<{ name?: string }>;
     };
     expect(mocks.toolCallLimitMiddleware).not.toHaveBeenCalled();
@@ -177,7 +192,7 @@ describe("Pizza Bot graph assembly", () => {
     ]);
     expect(mocks.toolCallLimitMiddleware.mock.calls).toEqual([
       [{ runLimit: 40, exitBehavior: "error" }],
-      [{ runLimit: 40, exitBehavior: "error" }],
+      [{ runLimit: 80, exitBehavior: "error" }],
     ]);
     const params = mocks.createDeepAgent.mock.calls[0]![0] as {
       subagents: Array<{ runnable: unknown }>;

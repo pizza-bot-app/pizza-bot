@@ -48,6 +48,8 @@ export interface SettingsModuleProps {
   onFeatureToggle: (key: "enableMemories" | "enableAutomations", value: boolean) => void;
   maxToolCalls: number;
   onMaxToolCallsChange: (value: number) => void;
+  maxSkillToolCalls: number;
+  onMaxSkillToolCallsChange: (value: number) => void;
   notificationsAvailable: boolean;
   notifyOnRunCompletion: boolean;
   notifyOnActionRequired: boolean;
@@ -84,6 +86,84 @@ function positiveToolCallLimit(value: string): number | undefined {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+interface ToolCallLimitSettingProps {
+  label: string;
+  hint: string;
+  noLimitHint: string;
+  value: number;
+  defaultValue: number;
+  onChange: (value: number) => void;
+}
+
+function ToolCallLimitSetting({
+  label,
+  hint,
+  noLimitHint,
+  value,
+  defaultValue,
+  onChange,
+}: ToolCallLimitSettingProps) {
+  const [draft, setDraft] = useState(String(value > 0 ? value : defaultValue));
+  const noLimit = value === -1;
+
+  useEffect(() => {
+    if (value > 0) setDraft(String(value));
+  }, [value]);
+
+  const save = () => {
+    const next = positiveToolCallLimit(draft);
+    if (next !== undefined) {
+      onChange(next);
+      return;
+    }
+    setDraft(String(defaultValue));
+  };
+
+  const toggleNoLimit = () => {
+    if (noLimit) {
+      const next = positiveToolCallLimit(draft) ?? defaultValue;
+      setDraft(String(next));
+      onChange(next);
+      return;
+    }
+    onChange(-1);
+  };
+
+  return (
+    <div className="settings-row settings-row-adaptive">
+      <div className="settings-row-text">
+        <div className="settings-row-label">{label}</div>
+        <div className="settings-row-hint">{noLimit ? noLimitHint : hint}</div>
+      </div>
+      <div className="settings-limit-control">
+        <input
+          className="settings-number-input"
+          type="number"
+          min={1}
+          step={1}
+          value={draft}
+          disabled={noLimit}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={save}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          aria-label={label}
+        />
+        <span className="settings-limit-label">{L.noToolCallLimitLabel}</span>
+        <button
+          type="button"
+          role="switch"
+          className="switch"
+          aria-checked={noLimit}
+          aria-label={`${L.noToolCallLimitLabel}: ${label}`}
+          onClick={toggleNoLimit}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function SettingsModule({
   client,
   theme,
@@ -106,6 +186,8 @@ export function SettingsModule({
   onFeatureToggle,
   maxToolCalls,
   onMaxToolCallsChange,
+  maxSkillToolCalls,
+  onMaxSkillToolCallsChange,
   notificationsAvailable,
   notifyOnRunCompletion,
   notifyOnActionRequired,
@@ -116,35 +198,9 @@ export function SettingsModule({
   runningCount,
 }: SettingsModuleProps) {
   const [providerId, setProviderId] = useState<string | null>(null);
-  const [toolCallLimitDraft, setToolCallLimitDraft] = useState(
-    String(maxToolCalls > 0 ? maxToolCalls : DEFAULT_SETTINGS.maxToolCalls),
-  );
-  const noToolCallLimit = maxToolCalls === -1;
   const selectedProviderId = providers.some((provider) => provider.id === providerId)
     ? providerId
     : null;
-  useEffect(() => {
-    if (maxToolCalls > 0) setToolCallLimitDraft(String(maxToolCalls));
-  }, [maxToolCalls]);
-
-  const saveToolCallLimit = () => {
-    const next = positiveToolCallLimit(toolCallLimitDraft);
-    if (next !== undefined) {
-      onMaxToolCallsChange(next);
-      return;
-    }
-    setToolCallLimitDraft(String(DEFAULT_SETTINGS.maxToolCalls));
-  };
-
-  const toggleNoToolCallLimit = () => {
-    if (noToolCallLimit) {
-      const next = positiveToolCallLimit(toolCallLimitDraft) ?? DEFAULT_SETTINGS.maxToolCalls;
-      setToolCallLimitDraft(String(next));
-      onMaxToolCallsChange(next);
-      return;
-    }
-    onMaxToolCallsChange(-1);
-  };
 
   const showProviders = (nextProviderId: string | null) => {
     onCategoryChange("providers");
@@ -297,41 +353,24 @@ export function SettingsModule({
                 ))}
               </section>
 
-              <section className="settings-group">
+              <section className="settings-group settings-stack">
                 <h2 className="settings-group-title">{L.agentTitle}</h2>
-                <div className="settings-row settings-row-adaptive">
-                  <div className="settings-row-text">
-                    <div className="settings-row-label">{L.maxToolCallsLabel}</div>
-                    <div className="settings-row-hint">
-                      {noToolCallLimit ? L.noToolCallLimitHint : L.maxToolCallsHint}
-                    </div>
-                  </div>
-                  <div className="settings-limit-control">
-                    <input
-                      className="settings-number-input"
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={toolCallLimitDraft}
-                      disabled={noToolCallLimit}
-                      onChange={(event) => setToolCallLimitDraft(event.target.value)}
-                      onBlur={saveToolCallLimit}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") event.currentTarget.blur();
-                      }}
-                      aria-label={L.maxToolCallsLabel}
-                    />
-                    <span className="settings-limit-label">{L.noToolCallLimitLabel}</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      className="switch"
-                      aria-checked={noToolCallLimit}
-                      aria-label={L.noToolCallLimitLabel}
-                      onClick={toggleNoToolCallLimit}
-                    />
-                  </div>
-                </div>
+                <ToolCallLimitSetting
+                  label={L.maxToolCallsLabel}
+                  hint={L.maxToolCallsHint}
+                  noLimitHint={L.noToolCallLimitHint}
+                  value={maxToolCalls}
+                  defaultValue={DEFAULT_SETTINGS.maxToolCalls}
+                  onChange={onMaxToolCallsChange}
+                />
+                <ToolCallLimitSetting
+                  label={L.maxSkillToolCallsLabel}
+                  hint={L.maxSkillToolCallsHint}
+                  noLimitHint={L.noSkillToolCallLimitHint}
+                  value={maxSkillToolCalls}
+                  defaultValue={DEFAULT_SETTINGS.maxSkillToolCalls}
+                  onChange={onMaxSkillToolCallsChange}
+                />
               </section>
 
               {notificationsAvailable && (
