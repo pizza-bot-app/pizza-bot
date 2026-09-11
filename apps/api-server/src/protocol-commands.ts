@@ -16,7 +16,7 @@ export type ProtocolCommandOutcome =
   | { kind: "success"; id: number; result: Record<string, unknown> }
   | { kind: "no_content" }
   | { kind: "cancellation_pending"; id: number }
-  | { kind: "unsupported"; method: string };
+  | { kind: "unknown_command"; method: string };
 
 export class ProtocolCommandError extends Error {
   constructor(
@@ -69,7 +69,7 @@ export async function dispatchProtocolCommand(opts: {
       };
     }
     default:
-      return { kind: "unsupported", method: String(command.method) };
+      return { kind: "unknown_command", method: String(command.method) };
   }
 }
 

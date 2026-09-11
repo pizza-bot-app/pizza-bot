@@ -60,8 +60,8 @@ export class InProcessTransport {
     if (outcome.kind === "cancellation_pending") {
       throw new Error("run did not stop before the cancellation deadline");
     }
-    if (outcome.kind === "unsupported") {
-      throw new Error(`unsupported command method ${JSON.stringify(outcome.method)}`);
+    if (outcome.kind === "unknown_command") {
+      throw new Error(`unknown command method ${JSON.stringify(outcome.method)}`);
     }
   }
 

@@ -346,8 +346,8 @@ cap, so a future provider adapter declares its own without touching the store.
   a success envelope with `result.run_id` synchronously (or the SDK deadlocks
   waiting to open its SSE); `input.respond` resumes a HITL interrupt; `run.stop`
   cancels; `state.get` returns checkpointed state. Any other method is refused
-  with `418` and an `unsupported_method` error envelope, because the SDK reads
-  an empty 2xx as "applied".
+  with `422 unknown_command` (a status on the SDK caller's no-retry list),
+  because the SDK reads an empty 2xx as "applied" and retries most non-2xx.
 - `POST /threads/:id/runs/:run_id/cancel` — the REST cancellation route the SDK's
   `stop()` calls in preference to the `run.stop` command. Cancellation is matched
   on `runId` so a late abort cannot kill a replacement run on the same thread.

@@ -148,9 +148,10 @@ when done.
 When driving the protocol endpoints by hand, two contracts trip people up:
 
 - `POST /threads/:id/commands` expects `{id, method, params}` (`run.start`,
-  `input.respond`, …). An unrecognized method returns `418` with an
-  `unsupported_method` error envelope; only a `run.stop` with nothing to stop
-  returns an empty `204`.
+  `input.respond`, …). A body that is not a JSON object returns `400
+  invalid_argument`; an unrecognized method returns `422 unknown_command`. The
+  only empty `204` is `run.stop`'s acknowledgement, whether it stopped a run or
+  found none.
 - `POST /threads/:id/stream/events` filters by `channels`, and an empty/absent
   array *silently* matches no frames (`frameMatchesFilter`), which looks like a
   broken server. Name them explicitly:
