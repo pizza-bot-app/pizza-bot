@@ -461,6 +461,46 @@ describe("api-server: checkpoint-shaped state surface", () => {
     expect(clearThreadAwaitingAction).toHaveBeenCalledWith("t1");
   });
 
+  it("refuses an unrecognized command method with 418 and an error envelope", async () => {
+    const starts: Array<{ threadId: string }> = [];
+    const app = buildApp(fakeHost("ready", undefined, starts));
+    const res = await app.request("/threads/t1/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 7, method: "pizza.order", params: { toppings: ["pineapple"] } }),
+    });
+
+    expect(res.status).toBe(418);
+    expect(await res.json()).toEqual({
+      type: "error",
+      id: 7,
+      error: "unsupported_method",
+      message: 'unsupported command method "pizza.order"',
+    });
+    expect(starts).toEqual([]);
+  });
+
+  it("refuses a body that is not a command at all with 418", async () => {
+    const res = await buildApp(fakeHost()).request("/threads/t1/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: "hello" }),
+    });
+
+    expect(res.status).toBe(418);
+    expect(await res.json()).toMatchObject({ type: "error", id: null, error: "unsupported_method" });
+  });
+
+  it("keeps the empty 204 for a run.stop with nothing to stop", async () => {
+    const res = await buildApp(fakeHost()).request("/threads/t1/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 8, method: "run.stop", params: {} }),
+    });
+
+    expect(res.status).toBe(204);
+  });
+
   it("GET /threads/:id/history returns the checkpoint list (newest-first)", async () => {
     const res = await buildApp(fakeHost()).request("/threads/t1/history");
     const list = (await res.json()) as Array<{ thread_id: string; checkpoint_id: string }>;

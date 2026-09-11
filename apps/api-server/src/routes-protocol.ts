@@ -50,6 +50,19 @@ export function protocolRoutes(host: AgentHost): Hono {
           409,
         );
       }
+      if (outcome.kind === "unsupported") {
+        // The SDK reads an empty 2xx as "applied", so an unknown method must fail
+        // loudly; 418 (RFC 2324) because this server will not brew that.
+        return c.json(
+          {
+            type: "error",
+            id: cmd.id ?? null,
+            error: "unsupported_method",
+            message: `unsupported command method ${JSON.stringify(outcome.method)}`,
+          },
+          418,
+        );
+      }
       // The SDK treats an empty 204 as applied for fire-and-forget commands.
       return c.body(null, 204);
     } catch (error) {

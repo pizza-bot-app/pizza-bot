@@ -15,7 +15,8 @@ interface StateReader {
 export type ProtocolCommandOutcome =
   | { kind: "success"; id: number; result: Record<string, unknown> }
   | { kind: "no_content" }
-  | { kind: "cancellation_pending"; id: number };
+  | { kind: "cancellation_pending"; id: number }
+  | { kind: "unsupported"; method: string };
 
 export class ProtocolCommandError extends Error {
   constructor(
@@ -68,7 +69,7 @@ export async function dispatchProtocolCommand(opts: {
       };
     }
     default:
-      return { kind: "no_content" };
+      return { kind: "unsupported", method: String(command.method) };
   }
 }
 

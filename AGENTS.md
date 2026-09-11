@@ -145,13 +145,15 @@ against live Bedrock and inspects the emitted `ProtocolEvent` frames (needs
 launch the app per `docs/RUNNING.md` and drive it. Delete throwaway probe scripts
 when done.
 
-When driving the protocol endpoints by hand, two contracts fail *silently* rather
-than erroring — both look like a broken server:
+When driving the protocol endpoints by hand, two contracts trip people up:
 
 - `POST /threads/:id/commands` expects `{id, method, params}` (`run.start`,
-  `input.respond`, …). An unrecognized body returns `204`, so nothing runs.
+  `input.respond`, …). An unrecognized method returns `418` with an
+  `unsupported_method` error envelope; only a `run.stop` with nothing to stop
+  returns an empty `204`.
 - `POST /threads/:id/stream/events` filters by `channels`, and an empty/absent
-  array matches no frames (`frameMatchesFilter`). Name them explicitly:
+  array *silently* matches no frames (`frameMatchesFilter`), which looks like a
+  broken server. Name them explicitly:
   `values`, `messages`, `updates`, `lifecycle`, `tools`, `tasks`, `input`, `custom`.
 
 `apps/api-server` needs `PIZZA_ALLOWED_ORIGINS` set to the web origin when Vite
