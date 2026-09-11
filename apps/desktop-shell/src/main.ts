@@ -351,6 +351,31 @@ function registerPowerLifecycle(): void {
   });
 }
 
+/**
+ * The renderer can only say the backend is unreachable and that it keeps
+ * retrying, which is untrue once the breaker trips — say so here instead.
+ */
+function reportSidecarFatal(err: Error): void {
+  if (shuttingDown) return;
+  const dataRoot = resolveDataRoot();
+  void dialog
+    .showMessageBox({
+      type: "error",
+      title: "Pizza Bot cannot start its local backend",
+      message: "Pizza Bot restarted its local backend repeatedly without it staying up, so it stopped retrying.",
+      detail: [
+        `Slow or failing MCP servers are the usual cause. Move "${path.join(dataRoot, ".mcp.json")}" aside, restart Pizza Bot, then add servers back a few at a time.`,
+        err.message,
+      ].join("\n\n"),
+      buttons: ["Open Logs Folder", "Close"],
+      defaultId: 1,
+      cancelId: 1,
+    })
+    .then(({ response }) => {
+      if (response === 0) void shell.openPath(path.join(dataRoot, "logs"));
+    });
+}
+
 /** Fork the sidecar with secrets decrypted from current storage. */
 async function bootSidecar(dataRoot: string, apiToken: string): Promise<Sidecar> {
   const mcpNodePath = resolveMcpNodePath();
@@ -373,7 +398,18 @@ async function bootSidecar(dataRoot: string, apiToken: string): Promise<Sidecar>
         }
       : {}),
     onFatal: (err) => {
-      console.error("[shell] sidecar fatal:", err.message);
+      shellLogger.error("Sidecar supervision gave up", err, {
+        event: "desktop.sidecar_fatal",
+      });
+      reportSidecarFatal(err);
+    },
+    onHealthProbeFailed: ({ outcome, consecutiveFailures, killing }) => {
+      shellLogger.warn("Sidecar health probe did not report healthy", {
+        event: "desktop.sidecar_health_probe_failed",
+        outcome,
+        consecutiveFailures,
+        killing,
+      });
     },
     onReady: (hs) => {
       console.log(`[shell] sidecar ready on port ${hs.port} (pid ${hs.pid})`);

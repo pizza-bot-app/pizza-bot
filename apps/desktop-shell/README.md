@@ -18,6 +18,15 @@ Electron main (dist/main.js)
   │                     remote bearer token; switches replace the renderer
 ```
 
+`sidecar-health.ts` decides what a failing probe means, because the naive answer
+loops forever. A sidecar connecting many stdio MCP servers stalls its own event
+loop for seconds, so an unanswered probe during the startup grace window is
+patience, not a kill: killing there means startup can never finish, and the
+replacement repeats the same stall. Only probes that answer `HealthyBusy` prove
+liveness without readiness. Restarts are forgiven only after the child stays
+healthy for a stability window — a single healthy probe between kills must not
+refill the budget, or the breaker never trips and the loop is silent.
+
 The main process uses `powerMonitor` to pause embedded cron timers on suspend.
 After resume it checks the sidecar, restarts an unhealthy child, or asks a
 healthy host to reconnect MCP servers before recovering one missed cron
