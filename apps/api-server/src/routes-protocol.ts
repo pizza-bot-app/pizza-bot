@@ -19,7 +19,14 @@ export function protocolRoutes(host: AgentHost): Hono {
     if (!runs) return c.json({ type: "error", id: null, error: "not_supported", message: "protocol seam disabled" }, 501);
 
     const threadId = c.req.param("thread_id");
-    const cmd = (await c.req.json().catch(() => ({}))) as ProtocolCommand;
+    const body: unknown = await c.req.json().catch(() => undefined);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      return c.json(
+        { type: "error", id: null, error: "invalid_argument", message: "command body must be a JSON object" },
+        400,
+      );
+    }
+    const cmd = body as ProtocolCommand;
     try {
       const outcome = await dispatchProtocolCommand({
         runs,
@@ -50,7 +57,21 @@ export function protocolRoutes(host: AgentHost): Hono {
           409,
         );
       }
-      // The SDK treats an empty 204 as applied for fire-and-forget commands.
+      if (outcome.kind === "unknown_command") {
+        // The SDK reads an empty 2xx as "applied", so an unknown method must fail
+        // loudly. 422 is on the SDK caller's no-retry list; 418 and 501 are not.
+        return c.json(
+          {
+            type: "error",
+            id: cmd.id ?? null,
+            error: "unknown_command",
+            message: `unknown command method ${JSON.stringify(outcome.method)}`,
+          },
+          422,
+        );
+      }
+      // run.stop acknowledgement (stopped, or nothing to stop): the SDK treats
+      // an empty 204 as applied.
       return c.body(null, 204);
     } catch (error) {
       if (error instanceof ProtocolCommandError) {
