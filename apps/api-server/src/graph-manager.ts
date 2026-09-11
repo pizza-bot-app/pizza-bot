@@ -1,6 +1,7 @@
 import {
   pizzaBotSystemPrompt,
   automaticModelCatalog,
+  DEFAULT_SETTINGS,
   type AutomaticModelCatalog,
   type ModelCatalogStatus,
   type ModelAvailability,
@@ -21,6 +22,10 @@ export interface GraphManagerOptions {
   dependencies: RuntimeDeps;
   /** Read at every graph build so a persona change takes effect on rebuild. */
   getPersonaAddendum?: () => string;
+  /** Read at every graph build so a tool-call limit change takes effect on rebuild. */
+  getMaxToolCalls?: () => number;
+  /** Read at every graph build so a skill tool-call limit change takes effect on rebuild. */
+  getMaxSkillToolCalls?: () => number;
 }
 
 export interface CapabilityReplacement {
@@ -60,17 +65,27 @@ export class GraphManager {
   private readonly models: ModelRegistry;
   private dependencies: RuntimeDeps;
   private readonly getPersonaAddendum: () => string;
+  private readonly getMaxToolCalls: () => number;
+  private readonly getMaxSkillToolCalls: () => number;
 
   private agentImpl?: LangGraphAgent;
   private readonly cache = new Map<string, Promise<LangGraphAgent>>();
   private updates: Promise<void> = Promise.resolve();
-  private appliedPromptSettings?: { addendum: string; memoriesEnabled: boolean };
+  private appliedRuntimeSettings?: {
+    addendum: string;
+    memoriesEnabled: boolean;
+    maxToolCalls: number;
+    maxSkillToolCalls: number;
+  };
 
   constructor(opts: GraphManagerOptions) {
     this.modelId = opts.modelId;
     this.models = opts.models;
     this.dependencies = opts.dependencies;
     this.getPersonaAddendum = opts.getPersonaAddendum ?? (() => "");
+    this.getMaxToolCalls = opts.getMaxToolCalls ?? (() => DEFAULT_SETTINGS.maxToolCalls);
+    this.getMaxSkillToolCalls = opts.getMaxSkillToolCalls ??
+      (() => DEFAULT_SETTINGS.maxSkillToolCalls);
   }
 
   get agent(): LangGraphAgent {
@@ -91,7 +106,12 @@ export class GraphManager {
   }
 
   private depsForModel(deps: RuntimeDeps, model: BaseChatModel): RuntimeDeps {
-    return { ...deps, model };
+    return {
+      ...deps,
+      model,
+      maxToolCalls: this.getMaxToolCalls(),
+      maxSkillToolCalls: this.getMaxSkillToolCalls(),
+    };
   }
 
   async listModels(includeDisabled = false): Promise<Array<{
@@ -195,7 +215,7 @@ export class GraphManager {
 
   /** Prevent a stale graph from serving after settings were patched elsewhere. */
   async ensureSettings(): Promise<void> {
-    if (this.promptSettingsMatch()) return;
+    if (this.runtimeSettingsMatch()) return;
     await this.reloadSettings();
   }
 
@@ -252,7 +272,7 @@ export class GraphManager {
     model: BaseChatModel,
     dependencies = this.dependencies,
   ): Promise<void> {
-    const promptSettings = this.readPromptSettings(dependencies);
+    const runtimeSettings = this.readRuntimeSettings(dependencies);
     const agent = await createPizzaBotAgent(
       this.systemPrompt(dependencies),
       this.depsForModel(dependencies, model),
@@ -260,34 +280,40 @@ export class GraphManager {
 
     this.dependencies = dependencies;
     this.agentImpl = agent;
-    this.appliedPromptSettings = promptSettings;
+    this.appliedRuntimeSettings = runtimeSettings;
     this.cache.clear();
     this.cache.set(this.modelId, Promise.resolve(agent));
   }
 
-  private readPromptSettings(dependencies: RuntimeDeps): {
+  private readRuntimeSettings(dependencies: RuntimeDeps): {
     addendum: string;
     memoriesEnabled: boolean;
+    maxToolCalls: number;
+    maxSkillToolCalls: number;
   } {
     return {
       addendum: this.getPersonaAddendum(),
       memoriesEnabled: dependencies.memoriesDir
         ? (dependencies.memoryEnabled?.() ?? true)
         : false,
+      maxToolCalls: this.getMaxToolCalls(),
+      maxSkillToolCalls: this.getMaxSkillToolCalls(),
     };
   }
 
-  private promptSettingsMatch(): boolean {
-    if (!this.appliedPromptSettings) return false;
-    const current = this.readPromptSettings(this.dependencies);
+  private runtimeSettingsMatch(): boolean {
+    if (!this.appliedRuntimeSettings) return false;
+    const current = this.readRuntimeSettings(this.dependencies);
     return (
-      current.addendum === this.appliedPromptSettings.addendum &&
-      current.memoriesEnabled === this.appliedPromptSettings.memoriesEnabled
+      current.addendum === this.appliedRuntimeSettings.addendum &&
+      current.memoriesEnabled === this.appliedRuntimeSettings.memoriesEnabled &&
+      current.maxToolCalls === this.appliedRuntimeSettings.maxToolCalls &&
+      current.maxSkillToolCalls === this.appliedRuntimeSettings.maxSkillToolCalls
     );
   }
 
   private systemPrompt(dependencies: RuntimeDeps): string {
-    const settings = this.readPromptSettings(dependencies);
+    const settings = this.readRuntimeSettings(dependencies);
     return withPersona(
       withSkillAvailability(
         pizzaBotSystemPrompt(settings.memoriesEnabled),

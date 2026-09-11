@@ -26,6 +26,7 @@ import {
   type Logger,
   type ToolCatalog,
   BUILTIN_EVAL_TOOL_REF,
+  DEFAULT_SETTINGS,
 } from "@pizza-bot/core";
 import type { ThreadStateValues } from "@pizza-bot/core";
 import type { ProtocolEvent, StateSnapshot } from "@langchain/langgraph";
@@ -50,7 +51,7 @@ registerHarnessProfile("openai", { excludedMiddleware: ["todoListMiddleware"] })
 export const AGENT_RUN_LIMITS = {
   orchestrator: {
     modelCalls: 20,
-    toolCalls: 40,
+    toolCalls: DEFAULT_SETTINGS.maxToolCalls,
   },
   subagent: {
     modelCalls: 20,
@@ -76,16 +77,19 @@ function runLimitMiddleware(limits: RunLimits): unknown[] {
   const createToolCallLimit = toolCallLimitMiddleware as unknown as (
     options: RunLimitMiddlewareOptions,
   ) => unknown;
-  return [
+  const middleware: unknown[] = [
     createModelCallLimit({
       runLimit: limits.modelCalls,
       exitBehavior: "end",
     }),
-    createToolCallLimit({
+  ];
+  if (limits.toolCalls !== -1) {
+    middleware.push(createToolCallLimit({
       runLimit: limits.toolCalls,
       exitBehavior: "error",
-    }),
-  ];
+    }));
+  }
+  return middleware;
 }
 
 // DeepAgents returns arbitrary child state to the parent; limiter counters are invocation-local.
@@ -218,11 +222,15 @@ export async function resolveSkillSubagents(
 ): Promise<readonly SubAgent[] | undefined> {
   if (!skills?.size) return undefined;
   const logger = deps.logger;
+  const limits = {
+    ...AGENT_RUN_LIMITS.subagent,
+    toolCalls: deps.maxSkillToolCalls ?? AGENT_RUN_LIMITS.subagent.toolCalls,
+  };
   const entries = [...skills.values()];
   const resolved = await Promise.all(entries.map(async (entry) => {
     try {
       const middleware: unknown[] = [
-        ...runLimitMiddleware(AGENT_RUN_LIMITS.subagent),
+        ...runLimitMiddleware(limits),
         subagentFinalizationMiddleware(AGENT_RUN_LIMITS.subagent.modelCalls),
         toolErrorRecoveryMiddleware(),
         outputTruncationMiddleware(),
@@ -317,7 +325,10 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   });
 
   const middleware: unknown[] = [
-    ...runLimitMiddleware(AGENT_RUN_LIMITS.orchestrator),
+    ...runLimitMiddleware({
+      ...AGENT_RUN_LIMITS.orchestrator,
+      toolCalls: deps.maxToolCalls ?? AGENT_RUN_LIMITS.orchestrator.toolCalls,
+    }),
     toolErrorRecoveryMiddleware(),
     currentDateTimeMiddleware(),
   ];

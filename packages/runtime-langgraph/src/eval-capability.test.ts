@@ -100,6 +100,67 @@ describe("Pizza Bot graph assembly", () => {
     );
   });
 
+  it("uses the configured tool-call limit", async () => {
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      maxToolCalls: 73,
+    });
+    expect(mocks.toolCallLimitMiddleware).toHaveBeenCalledWith({
+      runLimit: 73,
+      exitBehavior: "error",
+    });
+
+    mocks.toolCallLimitMiddleware.mockClear();
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      maxToolCalls: -1,
+    });
+    const params = mocks.createDeepAgent.mock.calls.at(-1)![0] as {
+      middleware: Array<{ name?: string }>;
+    };
+    expect(mocks.toolCallLimitMiddleware).not.toHaveBeenCalled();
+    expect(params.middleware.map((middleware) => middleware.name))
+      .not.toContain("ToolCallLimitMiddleware");
+  });
+
+  it("uses the configured skill-agent limit and omits both limiters when unlimited", async () => {
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      checkpointer: {},
+      skills: mailSkill(),
+      tools: { "mcp:outlook:send": { name: "outlook__send" } },
+      catalog: { outlook: ["send"] },
+      maxSkillToolCalls: 73,
+    });
+    expect(mocks.toolCallLimitMiddleware.mock.calls).toEqual([
+      [{ runLimit: 40, exitBehavior: "error" }],
+      [{ runLimit: 73, exitBehavior: "error" }],
+    ]);
+
+    mocks.toolCallLimitMiddleware.mockClear();
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      checkpointer: {},
+      skills: mailSkill(),
+      tools: { "mcp:outlook:send": { name: "outlook__send" } },
+      catalog: { outlook: ["send"] },
+      maxToolCalls: -1,
+      maxSkillToolCalls: -1,
+    });
+
+    const rootParams = mocks.createDeepAgent.mock.calls.at(-1)![0] as {
+      middleware: Array<{ name?: string }>;
+    };
+    const workerParams = mocks.createSubAgent.mock.calls.at(-1)![0] as {
+      middleware: Array<{ name?: string }>;
+    };
+    expect(mocks.toolCallLimitMiddleware).not.toHaveBeenCalled();
+    expect(rootParams.middleware.map((middleware) => middleware.name))
+      .not.toContain("ToolCallLimitMiddleware");
+    expect(workerParams.middleware.map((middleware) => middleware.name))
+      .not.toContain("ToolCallLimitMiddleware");
+  });
+
   it("compiles each skill behind its declared tools and HITL policy", async () => {
     const send = { name: "outlook__send" };
     await createPizzaBotAgent("prompt", {

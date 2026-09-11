@@ -2,6 +2,7 @@
 import Database from "better-sqlite3";
 import {
   DEFAULT_SETTINGS,
+  isMaxToolCalls,
   isPromptAddendum,
   isThemePreference,
   type AppSettings,
@@ -54,6 +55,12 @@ export class SettingsStore {
         typeof stored.enableAutomations === "boolean"
           ? stored.enableAutomations
           : DEFAULT_SETTINGS.enableAutomations,
+      maxToolCalls: isMaxToolCalls(stored.maxToolCalls)
+        ? stored.maxToolCalls
+        : DEFAULT_SETTINGS.maxToolCalls,
+      maxSkillToolCalls: isMaxToolCalls(stored.maxSkillToolCalls)
+        ? stored.maxSkillToolCalls
+        : DEFAULT_SETTINGS.maxSkillToolCalls,
     };
   }
 
@@ -79,6 +86,12 @@ export class SettingsStore {
     }
     if (patch.enableAutomations !== undefined) {
       entries.push({ key: "enableAutomations", value: JSON.stringify(patch.enableAutomations) });
+    }
+    if (patch.maxToolCalls !== undefined) {
+      entries.push({ key: "maxToolCalls", value: JSON.stringify(patch.maxToolCalls) });
+    }
+    if (patch.maxSkillToolCalls !== undefined) {
+      entries.push({ key: "maxSkillToolCalls", value: JSON.stringify(patch.maxSkillToolCalls) });
     }
     if (entries.length > 0) writeAll(entries);
     return this.get();

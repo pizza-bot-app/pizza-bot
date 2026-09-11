@@ -11,6 +11,10 @@ export interface AppSettings {
   enableMemories: boolean;
   /** Gates the triggers/automations feature and its rail button. */
   enableAutomations: boolean;
+  /** Per-run Pizza Bot tool-call limit; -1 disables the limit. */
+  maxToolCalls: number;
+  /** Per-run skill-agent tool-call limit; -1 disables the limit. */
+  maxSkillToolCalls: number;
 }
 
 export type AppSettingsPatch = Partial<AppSettings>;
@@ -20,6 +24,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   customPromptAddendum: "",
   enableMemories: false,
   enableAutomations: false,
+  maxToolCalls: 40,
+  maxSkillToolCalls: 80,
 };
 
 /** Bounds the persona addendum so it cannot bloat every prompt unboundedly. */
@@ -31,4 +37,8 @@ export function isThemePreference(value: unknown): value is ThemePreference {
 
 export function isPromptAddendum(value: unknown): value is string {
   return typeof value === "string" && value.length <= MAX_PROMPT_ADDENDUM_LENGTH;
+}
+
+export function isMaxToolCalls(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && (value === -1 || value > 0);
 }

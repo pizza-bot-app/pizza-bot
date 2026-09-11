@@ -70,6 +70,17 @@ describe("SettingsStore", () => {
     app.close();
   });
 
+  it("persists tool-call limits independently", () => {
+    const app = openAppDatabase(":memory:");
+    app.settings.patch({ maxToolCalls: -1, maxSkillToolCalls: -1 });
+    expect(app.settings.get().maxToolCalls).toBe(-1);
+    expect(app.settings.get().maxSkillToolCalls).toBe(-1);
+    app.settings.patch({ theme: "light" });
+    expect(app.settings.get().maxToolCalls).toBe(-1);
+    expect(app.settings.get().maxSkillToolCalls).toBe(-1);
+    app.close();
+  });
+
   it("falls back to the default persona for an over-long stored value", () => {
     const app = openAppDatabase(":memory:");
     const tooLong = "x".repeat(8001);
@@ -86,6 +97,19 @@ describe("SettingsStore", () => {
       .prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('theme', '\"neon\"', 'now')")
       .run();
     expect(app.settings.get().theme).toBe(DEFAULT_SETTINGS.theme);
+    app.close();
+  });
+
+  it("falls back to the default for an invalid stored tool-call limit", () => {
+    const app = openAppDatabase(":memory:");
+    app.db
+      .prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('maxToolCalls', '0', 'now')")
+      .run();
+    expect(app.settings.get().maxToolCalls).toBe(DEFAULT_SETTINGS.maxToolCalls);
+    app.db
+      .prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('maxSkillToolCalls', '0', 'now')")
+      .run();
+    expect(app.settings.get().maxSkillToolCalls).toBe(DEFAULT_SETTINGS.maxSkillToolCalls);
     app.close();
   });
 
