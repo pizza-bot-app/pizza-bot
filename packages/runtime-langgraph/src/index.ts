@@ -222,15 +222,11 @@ export async function resolveSkillSubagents(
 ): Promise<readonly SubAgent[] | undefined> {
   if (!skills?.size) return undefined;
   const logger = deps.logger;
-  const limits = {
-    ...AGENT_RUN_LIMITS.subagent,
-    toolCalls: deps.maxToolCalls ?? AGENT_RUN_LIMITS.orchestrator.toolCalls,
-  };
   const entries = [...skills.values()];
   const resolved = await Promise.all(entries.map(async (entry) => {
     try {
       const middleware: unknown[] = [
-        ...runLimitMiddleware(limits),
+        ...runLimitMiddleware(AGENT_RUN_LIMITS.subagent),
         subagentFinalizationMiddleware(AGENT_RUN_LIMITS.subagent.modelCalls),
         toolErrorRecoveryMiddleware(),
         outputTruncationMiddleware(),
