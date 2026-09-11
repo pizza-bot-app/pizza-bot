@@ -13,6 +13,8 @@ export interface AppSettings {
   enableAutomations: boolean;
   /** Per-run Pizza Bot tool-call limit; -1 disables the limit. */
   maxToolCalls: number;
+  /** Per-run skill-agent tool-call limit; -1 disables the limit. */
+  maxSkillToolCalls: number;
 }
 
 export type AppSettingsPatch = Partial<AppSettings>;
@@ -23,6 +25,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableMemories: false,
   enableAutomations: false,
   maxToolCalls: 40,
+  maxSkillToolCalls: 80,
 };
 
 /** Bounds the persona addendum so it cannot bloat every prompt unboundedly. */

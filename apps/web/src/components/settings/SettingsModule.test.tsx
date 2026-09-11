@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { SettingsModule } from "./SettingsModule.js";
 
-function renderSettings(maxToolCalls: number): string {
+function renderSettings(maxToolCalls: number, maxSkillToolCalls: number): string {
   return renderToStaticMarkup(
     <SettingsModule
       client={{} as never}
@@ -25,6 +25,8 @@ function renderSettings(maxToolCalls: number): string {
       onFeatureToggle={vi.fn()}
       maxToolCalls={maxToolCalls}
       onMaxToolCallsChange={vi.fn()}
+      maxSkillToolCalls={maxSkillToolCalls}
+      onMaxSkillToolCallsChange={vi.fn()}
       notificationsAvailable={false}
       notifyOnRunCompletion={false}
       notifyOnActionRequired={false}
@@ -37,21 +39,21 @@ function renderSettings(maxToolCalls: number): string {
 }
 
 describe("SettingsModule tool-call limit", () => {
-  it("shows a positive number field and a separate no-limit switch", () => {
-    const html = renderSettings(40);
+  it("shows separate limits for Pizza Bot and skill agents", () => {
+    const html = renderSettings(40, 80);
 
-    expect(html).toContain('aria-label="Tool calls per run"');
-    expect(html).toContain('type="number" min="1"');
-    expect(html).toContain('role="switch"');
-    expect(html).toContain('aria-label="No limit"');
-    expect(html).toContain('aria-checked="false"');
+    expect(html).toContain('aria-label="Pizza Bot tool calls per run"');
+    expect(html).toContain('aria-label="Skill agent tool calls per run"');
+    expect(html.match(/type="number" min="1"/g)).toHaveLength(2);
+    expect(html).toContain('aria-label="No limit: Pizza Bot tool calls per run"');
+    expect(html).toContain('aria-label="No limit: Skill agent tool calls per run"');
   });
 
-  it("disables the number field when no limit is selected", () => {
-    const html = renderSettings(-1);
+  it("disables each number field when its no-limit toggle is selected", () => {
+    const html = renderSettings(-1, -1);
 
-    expect(html).toMatch(/<input(?=[^>]*aria-label="Tool calls per run")(?=[^>]*disabled="")[^>]*>/);
-    expect(html).toContain('aria-label="No limit"');
-    expect(html).toContain('aria-checked="true"');
+    expect(html).toMatch(/<input(?=[^>]*aria-label="Pizza Bot tool calls per run")(?=[^>]*disabled="")[^>]*>/);
+    expect(html).toMatch(/<input(?=[^>]*aria-label="Skill agent tool calls per run")(?=[^>]*disabled="")[^>]*>/);
+    expect(html.match(/aria-checked="true"/g)).toHaveLength(2);
   });
 });

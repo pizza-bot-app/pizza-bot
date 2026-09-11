@@ -70,12 +70,14 @@ describe("SettingsStore", () => {
     app.close();
   });
 
-  it("persists the tool-call limit independently", () => {
+  it("persists tool-call limits independently", () => {
     const app = openAppDatabase(":memory:");
-    app.settings.patch({ maxToolCalls: -1 });
+    app.settings.patch({ maxToolCalls: -1, maxSkillToolCalls: -1 });
     expect(app.settings.get().maxToolCalls).toBe(-1);
+    expect(app.settings.get().maxSkillToolCalls).toBe(-1);
     app.settings.patch({ theme: "light" });
     expect(app.settings.get().maxToolCalls).toBe(-1);
+    expect(app.settings.get().maxSkillToolCalls).toBe(-1);
     app.close();
   });
 
@@ -104,6 +106,10 @@ describe("SettingsStore", () => {
       .prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('maxToolCalls', '0', 'now')")
       .run();
     expect(app.settings.get().maxToolCalls).toBe(DEFAULT_SETTINGS.maxToolCalls);
+    app.db
+      .prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('maxSkillToolCalls', '0', 'now')")
+      .run();
+    expect(app.settings.get().maxSkillToolCalls).toBe(DEFAULT_SETTINGS.maxSkillToolCalls);
     app.close();
   });
 
