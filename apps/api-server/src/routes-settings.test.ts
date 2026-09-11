@@ -91,6 +91,16 @@ describe("settings routes: GET/PUT /settings", () => {
     expect(await host.memoriesDirectory()).toBe(false);
   });
 
+  it("persists a tool-call limit and rebuilds the warm graph", async () => {
+    const firstAgent = host.agent;
+    const res = await put({ maxToolCalls: -1 });
+    expect(((await res.json()) as { maxToolCalls: number }).maxToolCalls).toBe(-1);
+    expect(host.agent).not.toBe(firstAgent);
+
+    const invalid = await put({ maxToolCalls: 0 });
+    expect(((await invalid.json()) as { maxToolCalls: number }).maxToolCalls).toBe(-1);
+  });
+
   it("refreshes scheduler state when the automations setting changes", async () => {
     const reload = vi.spyOn(host.triggerService, "reload");
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_SETTINGS,
+  isMaxToolCalls,
   MAX_PROMPT_ADDENDUM_LENGTH,
   isPromptAddendum,
   isThemePreference,
@@ -33,6 +34,21 @@ describe("isPromptAddendum", () => {
   });
 });
 
+describe("isMaxToolCalls", () => {
+  it("accepts positive integers and -1 for no limit", () => {
+    expect(isMaxToolCalls(1)).toBe(true);
+    expect(isMaxToolCalls(40)).toBe(true);
+    expect(isMaxToolCalls(-1)).toBe(true);
+  });
+
+  it("rejects zero, other negatives, fractions, and non-numbers", () => {
+    expect(isMaxToolCalls(0)).toBe(false);
+    expect(isMaxToolCalls(-2)).toBe(false);
+    expect(isMaxToolCalls(1.5)).toBe(false);
+    expect(isMaxToolCalls("40")).toBe(false);
+  });
+});
+
 describe("DEFAULT_SETTINGS", () => {
   it("defaults the persona addendum to an empty string", () => {
     expect(DEFAULT_SETTINGS.customPromptAddendum).toBe("");
@@ -41,5 +57,9 @@ describe("DEFAULT_SETTINGS", () => {
   it("defaults the feature flags off", () => {
     expect(DEFAULT_SETTINGS.enableMemories).toBe(false);
     expect(DEFAULT_SETTINGS.enableAutomations).toBe(false);
+  });
+
+  it("defaults the tool-call limit to 40", () => {
+    expect(DEFAULT_SETTINGS.maxToolCalls).toBe(40);
   });
 });

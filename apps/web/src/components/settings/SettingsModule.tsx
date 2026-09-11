@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   KeyRound,
   FolderOpen,
@@ -20,6 +20,7 @@ import type { DesktopConnection } from "../../use-desktop-connection.js";
 import { ConnectionSettings } from "./ConnectionSettings.js";
 import { LocalFoldersSettings } from "./LocalFoldersSettings.js";
 import type { ApiClient } from "@/api-client";
+import { DEFAULT_SETTINGS } from "@pizza-bot/core";
 
 export interface SettingsModuleProps {
   client: ApiClient;
@@ -45,6 +46,8 @@ export interface SettingsModuleProps {
   enableMemories: boolean;
   enableAutomations: boolean;
   onFeatureToggle: (key: "enableMemories" | "enableAutomations", value: boolean) => void;
+  maxToolCalls: number;
+  onMaxToolCallsChange: (value: number) => void;
   notificationsAvailable: boolean;
   notifyOnRunCompletion: boolean;
   notifyOnActionRequired: boolean;
@@ -76,6 +79,11 @@ const SETTINGS_CATEGORIES: {
   { id: "files", label: L.settingsFilesCategory, icon: FolderOpen },
 ];
 
+function positiveToolCallLimit(value: string): number | undefined {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export function SettingsModule({
   client,
   theme,
@@ -96,6 +104,8 @@ export function SettingsModule({
   enableMemories,
   enableAutomations,
   onFeatureToggle,
+  maxToolCalls,
+  onMaxToolCallsChange,
   notificationsAvailable,
   notifyOnRunCompletion,
   notifyOnActionRequired,
@@ -106,9 +116,35 @@ export function SettingsModule({
   runningCount,
 }: SettingsModuleProps) {
   const [providerId, setProviderId] = useState<string | null>(null);
+  const [toolCallLimitDraft, setToolCallLimitDraft] = useState(
+    String(maxToolCalls > 0 ? maxToolCalls : DEFAULT_SETTINGS.maxToolCalls),
+  );
+  const noToolCallLimit = maxToolCalls === -1;
   const selectedProviderId = providers.some((provider) => provider.id === providerId)
     ? providerId
     : null;
+  useEffect(() => {
+    if (maxToolCalls > 0) setToolCallLimitDraft(String(maxToolCalls));
+  }, [maxToolCalls]);
+
+  const saveToolCallLimit = () => {
+    const next = positiveToolCallLimit(toolCallLimitDraft);
+    if (next !== undefined) {
+      onMaxToolCallsChange(next);
+      return;
+    }
+    setToolCallLimitDraft(String(DEFAULT_SETTINGS.maxToolCalls));
+  };
+
+  const toggleNoToolCallLimit = () => {
+    if (noToolCallLimit) {
+      const next = positiveToolCallLimit(toolCallLimitDraft) ?? DEFAULT_SETTINGS.maxToolCalls;
+      setToolCallLimitDraft(String(next));
+      onMaxToolCallsChange(next);
+      return;
+    }
+    onMaxToolCallsChange(-1);
+  };
 
   const showProviders = (nextProviderId: string | null) => {
     onCategoryChange("providers");
@@ -259,6 +295,43 @@ export function SettingsModule({
                     />
                   </div>
                 ))}
+              </section>
+
+              <section className="settings-group">
+                <h2 className="settings-group-title">{L.agentTitle}</h2>
+                <div className="settings-row settings-row-adaptive">
+                  <div className="settings-row-text">
+                    <div className="settings-row-label">{L.maxToolCallsLabel}</div>
+                    <div className="settings-row-hint">
+                      {noToolCallLimit ? L.noToolCallLimitHint : L.maxToolCallsHint}
+                    </div>
+                  </div>
+                  <div className="settings-limit-control">
+                    <input
+                      className="settings-number-input"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={toolCallLimitDraft}
+                      disabled={noToolCallLimit}
+                      onChange={(event) => setToolCallLimitDraft(event.target.value)}
+                      onBlur={saveToolCallLimit}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                      }}
+                      aria-label={L.maxToolCallsLabel}
+                    />
+                    <span className="settings-limit-label">{L.noToolCallLimitLabel}</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      className="switch"
+                      aria-checked={noToolCallLimit}
+                      aria-label={L.noToolCallLimitLabel}
+                      onClick={toggleNoToolCallLimit}
+                    />
+                  </div>
+                </div>
               </section>
 
               {notificationsAvailable && (

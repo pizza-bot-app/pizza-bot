@@ -173,7 +173,8 @@ in `core/src/protocol-types.ts`:
   attached to skill workers and is never checkpointed. Task planning middleware
   is intentionally excluded, including from model-specific harness profiles.
 - **Runaway-call limits** are per agent invocation, with no combined parent/child
-  budget. The orchestrator allows 20 model calls and 40 tool calls; each
+  budget. The orchestrator allows 20 model calls and the user-configured
+  per-run tool-call limit (40 by default; `-1` disables that limit); each
   `task`-invoked skill worker independently allows 20 model calls and 80 tool
   calls. A worker's last model call is tool-free and reserved for returning
   verified results with an incomplete-coverage disclaimer when necessary. A

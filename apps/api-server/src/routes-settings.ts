@@ -1,5 +1,10 @@
 import { Hono } from "hono";
-import { isPromptAddendum, isThemePreference, type AppSettingsPatch } from "@pizza-bot/core";
+import {
+  isMaxToolCalls,
+  isPromptAddendum,
+  isThemePreference,
+  type AppSettingsPatch,
+} from "@pizza-bot/core";
 import type { AgentHost } from "./agent-host.js";
 
 export function settingsRoutes(host: AgentHost): Hono {
@@ -14,6 +19,7 @@ export function settingsRoutes(host: AgentHost): Hono {
     if (isPromptAddendum(raw.customPromptAddendum)) patch.customPromptAddendum = raw.customPromptAddendum;
     if (typeof raw.enableMemories === "boolean") patch.enableMemories = raw.enableMemories;
     if (typeof raw.enableAutomations === "boolean") patch.enableAutomations = raw.enableAutomations;
+    if (isMaxToolCalls(raw.maxToolCalls)) patch.maxToolCalls = raw.maxToolCalls;
 
     const before = host.settings.get();
     const settings = host.settings.patch(patch);
@@ -21,7 +27,8 @@ export function settingsRoutes(host: AgentHost): Hono {
     // The backend's live gate separately revokes memory I/O from active graphs.
     if (
       settings.customPromptAddendum !== before.customPromptAddendum ||
-      settings.enableMemories !== before.enableMemories
+      settings.enableMemories !== before.enableMemories ||
+      settings.maxToolCalls !== before.maxToolCalls
     ) {
       await host.reloadSettings();
     }

@@ -36,6 +36,10 @@ export interface UseSettingsResult {
     enableAutomations: boolean;
     setFlag: (key: "enableMemories" | "enableAutomations", value: boolean) => void;
   };
+  agent: {
+    maxToolCalls: number;
+    setMaxToolCalls: (value: number) => void;
+  };
 }
 
 const isBrowser = typeof window !== "undefined";
@@ -150,6 +154,21 @@ export function useSettings(client: ApiClient): UseSettingsResult {
     setPersonaStatus("idle");
   }, []);
 
+  const setMaxToolCalls = useCallback(
+    (value: number) => {
+      const previous = settings.maxToolCalls;
+      setSettings((s) => ({ ...s, maxToolCalls: value }));
+      void client
+        .updateSettings({ maxToolCalls: value })
+        .then((saved) => setSettings(saved))
+        .catch((err) => {
+          setSettings((s) => ({ ...s, maxToolCalls: previous }));
+          toast({ title: "Couldn't save tool call limit", description: errorMessage(err), tone: "error" });
+        });
+    },
+    [client, settings.maxToolCalls, toast],
+  );
+
   const savedPersonaRef = useRef(settings.customPromptAddendum);
   savedPersonaRef.current = settings.customPromptAddendum;
   const savePersona = useCallback(() => {
@@ -178,11 +197,16 @@ export function useSettings(client: ApiClient): UseSettingsResult {
         enableAutomations: settings.enableAutomations,
         setFlag,
       },
+      agent: {
+        maxToolCalls: settings.maxToolCalls,
+        setMaxToolCalls,
+      },
     }),
     [
       settings.theme,
       settings.enableMemories,
       settings.enableAutomations,
+      settings.maxToolCalls,
       resolved,
       setPreference,
       personaDraft,
@@ -190,6 +214,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       setPersonaValue,
       savePersona,
       setFlag,
+      setMaxToolCalls,
     ],
   );
 }
