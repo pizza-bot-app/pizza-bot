@@ -9,6 +9,14 @@ import {
   type SidecarSecretUpdate,
 } from "@pizza-bot/api-server/sidecar-ipc";
 import { findSystemNode } from "@pizza-bot/plugin-sdk/runtime-resolver";
+import {
+  applyProbe,
+  DEFAULT_HEALTH_POLICY,
+  initialHealthState,
+  type HealthPolicyLimits,
+  type HealthState,
+  type ProbeOutcome,
+} from "./sidecar-health.js";
 
 /**
  * Development native modules target system Node's ABI, not Electron's. Resolve a
@@ -68,8 +76,11 @@ export interface SidecarOptions {
   expectedApiVersion: string;
   healthIntervalMs?: number;
   healthTimeoutMs?: number;
+  /** Patience knobs for the health probe; each falls back to the shared default. */
+  healthPolicy?: Partial<HealthPolicyLimits>;
   lifecycleTimeoutMs?: number;
   handshakeTimeoutMs?: number;
+  /** Restarts tolerated before the breaker trips, unless the child stabilizes. */
   maxRestarts?: number;
   /**
    * Graceful-stop deadline before group SIGKILL. The default 10s exceeds the
@@ -80,6 +91,14 @@ export interface SidecarOptions {
   onFatal?: (err: Error) => void;
   onReady?: (handshake: SidecarHandshake) => void;
   onEndpointChanged?: (baseUrl: string, handshake: SidecarHandshake) => void;
+  /** Reports every probe the child did not answer as healthy, kill or not. */
+  onHealthProbeFailed?: (report: HealthProbeReport) => void;
+}
+
+export interface HealthProbeReport {
+  outcome: ProbeOutcome;
+  consecutiveFailures: number;
+  killing: boolean;
 }
 
 export interface Sidecar {
@@ -258,13 +277,18 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
   const lifecycleTimeoutMs = opts.lifecycleTimeoutMs ?? 60_000;
   const maxRestarts = opts.maxRestarts ?? 5;
   const stopTimeoutMs = opts.stopTimeoutMs ?? 10_000;
+  const healthPolicy: HealthPolicyLimits = {
+    ...DEFAULT_HEALTH_POLICY,
+    ...opts.healthPolicy,
+  };
 
   let child: ChildProcess;
   let handshake: SidecarHandshake;
   let baseUrl: string;
   let stopped = false;
   let healthTimer: NodeJS.Timeout | undefined;
-  let consecutiveFailures = 0;
+  let health: HealthState;
+  let restartAttempts = 0;
   let restartInFlight: Promise<void> | undefined;
   let secretRequestId = 0;
 
@@ -272,9 +296,10 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
   child = boot.child;
   handshake = boot.handshake;
   baseUrl = `http://127.0.0.1:${handshake.port}`;
+  health = initialHealthState(Date.now());
   opts.onReady?.(handshake);
 
-  async function ping(): Promise<boolean> {
+  async function probe(): Promise<ProbeOutcome> {
     try {
       const res = await fetchWithTimeout(
         doFetch,
@@ -282,12 +307,19 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
         {},
         healthTimeoutMs,
       );
-      if (!res.ok) return false;
+      if (!res.ok) return "unhealthy";
       const body = (await res.json()) as { status?: string };
-      return body.status === "Healthy" || body.status === "HealthyBusy";
+      if (body.status === "Healthy") return "healthy";
+      if (body.status === "HealthyBusy") return "warming";
+      return "unhealthy";
     } catch {
-      return false;
+      return "unreachable";
     }
+  }
+
+  async function ping(): Promise<boolean> {
+    const outcome = await probe();
+    return outcome === "healthy" || outcome === "warming";
   }
 
   async function postLifecycle(
@@ -329,16 +361,16 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
   async function restartLoop(reason: string): Promise<void> {
     let lastReason = reason;
     while (!stopped) {
-      consecutiveFailures += 1;
-      if (consecutiveFailures > maxRestarts) {
+      restartAttempts += 1;
+      if (restartAttempts > maxRestarts) {
         const err = new Error(
-          `sidecar circuit breaker tripped after ${maxRestarts} restarts (last reason: ${lastReason})`,
+          `sidecar circuit breaker tripped after ${maxRestarts} restarts without stabilizing (last reason: ${lastReason})`,
         );
         stopped = true;
         opts.onFatal?.(err);
         return;
       }
-      const backoff = Math.min(250 * 2 ** (consecutiveFailures - 1), 10_000);
+      const backoff = Math.min(250 * 2 ** (restartAttempts - 1), 10_000);
       await sleep(backoff);
       if (stopped) return;
 
@@ -353,6 +385,7 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
         child = replacement.child;
         handshake = replacement.handshake;
         baseUrl = `http://127.0.0.1:${handshake.port}`;
+        health = initialHealthState(Date.now());
         attach();
         opts.onReady?.(handshake);
         if (baseUrl !== previousBaseUrl) {
@@ -449,15 +482,23 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
   const scheduleHealth = (): void => {
     healthTimer = setTimeout(async () => {
       if (stopped) return;
-      const healthy = await ping();
+      const outcome = await probe();
       if (stopped) return;
-      if (healthy) {
-        consecutiveFailures = 0;
-      } else {
+      const decision = applyProbe(health, outcome, Date.now(), healthPolicy);
+      health = decision.state;
+      if (decision.clearRestartBudget) restartAttempts = 0;
+      if (outcome !== "healthy") {
+        opts.onHealthProbeFailed?.({
+          outcome,
+          consecutiveFailures: health.consecutiveFailures,
+          killing: decision.kill,
+        });
+      }
+      if (decision.kill) {
         if (child.exitCode === null && child.signalCode === null) {
           killTree(child, "SIGKILL");
         } else {
-          void restart("health ping failed");
+          void restart(`health probe ${outcome}`);
         }
       }
       if (!stopped) scheduleHealth();

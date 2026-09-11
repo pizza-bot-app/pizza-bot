@@ -8,6 +8,7 @@ import { build } from "esbuild";
 import {
   fetchWithTimeout,
   startSidecar,
+  type HealthProbeReport,
   type Sidecar,
 } from "./sidecar.js";
 
@@ -232,6 +233,69 @@ describe("startSidecar (real api-server)", () => {
     expect(["Healthy", "HealthyBusy"]).toContain((await res.json() as { status: string }).status);
     await sidecar.stop();
     sidecar = undefined;
+  }, 90_000);
+
+  it("keeps a child whose probes never answer during the startup grace window", async () => {
+    const dataRoot = tempRoot("electron-shell-grace-");
+    const { pluginsDir, builtinSkillsDir } = emptyContributionDirs(dataRoot);
+    const reports: HealthProbeReport[] = [];
+    sidecar = await startSidecar({
+      serverModulePath: serverEntry(),
+      dataRoot,
+      pluginsDir,
+      builtinSkillsDir,
+      expectedApiVersion: "1",
+      handshakeTimeoutMs: 60_000,
+      healthIntervalMs: 50,
+      healthTimeoutMs: 50,
+      healthPolicy: { failureThreshold: 1, startupGraceMs: 30_000 },
+      // A stalled event loop is indistinguishable from this: the probe is sent
+      // and never answered.
+      fetch: (() => new Promise<Response>(() => {})) as typeof fetch,
+      onHealthProbeFailed: (report) => reports.push(report),
+    });
+    const originalPid = sidecar.handshake.pid;
+    const originalEndpoint = sidecar.baseUrl;
+
+    await new Promise((r) => setTimeout(r, 1_500));
+
+    expect(reports.length).toBeGreaterThan(2);
+    expect(reports.every((r) => r.outcome === "unreachable" && !r.killing)).toBe(true);
+    expect(sidecar.handshake.pid).toBe(originalPid);
+    expect(sidecar.baseUrl).toBe(originalEndpoint);
+    // The real server is untouched and still serving on the original port.
+    expect((await fetch(`${originalEndpoint}/ping`)).status).toBe(200);
+  }, 90_000);
+
+  it("trips the breaker instead of restarting forever past the grace window", async () => {
+    const dataRoot = tempRoot("electron-shell-breaker-");
+    const { pluginsDir, builtinSkillsDir } = emptyContributionDirs(dataRoot);
+    let resolveFatal!: (err: Error) => void;
+    const fatal = new Promise<Error>((resolve) => {
+      resolveFatal = resolve;
+    });
+    sidecar = await startSidecar({
+      serverModulePath: serverEntry(),
+      dataRoot,
+      pluginsDir,
+      builtinSkillsDir,
+      expectedApiVersion: "1",
+      handshakeTimeoutMs: 60_000,
+      healthIntervalMs: 50,
+      healthTimeoutMs: 50,
+      healthPolicy: { failureThreshold: 1, startupGraceMs: 0 },
+      maxRestarts: 0,
+      fetch: (() => new Promise<Response>(() => {})) as typeof fetch,
+      onFatal: (err) => resolveFatal(err),
+    });
+
+    const err = await Promise.race([
+      fatal,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("breaker never tripped")), 30_000),
+      ),
+    ]);
+    expect(err.message).toContain("circuit breaker tripped");
   }, 90_000);
 
   it("reports a changed endpoint after recovering a crashed child", async () => {
