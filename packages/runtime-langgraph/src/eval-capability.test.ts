@@ -100,6 +100,29 @@ describe("Pizza Bot graph assembly", () => {
     );
   });
 
+  it("uses a configured root tool-call limit and omits the limiter for -1", async () => {
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      maxToolCalls: 73,
+    });
+    expect(mocks.toolCallLimitMiddleware).toHaveBeenCalledWith({
+      runLimit: 73,
+      exitBehavior: "error",
+    });
+
+    mocks.toolCallLimitMiddleware.mockClear();
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      maxToolCalls: -1,
+    });
+    const params = mocks.createDeepAgent.mock.calls.at(-1)![0] as {
+      middleware: Array<{ name?: string }>;
+    };
+    expect(mocks.toolCallLimitMiddleware).not.toHaveBeenCalled();
+    expect(params.middleware.map((middleware) => middleware.name))
+      .not.toContain("ToolCallLimitMiddleware");
+  });
+
   it("compiles each skill behind its declared tools and HITL policy", async () => {
     const send = { name: "outlook__send" };
     await createPizzaBotAgent("prompt", {

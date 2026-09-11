@@ -1365,6 +1365,14 @@ button.sidebar-folder-row:hover,
 }
 .settings-persona-input:focus { outline: none; border-color: var(--brand); }
 .settings-persona-status { min-height: 15px; font-size: 11.5px; color: var(--dim); }
+.settings-number-input {
+  width: 96px; padding: 8px 10px; font: inherit; font-size: 13px;
+  color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+}
+.settings-number-input:focus { outline: none; border-color: var(--brand); }
+.settings-number-input:disabled { cursor: not-allowed; opacity: .5; }
+.settings-limit-control { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.settings-limit-label { color: var(--dim); font-size: 13px; white-space: nowrap; }
 .settings-theme-toggle { flex: 0 0 auto; }
 .settings-theme-toggle .segmented-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -1934,6 +1942,7 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
   .settings-row-adaptive { flex-direction: column; align-items: stretch; }
   .settings-row-adaptive .settings-theme-toggle,
   .settings-row-adaptive .settings-provider-default { width: 100%; max-width: none; }
+  .settings-row-adaptive .settings-limit-control { justify-content: flex-end; }
   .settings-row-adaptive .settings-theme-toggle .segmented-btn { flex: 1 1 0; min-width: 0; }
   .local-folder-row {
     display: grid; grid-template-columns: 18px minmax(0, 1fr) 34px;

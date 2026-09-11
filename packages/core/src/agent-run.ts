@@ -51,6 +51,8 @@ export interface RuntimeDeps {
    * state never contains file bytes. Absence disables inlining.
    */
   attachmentResolver?: AttachmentResolver;
+  /** Per-run root-agent tool-call limit; -1 disables the limiter. */
+  maxToolCalls?: number;
   model?: BaseChatModel;
   logger?: Logger;
 }
