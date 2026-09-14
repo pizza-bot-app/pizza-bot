@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { delimiter as pathDelimiter } from "node:path";
 import { ToolMessage } from "@langchain/core/messages";
+import { Client } from "@langchain/langgraph-sdk";
 import { PROTOCOL_VERSION } from "@pizza-bot/core";
 import {
   buildApp,
@@ -459,6 +460,81 @@ describe("api-server: checkpoint-shaped state surface", () => {
 
     expect(res.status).toBe(200);
     expect(clearThreadAwaitingAction).toHaveBeenCalledWith("t1");
+  });
+
+  it("refuses an unrecognized command method with 422 and an unknown_command envelope", async () => {
+    const starts: Array<{ threadId: string }> = [];
+    const app = buildApp(fakeHost("ready", undefined, starts));
+    const res = await app.request("/threads/t1/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 7, method: "pizza.order", params: { toppings: ["pineapple"] } }),
+    });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      type: "error",
+      id: 7,
+      error: "unknown_command",
+      message: 'unknown command method "pizza.order"',
+    });
+    expect(starts).toEqual([]);
+  });
+
+  it("refuses an object body with no method as unknown_command", async () => {
+    const res = await buildApp(fakeHost()).request("/threads/t1/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: "hello" }),
+    });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ type: "error", id: null, error: "unknown_command" });
+  });
+
+  it.each([
+    ["JSON null", "null"],
+    ["a JSON array", "[]"],
+    ["a JSON string", '"run.start"'],
+    ["unparseable text", "{not json"],
+  ])("rejects %s as invalid_argument instead of crashing", async (_label, body) => {
+    const res = await buildApp(fakeHost()).request("/threads/t1/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ type: "error", id: null, error: "invalid_argument" });
+  });
+
+  it("keeps the empty 204 for a run.stop with nothing to stop", async () => {
+    const res = await buildApp(fakeHost()).request("/threads/t1/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 8, method: "run.stop", params: {} }),
+    });
+
+    expect(res.status).toBe(204);
+  });
+
+  it("fails an unknown command in one attempt through the SDK's default retrying transport", async () => {
+    const app = buildApp(fakeHost());
+    const fetchSpy = vi.fn(async (input: string | URL, init?: RequestInit) =>
+      app.request(String(input).replace(/^https?:\/\/[^/]+/, ""), init),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const client = new Client({ apiUrl: "http://pizza.test" });
+      const thread = client.threads.stream("t1", { assistantId: "pizza-bot" });
+
+      await expect(thread.state.fork({ checkpoint_id: "chk1" })).rejects.toThrow(/422/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const commandCalls = fetchSpy.mock.calls.filter(([url]) => String(url).endsWith("/threads/t1/commands"));
+    expect(commandCalls).toHaveLength(1);
   });
 
   it("GET /threads/:id/history returns the checkpoint list (newest-first)", async () => {
