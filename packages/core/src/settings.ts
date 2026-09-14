@@ -24,8 +24,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   customPromptAddendum: "",
   enableMemories: false,
   enableAutomations: false,
-  maxToolCalls: 40,
-  maxSubagentToolCalls: 80,
+  maxToolCalls: 100,
+  maxSubagentToolCalls: 150,
 };
 
 /** Bounds the persona addendum so it cannot bloat every prompt unboundedly. */

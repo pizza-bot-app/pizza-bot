@@ -87,12 +87,12 @@ describe("Pizza Bot graph assembly", () => {
       ]),
     );
     expect(mocks.modelCallLimitMiddleware).toHaveBeenCalledWith({
-      runLimit: 20,
+      runLimit: 40,
       exitBehavior: "end",
     });
     expect(mocks.toolCallLimitMiddleware).toHaveBeenCalledWith({
-      runLimit: 40,
-      exitBehavior: "error",
+      runLimit: 100,
+      exitBehavior: "continue",
     });
     expect(params.subagents).toBeUndefined();
     expect(mocks.createCodeInterpreterMiddleware).toHaveBeenCalledWith(
@@ -107,7 +107,7 @@ describe("Pizza Bot graph assembly", () => {
     });
     expect(mocks.toolCallLimitMiddleware).toHaveBeenCalledWith({
       runLimit: 73,
-      exitBehavior: "error",
+      exitBehavior: "continue",
     });
 
     mocks.toolCallLimitMiddleware.mockClear();
@@ -133,8 +133,8 @@ describe("Pizza Bot graph assembly", () => {
       maxSubagentToolCalls: 73,
     });
     expect(mocks.toolCallLimitMiddleware.mock.calls).toEqual([
-      [{ runLimit: 40, exitBehavior: "error" }],
-      [{ runLimit: 73, exitBehavior: "error" }],
+      [{ runLimit: 100, exitBehavior: "continue" }],
+      [{ runLimit: 73, exitBehavior: "continue" }],
     ]);
 
     mocks.toolCallLimitMiddleware.mockClear();
@@ -187,12 +187,12 @@ describe("Pizza Bot graph assembly", () => {
     expect(subagentParams.middleware.map((middleware) => middleware.name))
       .not.toContain("SkillsMiddleware");
     expect(mocks.modelCallLimitMiddleware.mock.calls).toEqual([
-      [{ runLimit: 20, exitBehavior: "end" }],
-      [{ runLimit: 20, exitBehavior: "end" }],
+      [{ runLimit: 40, exitBehavior: "end" }],
+      [{ runLimit: 40, exitBehavior: "end" }],
     ]);
     expect(mocks.toolCallLimitMiddleware.mock.calls).toEqual([
-      [{ runLimit: 40, exitBehavior: "error" }],
-      [{ runLimit: 80, exitBehavior: "error" }],
+      [{ runLimit: 100, exitBehavior: "continue" }],
+      [{ runLimit: 150, exitBehavior: "continue" }],
     ]);
     const params = mocks.createDeepAgent.mock.calls[0]![0] as {
       subagents: Array<{ runnable: unknown }>;

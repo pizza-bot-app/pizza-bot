@@ -47,7 +47,7 @@ describe("GraphManager memory settings", () => {
     expect((enabledDeps as RuntimeDeps).memoryEnabled?.()).toBe(true);
   });
 
-  it("rebuilds with the current agent and skill tool-call limits", async () => {
+  it("rebuilds with the current orchestrator and subagent tool-call limits", async () => {
     const models = new ModelRegistry();
     await registerBuiltinProviders(models);
     let maxToolCalls = 40;

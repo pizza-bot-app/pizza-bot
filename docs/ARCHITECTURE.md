@@ -173,14 +173,18 @@ in `core/src/protocol-types.ts`:
   attached to subagents and is never checkpointed. Task planning middleware
   is intentionally excluded, including from model-specific harness profiles.
 - **Runaway-call limits** are per agent invocation, with no combined parent/child
-  budget. The orchestrator allows 20 model calls and its user-configured per-run
-  tool-call limit (40 by default); each `task`-invoked subagent independently
-  allows 20 model calls and its own user-configured per-run tool-call limit (80
+  budget. The orchestrator allows 40 model calls and its user-configured per-run
+  tool-call limit (100 by default); each `task`-invoked subagent independently
+  allows 40 model calls and its own user-configured per-run tool-call limit (150
   by default). Both limits are settings (`maxToolCalls`,
-  `maxSubagentToolCalls`); `-1` drops the tool-call limiter, so the 20-model-call
-  ceiling is what still bounds an otherwise unlimited run. A subagent's last
-  model call is tool-free and reserved for returning verified results with an
-  incomplete-coverage disclaimer when necessary. A delegation counts as one
+  `maxSubagentToolCalls`); `-1` drops the tool-call limiter, so the 40-model-call
+  ceiling is what still bounds an otherwise unlimited run. Reaching the tool-call
+  limit refuses the excess calls in place — each comes back as an errored tool
+  result — and ends the turn instead of failing the run: the limiter resets its
+  per-run counter only when the graph completes, so an aborting exit would charge
+  the next turn for this one.
+  A subagent's last model call is tool-free and reserved for returning verified
+  results with an incomplete-coverage disclaimer when necessary. A delegation counts as one
   orchestrator tool call, while the subagent's calls count only against that
   subagent. Parallel calls are counted individually.
 - **Checkpointer** and **store** are passed *into* `createDeepAgent` (never set

@@ -41,7 +41,7 @@ describe("SettingsModule tool-call limit", () => {
   it("shows separate limits for the orchestrator and subagents", () => {
     const html = renderSettings(40, 80);
 
-    expect(html).toContain('aria-label="Orchestrator tool calls per response"');
+    expect(html).toContain('aria-label="Orchestrator tool calls per turn"');
     expect(html).toContain('aria-label="Subagent tool calls per task"');
     expect(html.match(/placeholder="No limit"/g)).toHaveLength(2);
     expect(html.match(/Leave empty for no limit\./g)).toHaveLength(2);
@@ -60,7 +60,7 @@ describe("SettingsModule tool-call limit", () => {
     const html = renderSettings(-1, -1);
 
     expect(html).toMatch(
-      /<input(?=[^>]*aria-label="Orchestrator tool calls per response")(?=[^>]*value="")[^>]*>/,
+      /<input(?=[^>]*aria-label="Orchestrator tool calls per turn")(?=[^>]*value="")[^>]*>/,
     );
     expect(html).toMatch(
       /<input(?=[^>]*aria-label="Subagent tool calls per task")(?=[^>]*value="")[^>]*>/,

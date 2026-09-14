@@ -50,11 +50,11 @@ registerHarnessProfile("openai", { excludedMiddleware: ["todoListMiddleware"] })
 
 export const AGENT_RUN_LIMITS = {
   orchestrator: {
-    modelCalls: 20,
+    modelCalls: 40,
     toolCalls: DEFAULT_SETTINGS.maxToolCalls,
   },
   subagent: {
-    modelCalls: 20,
+    modelCalls: 40,
     toolCalls: DEFAULT_SETTINGS.maxSubagentToolCalls,
   },
 } as const;
@@ -66,7 +66,7 @@ interface RunLimits {
 
 interface RunLimitMiddlewareOptions {
   runLimit: number;
-  exitBehavior: "end" | "error";
+  exitBehavior: "continue" | "end";
 }
 
 function runLimitMiddleware(limits: RunLimits): unknown[] {
@@ -84,9 +84,12 @@ function runLimitMiddleware(limits: RunLimits): unknown[] {
     }),
   ];
   if (limits.toolCalls !== -1) {
+    // The limiter clears its per-run counter only once the graph completes, so blocking
+    // the excess in place is what keeps each turn's budget its own; a model that keeps
+    // requesting blocked tools stays bounded by the model-call ceiling.
     middleware.push(createToolCallLimit({
       runLimit: limits.toolCalls,
-      exitBehavior: "error",
+      exitBehavior: "continue",
     }));
   }
   return middleware;
