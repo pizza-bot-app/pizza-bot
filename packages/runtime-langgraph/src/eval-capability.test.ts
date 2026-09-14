@@ -123,14 +123,14 @@ describe("Pizza Bot graph assembly", () => {
       .not.toContain("ToolCallLimitMiddleware");
   });
 
-  it("uses the configured skill-agent limit and omits both limiters when unlimited", async () => {
+  it("uses the configured subagent limit and omits both limiters when unlimited", async () => {
     await createPizzaBotAgent("prompt", {
       model: { modelId: "test" } as never,
       checkpointer: {},
       skills: mailSkill(),
       tools: { "mcp:outlook:send": { name: "outlook__send" } },
       catalog: { outlook: ["send"] },
-      maxSkillToolCalls: 73,
+      maxSubagentToolCalls: 73,
     });
     expect(mocks.toolCallLimitMiddleware.mock.calls).toEqual([
       [{ runLimit: 40, exitBehavior: "error" }],
@@ -145,7 +145,7 @@ describe("Pizza Bot graph assembly", () => {
       tools: { "mcp:outlook:send": { name: "outlook__send" } },
       catalog: { outlook: ["send"] },
       maxToolCalls: -1,
-      maxSkillToolCalls: -1,
+      maxSubagentToolCalls: -1,
     });
 
     const rootParams = mocks.createDeepAgent.mock.calls.at(-1)![0] as {
@@ -205,7 +205,7 @@ describe("Pizza Bot graph assembly", () => {
     );
   });
 
-  it("adds live local-folder context to Pizza Bot and skill workers", async () => {
+  it("adds live local-folder context to the orchestrator and subagents", async () => {
     await createPizzaBotAgent("prompt", {
       model: { modelId: "test" } as never,
       skills: mailSkill(),

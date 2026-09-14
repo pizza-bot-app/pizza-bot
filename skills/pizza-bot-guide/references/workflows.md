@@ -8,12 +8,12 @@ api-server remains running.
 
 - **Unread** collects completed work that the user has not revisited.
 - **Action** collects durable approval requests waiting for a decision.
-- The Activity panel shows delegated work performed by skill workers.
+- The Activity panel shows delegated work performed by subagents.
 
 ## Delegation
 
 Pizza Bot answers directly for ordinary work and delegates specialized tasks to
-enabled, ready skills. Each skill runs as a tool-scoped worker with its own
+enabled, ready skills. Each skill runs as a tool-scoped subagent with its own
 instructions. A skill that depends on MCP tools becomes ready after those tools
 are enabled and connected.
 

@@ -1,4 +1,4 @@
-/** Reserves a worker's last model call for a useful, tool-free response. */
+/** Reserves a subagent's last model call for a useful, tool-free response. */
 import {
   AIMessage,
   HumanMessage,

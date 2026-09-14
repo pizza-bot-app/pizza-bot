@@ -3,7 +3,7 @@
 Pizza Bot combines MCP servers, Agent Skills, and plugins:
 
 - **MCP servers** expose tools.
-- **Skills** turn instructions and a scoped tool set into delegatable workers.
+- **Skills** turn instructions and a scoped tool set into delegatable subagents.
 - **Plugins** package MCP servers and skills for installation and distribution.
 
 All three can be managed from the application UI.
@@ -48,8 +48,8 @@ Startup connects to at most three servers concurrently and gives each attempt
 ## Skills
 
 Pizza Bot is the conversation agent; each enabled, ready skill becomes a
-tool-scoped worker that Pizza Bot can invoke through the `task` tool. The skill's
-name and description guide routing, its `SKILL.md` body supplies the worker
+tool-scoped subagent that Pizza Bot can invoke through the `task` tool. The skill's
+name and description guide routing, its `SKILL.md` body supplies the subagent
 instructions, and its declared tools define the complete tool surface.
 
 User skills live under `<PIZZA_DATA_ROOT>/skills/<id>/SKILL.md`. They can
@@ -72,7 +72,7 @@ tools:
 
 A skill becomes callable only after all of its declared MCP servers and tools
 are enabled and connected. Loading or unavailable skills remain visible but are
-omitted from the worker list until their dependencies recover. Newly ready
+omitted from the subagent list until their dependencies recover. Newly ready
 skills become available on the next turn.
 
 Use `interruptOn` in the frontmatter to require human approval for a tool. The

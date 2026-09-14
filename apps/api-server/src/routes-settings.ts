@@ -20,7 +20,7 @@ export function settingsRoutes(host: AgentHost): Hono {
     if (typeof raw.enableMemories === "boolean") patch.enableMemories = raw.enableMemories;
     if (typeof raw.enableAutomations === "boolean") patch.enableAutomations = raw.enableAutomations;
     if (isMaxToolCalls(raw.maxToolCalls)) patch.maxToolCalls = raw.maxToolCalls;
-    if (isMaxToolCalls(raw.maxSkillToolCalls)) patch.maxSkillToolCalls = raw.maxSkillToolCalls;
+    if (isMaxToolCalls(raw.maxSubagentToolCalls)) patch.maxSubagentToolCalls = raw.maxSubagentToolCalls;
 
     const before = host.settings.get();
     const settings = host.settings.patch(patch);
@@ -30,7 +30,7 @@ export function settingsRoutes(host: AgentHost): Hono {
       settings.customPromptAddendum !== before.customPromptAddendum ||
       settings.enableMemories !== before.enableMemories ||
       settings.maxToolCalls !== before.maxToolCalls ||
-      settings.maxSkillToolCalls !== before.maxSkillToolCalls
+      settings.maxSubagentToolCalls !== before.maxSubagentToolCalls
     ) {
       await host.reloadSettings();
     }

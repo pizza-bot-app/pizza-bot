@@ -38,11 +38,12 @@ export interface UseSettingsResult {
   };
   agent: {
     maxToolCalls: number;
-    setMaxToolCalls: (value: number) => void;
-    maxSkillToolCalls: number;
-    setMaxSkillToolCalls: (value: number) => void;
+    maxSubagentToolCalls: number;
+    setToolCallLimit: (key: ToolCallLimitKey, value: number) => void;
   };
 }
+
+export type ToolCallLimitKey = "maxToolCalls" | "maxSubagentToolCalls";
 
 const isBrowser = typeof window !== "undefined";
 
@@ -156,34 +157,19 @@ export function useSettings(client: ApiClient): UseSettingsResult {
     setPersonaStatus("idle");
   }, []);
 
-  const setMaxToolCalls = useCallback(
-    (value: number) => {
-      const previous = settings.maxToolCalls;
-      setSettings((s) => ({ ...s, maxToolCalls: value }));
+  const setToolCallLimit = useCallback(
+    (key: ToolCallLimitKey, value: number) => {
+      const previous = settings[key];
+      setSettings((s) => ({ ...s, [key]: value }));
       void client
-        .updateSettings({ maxToolCalls: value })
+        .updateSettings({ [key]: value })
         .then((saved) => setSettings(saved))
         .catch((err) => {
-          setSettings((s) => ({ ...s, maxToolCalls: previous }));
+          setSettings((s) => ({ ...s, [key]: previous }));
           toast({ title: "Couldn't save tool call limit", description: errorMessage(err), tone: "error" });
         });
     },
-    [client, settings.maxToolCalls, toast],
-  );
-
-  const setMaxSkillToolCalls = useCallback(
-    (value: number) => {
-      const previous = settings.maxSkillToolCalls;
-      setSettings((s) => ({ ...s, maxSkillToolCalls: value }));
-      void client
-        .updateSettings({ maxSkillToolCalls: value })
-        .then((saved) => setSettings(saved))
-        .catch((err) => {
-          setSettings((s) => ({ ...s, maxSkillToolCalls: previous }));
-          toast({ title: "Couldn't save skill tool call limit", description: errorMessage(err), tone: "error" });
-        });
-    },
-    [client, settings.maxSkillToolCalls, toast],
+    [client, settings, toast],
   );
 
   const savedPersonaRef = useRef(settings.customPromptAddendum);
@@ -216,9 +202,8 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       },
       agent: {
         maxToolCalls: settings.maxToolCalls,
-        setMaxToolCalls,
-        maxSkillToolCalls: settings.maxSkillToolCalls,
-        setMaxSkillToolCalls,
+        maxSubagentToolCalls: settings.maxSubagentToolCalls,
+        setToolCallLimit,
       },
     }),
     [
@@ -226,7 +211,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       settings.enableMemories,
       settings.enableAutomations,
       settings.maxToolCalls,
-      settings.maxSkillToolCalls,
+      settings.maxSubagentToolCalls,
       resolved,
       setPreference,
       personaDraft,
@@ -234,8 +219,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       setPersonaValue,
       savePersona,
       setFlag,
-      setMaxToolCalls,
-      setMaxSkillToolCalls,
+      setToolCallLimit,
     ],
   );
 }

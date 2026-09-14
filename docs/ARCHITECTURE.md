@@ -170,17 +170,19 @@ in `core/src/protocol-types.ts`:
   error recovery, attachment inlining, sandboxed evaluation, memory, a transient
   host-local date/time prompt refreshed for every model call, and — when
   `interruptOn` is set — `HumanInTheLoopMiddleware`. The clock context is also
-  attached to skill workers and is never checkpointed. Task planning middleware
+  attached to subagents and is never checkpointed. Task planning middleware
   is intentionally excluded, including from model-specific harness profiles.
 - **Runaway-call limits** are per agent invocation, with no combined parent/child
-  budget. The orchestrator allows 20 model calls and its user-configured
-  per-run tool-call limit (40 by default; `-1` disables that limit). Each
-  `task`-invoked skill worker independently allows 20 model calls and its
-  user-configured per-run tool-call limit (80 by default; `-1` disables that
-  limit). A worker's last model call is tool-free and reserved for returning
-  verified results with an incomplete-coverage disclaimer when necessary. A
-  delegation counts as one orchestrator tool call, while the worker's calls count
-  only against that worker. Parallel calls are counted individually.
+  budget. The orchestrator allows 20 model calls and its user-configured per-run
+  tool-call limit (40 by default); each `task`-invoked subagent independently
+  allows 20 model calls and its own user-configured per-run tool-call limit (80
+  by default). Both limits are settings (`maxToolCalls`,
+  `maxSubagentToolCalls`); `-1` drops the tool-call limiter, so the 20-model-call
+  ceiling is what still bounds an otherwise unlimited run. A subagent's last
+  model call is tool-free and reserved for returning verified results with an
+  incomplete-coverage disclaimer when necessary. A delegation counts as one
+  orchestrator tool call, while the subagent's calls count only against that
+  subagent. Parallel calls are counted individually.
 - **Checkpointer** and **store** are passed *into* `createDeepAgent` (never set
   post-hoc). Checkpointer = short-term, thread-scoped; store = long-term,
   cross-thread.
@@ -216,53 +218,55 @@ in `core/src/protocol-types.ts`:
   client sends the decision back over the SDK as an `input.respond` command →
   a `ResumeCommand` → `Command({ resume })`. Because a node re-runs from the
   top on resume, pre-interrupt tool side effects must be idempotent.
-- **Skill workers**: there is one selectable identity, the built-in **Pizza Bot**.
-  The `task` roster is exactly the ready skill workers: DeepAgents'
-  `general-purpose` worker is disabled, because it heads the roster claiming
-  "access to all tools as the main agent" while holding only the filesystem — the
-  runtime passes no `tools` to `createDeepAgent`, so its `defaultTools` are empty
-  and it receives no skill, no `eval`, and none of the per-worker guardrails.
-  Dropping it costs no capability: Pizza Bot holds the same filesystem tools and
-  `eval` directly, so the only loss is an isolated context to do noisy filesystem
-  work in. With no ready skills there is nothing to route to, so the `task` tool
+- **Agent roster**: there is one selectable identity, the built-in **Pizza Bot**,
+  which is the orchestrator. The `task` roster is exactly the ready subagents:
+  DeepAgents' `general-purpose` subagent is disabled, because it heads the roster
+  claiming "access to all tools as the main agent" while holding only the
+  filesystem — the runtime passes no `tools` to `createDeepAgent`, so its
+  `defaultTools` are empty and it receives no skill, no `eval`, and none of the
+  per-subagent guardrails. Dropping it costs no capability: the orchestrator holds
+  the same filesystem tools and `eval` directly, so the only loss is an isolated
+  context to do noisy filesystem work in. With no ready skills there is nothing
+  to route to, so the `task` tool
   and the QuickJS `task()` bridge are both absent; readiness is dynamic, so an
   installed-but-unavailable skill also withholds them. With skills, the root
   QuickJS interpreter exposes `task()` for programmatic fan-out.
-  Each skill catalog entry compiles directly into one worker invoked through the
+  Each skill catalog entry compiles directly into one subagent invoked through the
   `task` tool. Its `SKILL.md` body is the system prompt, its description is the
   routing signal, and its declared `mcp:server:tool` refs are its complete tool
-  surface. A readiness projection compiles the worker only after every explicit
+  surface. A readiness projection compiles the subagent only after every explicit
   tool exists, every wildcard has completed discovery with a match, and every
   built-in dependency is available. Dependency-free skills are ready
   immediately. Loading or unavailable skills are omitted from the callable
-  subagent list and summarized in the root prompt. Workers share the selected
+  subagent list and summarized in the root prompt. Subagents share the selected
   conversation model and each receive only their own skill bundle. Synchronous
-  worker graphs do not contain subagent middleware, so only Pizza Bot can delegate.
+  subagent graphs do not contain subagent middleware, so only the orchestrator can
+  delegate.
 
 Delegation is **routing, not rewriting**: the skill owns the procedure and the
 output shape, so a dispatch extracts the user's ask rather than composing a brief
-around it, and the reply relays the worker's report instead of re-summarizing it.
+around it, and the reply relays the subagent's report instead of re-summarizing it.
 Two layers state it, and a live 2x2 ablation says both earn their place. The
 `task` tool description (`TASK_USAGE_NOTES`) has to, because it must displace
 DeepAgents' own usage notes, which tell the model to put full detail in the
 dispatch, state exactly what to get back, and relay a summary — advice for a
-generic subagent, not a skill-scoped worker — and because it sits in the schema
+generic subagent, not a skill-scoped one — and because it sits in the schema
 the model is filling out. The orchestrator prompt
 (`packages/core/src/agent.ts`) also has to, for the **return** half: measured over
-three runs each, dropping its relay paragraph cut the share of the worker's report
+three runs each, dropping its relay paragraph cut the share of the subagent's report
 that reached the user from 0.67 to 0.34, losing exactly the specifics a skill
 exists to produce (attendee names, case ages, identifiers). No tool description
 can reach that path, because by then the tool call is over. A third layer, a
-preamble prepended to each worker's own prompt, was deleted: a worker cannot tell
+preamble prepended to each subagent's own prompt, was deleted: a subagent cannot tell
 the user's own words from the orchestrator's invention, so it can only defer to
 its skill instructions, which is what they already say.
 
 A skill's `description` is the third lever and the strongest one on the dispatch
 itself. It is the only per-skill text the orchestrator ever sees — it never reads
-a `SKILL.md` — so a description that states what the worker decides for itself and
+a `SKILL.md` — so a description that states what the subagent decides for itself and
 what it returns removes the uncertainty that makes the orchestrator invent a spec.
 In the same ablation, expanding two descriptions that way cut dispatch length 36%
-(45 to 29 words) and stopped a request from being split across redundant workers.
+(45 to 29 words) and stopped a request from being split across redundant subagents.
 Skill authors own that text; see the skill-authoring guidance in
 [skills/README.md](../skills/README.md).
 
@@ -427,7 +431,7 @@ using a supported subset of the Claude Code plugin format:
 - **Skills** — `SKILL.md` bundles are the only extension point for delegation.
   `loadPlugins` reads each plugin-shipped skill dir into a `SkillCatalog`
   (`@pizza-bot/core`), and the runtime turns the complete catalog into isolated
-  workers. Each worker receives its `SKILL.md` body directly as its system prompt
+  subagents. Each subagent receives its `SKILL.md` body directly as its system prompt
   and its description becomes root routing metadata in the `task` tool. The root
   does not receive DeepAgents' skills middleware, so it delegates from that
   metadata without reading the skill body first. The runtime still seeds every
@@ -448,7 +452,7 @@ Capability enablement is an installation-owned overlay in `app.sqlite`, keyed
 by resource kind, source identity, and id. It applies uniformly to user,
 built-in, and plugin contributions without mutating shipped files. Disabled
 skills are filtered before readiness projection, unavailable-skill prompting,
-worker compilation, and state seeding. Explicit enable requests require every
+subagent compilation, and state seeding. Explicit enable requests require every
 declared MCP server to exist and be enabled, and a server cannot be disabled or
 deleted while an enabled skill depends on it. External configuration absence,
 loading, and connection health affect readiness without changing saved
@@ -646,15 +650,15 @@ provider is stricter: only a ready listing, or an unconfigured one that voids th
 pick outright, may resolve a different default, since a failed listing may simply
 be hiding the remembered model.
 
-Skill workers mark terminal responses whose provider metadata reports an
+Subagents mark terminal responses whose provider metadata reports an
 output-token limit with an `OUTPUT_TRUNCATED` notice. DeepAgents carries that
 notice in the task result so Pizza Bot can distinguish incomplete delegated work
-from a completed result. The worker does not retry the model call, and this
+from a completed result. The subagent does not retry the model call, and this
 behavior is not installed on Pizza Bot itself.
 
 The Bedrock Converse shim subclasses `ChatBedrockConverse` and strips prior
 reasoning blocks only at its three model-call entry points. This is intentionally below
-DeepAgents: Pizza Bot and all skill workers use ordinary initialized LangChain
+DeepAgents: Pizza Bot and all subagents use ordinary initialized LangChain
 model instances, with no replacement subgraphs. The shim is
 necessary because `@langchain/aws` currently discards Bedrock reasoning signatures
 on the native `streamEvents(v3)` path; `outputVersion: "v0"` fixes `.invoke()` but

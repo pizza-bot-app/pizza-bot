@@ -122,7 +122,7 @@ export async function* streamProtocolEvents(
 }
 
 /**
- * A worker's approval pause bubbles a `GraphInterrupt` out through the parent
+ * A subagent's approval pause bubbles a `GraphInterrupt` out through the parent
  * `task` tool, which LangGraph reports as `tool-error` carrying the serialized
  * interrupts as its message. Forwarding that tells every consumer the delegation
  * failed, when the run is only waiting for the user; the terminal

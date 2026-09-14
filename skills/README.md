@@ -9,10 +9,10 @@ sibling files.
 Pizza Bot is the only conversation agent; **skills are how you extend it.** A
 skill has a `name` and `description`, which Pizza Bot uses to decide when to
 delegate through the `task` tool. Each enabled, ready skill compiles into a
-tool-scoped worker: its `SKILL.md` body is the worker's system prompt and its
+tool-scoped subagent: its `SKILL.md` body is the subagent's system prompt and its
 declared `mcp:server:tool` references are its complete tool surface. Sibling
 files (`reference.md`, scripts, assets, and so on) are seeded with the skill and
-remain available to the worker when its instructions call for them.
+remain available to the subagent when its instructions call for them.
 
 **Three catalogs merge into one**, resolved at startup:
 
@@ -24,7 +24,7 @@ remain available to the worker when its instructions call for them.
 
 User skills win on an id collision, so editing a Built-in or Plugin skill creates
 a user override. The runtime projects enabled, ready entries from the merged
-catalog into workers and seeds each bundle into run state so DeepAgents'
+catalog into subagents and seeds each bundle into run state so DeepAgents'
 StateBackend can serve it — see
 [`packages/core/src/skill.ts`](../packages/core/src/skill.ts). Text
 resources are stored as UTF-8 strings; binary assets such as images, PDFs, and
@@ -45,18 +45,18 @@ The `description` is the **only** part of a skill Pizza Bot ever sees — it doe
 not read `SKILL.md` before delegating. So it does two jobs, and most descriptions
 only do the first:
 
-1. **Selection** — when should this worker be picked? Name the domain and the
+1. **Selection** — when should this subagent be picked? Name the domain and the
    phrases a user would actually say ("my notes", "my vault").
-2. **Expectation** — what does the worker decide for itself, and what does it
+2. **Expectation** — what does the subagent decide for itself, and what does it
    return? Without this, Pizza Bot has to guess, and it guesses by writing a spec
    into the dispatch: an output format, a field list, a time range the user never
-   asked for. Stating that the worker already picks its own time window, or that
+   asked for. Stating that the subagent already picks its own time window, or that
    a task review comes back with source notes and due dates, removes the gap it
    would otherwise fill.
 
 A live ablation on two skills measured 36% shorter dispatches from adding one
 "decides X itself, returns Y" sentence, and it stopped one request from being
-split across redundant workers. Describe only what the worker really does —
+split across redundant subagents. Describe only what the subagent really does —
 a description that overpromises makes Pizza Bot dispatch work the skill cannot
 deliver.
 

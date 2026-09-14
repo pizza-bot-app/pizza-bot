@@ -25,7 +25,7 @@ export interface GraphManagerOptions {
   /** Read at every graph build so a tool-call limit change takes effect on rebuild. */
   getMaxToolCalls?: () => number;
   /** Read at every graph build so a skill tool-call limit change takes effect on rebuild. */
-  getMaxSkillToolCalls?: () => number;
+  getMaxSubagentToolCalls?: () => number;
 }
 
 export interface CapabilityReplacement {
@@ -66,7 +66,7 @@ export class GraphManager {
   private dependencies: RuntimeDeps;
   private readonly getPersonaAddendum: () => string;
   private readonly getMaxToolCalls: () => number;
-  private readonly getMaxSkillToolCalls: () => number;
+  private readonly getMaxSubagentToolCalls: () => number;
 
   private agentImpl?: LangGraphAgent;
   private readonly cache = new Map<string, Promise<LangGraphAgent>>();
@@ -75,7 +75,7 @@ export class GraphManager {
     addendum: string;
     memoriesEnabled: boolean;
     maxToolCalls: number;
-    maxSkillToolCalls: number;
+    maxSubagentToolCalls: number;
   };
 
   constructor(opts: GraphManagerOptions) {
@@ -84,8 +84,8 @@ export class GraphManager {
     this.dependencies = opts.dependencies;
     this.getPersonaAddendum = opts.getPersonaAddendum ?? (() => "");
     this.getMaxToolCalls = opts.getMaxToolCalls ?? (() => DEFAULT_SETTINGS.maxToolCalls);
-    this.getMaxSkillToolCalls = opts.getMaxSkillToolCalls ??
-      (() => DEFAULT_SETTINGS.maxSkillToolCalls);
+    this.getMaxSubagentToolCalls = opts.getMaxSubagentToolCalls ??
+      (() => DEFAULT_SETTINGS.maxSubagentToolCalls);
   }
 
   get agent(): LangGraphAgent {
@@ -110,7 +110,7 @@ export class GraphManager {
       ...deps,
       model,
       maxToolCalls: this.getMaxToolCalls(),
-      maxSkillToolCalls: this.getMaxSkillToolCalls(),
+      maxSubagentToolCalls: this.getMaxSubagentToolCalls(),
     };
   }
 
@@ -289,7 +289,7 @@ export class GraphManager {
     addendum: string;
     memoriesEnabled: boolean;
     maxToolCalls: number;
-    maxSkillToolCalls: number;
+    maxSubagentToolCalls: number;
   } {
     return {
       addendum: this.getPersonaAddendum(),
@@ -297,7 +297,7 @@ export class GraphManager {
         ? (dependencies.memoryEnabled?.() ?? true)
         : false,
       maxToolCalls: this.getMaxToolCalls(),
-      maxSkillToolCalls: this.getMaxSkillToolCalls(),
+      maxSubagentToolCalls: this.getMaxSubagentToolCalls(),
     };
   }
 
@@ -308,7 +308,7 @@ export class GraphManager {
       current.addendum === this.appliedRuntimeSettings.addendum &&
       current.memoriesEnabled === this.appliedRuntimeSettings.memoriesEnabled &&
       current.maxToolCalls === this.appliedRuntimeSettings.maxToolCalls &&
-      current.maxSkillToolCalls === this.appliedRuntimeSettings.maxSkillToolCalls
+      current.maxSubagentToolCalls === this.appliedRuntimeSettings.maxSubagentToolCalls
     );
   }
 

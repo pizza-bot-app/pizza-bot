@@ -29,7 +29,7 @@ export interface RuntimeDeps {
    */
   catalog?: ToolCatalog;
   skills?: SkillCatalog;
-  /** Full readiness projection; non-ready skills are context only, never workers. */
+  /** Full readiness projection; non-ready skills are context only, never subagents. */
   skillAvailability?: readonly SkillAvailability[];
   /**
    * Routes `/memories/` to a sandboxed shared filesystem backend.
@@ -53,8 +53,8 @@ export interface RuntimeDeps {
   attachmentResolver?: AttachmentResolver;
   /** Per-run root-agent tool-call limit; -1 disables the limiter. */
   maxToolCalls?: number;
-  /** Per-run skill-agent tool-call limit; -1 disables the limiter. */
-  maxSkillToolCalls?: number;
+  /** Per-run subagent tool-call limit; -1 disables the limiter. */
+  maxSubagentToolCalls?: number;
   model?: BaseChatModel;
   logger?: Logger;
 }

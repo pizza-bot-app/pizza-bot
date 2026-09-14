@@ -22,7 +22,7 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
   work from the global Unread and Action queues.
 - **Resume real work.** Checkpointed runs survive client disconnects, and cron or
   webhook triggers can start work without an open conversation.
-- **Delegate to specialists.** Skills become tool-scoped workers whose progress
+- **Delegate to specialists.** Skills become tool-scoped subagents whose progress
   appears in the Activity panel.
 - **Bring your model provider.** Amazon Bedrock, Anthropic, Google Gemini,
   OpenAI, OpenRouter, and Ollama are supported.

@@ -61,6 +61,6 @@ describe("DEFAULT_SETTINGS", () => {
 
   it("defaults the agent and skill tool-call limits", () => {
     expect(DEFAULT_SETTINGS.maxToolCalls).toBe(40);
-    expect(DEFAULT_SETTINGS.maxSkillToolCalls).toBe(80);
+    expect(DEFAULT_SETTINGS.maxSubagentToolCalls).toBe(80);
   });
 });

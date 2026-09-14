@@ -58,9 +58,9 @@ export class SettingsStore {
       maxToolCalls: isMaxToolCalls(stored.maxToolCalls)
         ? stored.maxToolCalls
         : DEFAULT_SETTINGS.maxToolCalls,
-      maxSkillToolCalls: isMaxToolCalls(stored.maxSkillToolCalls)
-        ? stored.maxSkillToolCalls
-        : DEFAULT_SETTINGS.maxSkillToolCalls,
+      maxSubagentToolCalls: isMaxToolCalls(stored.maxSubagentToolCalls)
+        ? stored.maxSubagentToolCalls
+        : DEFAULT_SETTINGS.maxSubagentToolCalls,
     };
   }
 
@@ -90,8 +90,8 @@ export class SettingsStore {
     if (patch.maxToolCalls !== undefined) {
       entries.push({ key: "maxToolCalls", value: JSON.stringify(patch.maxToolCalls) });
     }
-    if (patch.maxSkillToolCalls !== undefined) {
-      entries.push({ key: "maxSkillToolCalls", value: JSON.stringify(patch.maxSkillToolCalls) });
+    if (patch.maxSubagentToolCalls !== undefined) {
+      entries.push({ key: "maxSubagentToolCalls", value: JSON.stringify(patch.maxSubagentToolCalls) });
     }
     if (entries.length > 0) writeAll(entries);
     return this.get();

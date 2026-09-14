@@ -93,14 +93,14 @@ describe("settings routes: GET/PUT /settings", () => {
 
   it("persists tool-call limits and rebuilds the warm graph", async () => {
     const firstAgent = host.agent;
-    const res = await put({ maxToolCalls: -1, maxSkillToolCalls: -1 });
-    expect((await res.json()) as { maxToolCalls: number; maxSkillToolCalls: number })
-      .toMatchObject({ maxToolCalls: -1, maxSkillToolCalls: -1 });
+    const res = await put({ maxToolCalls: -1, maxSubagentToolCalls: -1 });
+    expect((await res.json()) as { maxToolCalls: number; maxSubagentToolCalls: number })
+      .toMatchObject({ maxToolCalls: -1, maxSubagentToolCalls: -1 });
     expect(host.agent).not.toBe(firstAgent);
 
-    const invalid = await put({ maxToolCalls: 0, maxSkillToolCalls: 0 });
-    expect((await invalid.json()) as { maxToolCalls: number; maxSkillToolCalls: number })
-      .toMatchObject({ maxToolCalls: -1, maxSkillToolCalls: -1 });
+    const invalid = await put({ maxToolCalls: 0, maxSubagentToolCalls: 0 });
+    expect((await invalid.json()) as { maxToolCalls: number; maxSubagentToolCalls: number })
+      .toMatchObject({ maxToolCalls: -1, maxSubagentToolCalls: -1 });
   });
 
   it("refreshes scheduler state when the automations setting changes", async () => {

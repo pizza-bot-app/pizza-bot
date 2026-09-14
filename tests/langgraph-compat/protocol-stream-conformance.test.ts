@@ -184,7 +184,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
     expect((failed!.params.data as { error?: string }).error).toContain("boom");
   });
 
-  it("a skill worker handles its own tool error before completing the delegated task", async () => {
+  it("a subagent handles its own tool error before completing the delegated task", async () => {
     const boomTool = tool(
       () => {
         throw new Error("kaboom inside subagent");
@@ -330,7 +330,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
     )).toBe(false);
   });
 
-  it("a skill worker can receive an MCP tool whose original name is reserved", async () => {
+  it("a subagent can receive an MCP tool whose original name is reserved", async () => {
     const externalReadFile = tool(
       () => "external file",
       {

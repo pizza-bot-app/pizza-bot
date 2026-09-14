@@ -125,23 +125,23 @@ describe("Pizza Bot delegation", () => {
     expect(await boundTools()).not.toContain("task");
   });
 
-  it("keeps task available when a skill worker exists", async () => {
+  it("keeps task available when a subagent exists", async () => {
     expect(await boundTools(workerSkill)).toContain("task");
   });
 
-  it("routes skill workers from task metadata without root skills middleware", async () => {
+  it("routes subagents from task metadata without root skills middleware", async () => {
     const model = await captureModel(workerSkill);
     const task = model.boundToolDescriptions[0]?.find((tool) => tool.name === "task");
     expect(task?.description).toContain("- worker: Handles delegated work.");
   });
 
-  it("offers only skill workers, never DeepAgents' capability-free general-purpose one", async () => {
+  it("offers only subagents, never DeepAgents' capability-free general-purpose one", async () => {
     const model = await captureModel(workerSkill);
     const task = model.boundToolDescriptions[0]?.find((tool) => tool.name === "task");
     expect(task?.description).not.toContain("general-purpose");
   });
 
-  it("keeps run-limit counters local when skill workers run in parallel", async () => {
+  it("keeps run-limit counters local when subagents run in parallel", async () => {
     const threadId = `parallel_delegation_${Math.random().toString(36).slice(2)}`;
     const agent = await createPizzaBotAgent("Help the user.", {
       model: new ParallelDelegationModel({}),

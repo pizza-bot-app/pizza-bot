@@ -1370,6 +1370,9 @@ button.sidebar-folder-row:hover,
   color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
 }
 .settings-number-input:focus { outline: none; border-color: var(--brand); }
+.settings-number-input.invalid,
+.settings-number-input.invalid:focus { border-color: var(--danger, #e5484d); }
+.settings-row-hint.error { color: var(--danger, #e5484d); }
 .settings-limit-control { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .settings-theme-toggle { flex: 0 0 auto; }
 .settings-theme-toggle .segmented-btn {

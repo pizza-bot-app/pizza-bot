@@ -1,4 +1,4 @@
-/** Drives the real graph to pin what a skill worker receives on dispatch. */
+/** Drives the real graph to pin what a subagent receives on dispatch. */
 import { describe, expect, it } from "vitest";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -91,7 +91,7 @@ async function dispatch(
   };
 }
 
-describe("skill worker dispatch", () => {
+describe("subagent dispatch", () => {
   it("reaches the worker as the orchestrator wrote it", async () => {
     const { workerTurn } = await dispatch(
       "Book the cheapest flight to Tokyo.",

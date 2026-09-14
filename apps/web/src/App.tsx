@@ -483,9 +483,8 @@ export function App() {
                 enableAutomations={features.enableAutomations}
                 onFeatureToggle={features.setFlag}
                 maxToolCalls={agentSettings.maxToolCalls}
-                onMaxToolCallsChange={agentSettings.setMaxToolCalls}
-                maxSkillToolCalls={agentSettings.maxSkillToolCalls}
-                onMaxSkillToolCallsChange={agentSettings.setMaxSkillToolCalls}
+                maxSubagentToolCalls={agentSettings.maxSubagentToolCalls}
+                onToolCallLimitChange={agentSettings.setToolCallLimit}
                 notificationsAvailable={desktopNotifications !== undefined}
                 notifyOnRunCompletion={
                   desktopNotifications?.notifyOnRunCompletion ?? true

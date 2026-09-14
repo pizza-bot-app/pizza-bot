@@ -1,4 +1,4 @@
-/** Owns the `task` tool: its roster is the skill workers and its notes route, not brief. */
+/** Owns the `task` tool: its roster is the subagents and its notes route, not brief. */
 import { createMiddleware } from "langchain";
 import { createSubAgentMiddleware, type CompiledSubAgent, type SubAgent } from "deepagents";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -45,16 +45,16 @@ export function taskToolDescription(subagents: readonly RosterEntry[]): string {
 /**
  * Upstream's notes tell the model to put full detail in the dispatch, to state
  * exactly what to get back, and to relay a summary — advice for a generic
- * subagent that fights a skill-scoped worker, whose own instructions already
+ * subagent that fights a skill-scoped subagent, whose own instructions already
  * govern procedure and output. The system prompt loses this argument on
  * locality, since those notes sit in the schema the model is filling out.
  *
  * `generalPurposeAgent: false` because DeepAgents' auto-added one heads the
  * roster claiming "access to all tools as the main agent" while holding only the
  * filesystem — we pass no `tools` to `createDeepAgent`, so its `defaultTools` are
- * empty, and it gets no skill, no `eval`, and none of the per-worker guardrails.
+ * empty, and it gets no skill, no `eval`, and none of the per-subagent guardrails.
  * The base agent already holds the same filesystem tools directly. With no
- * workers there is nothing to route to, so the tool itself goes away.
+ * subagents there is nothing to route to, so the tool itself goes away.
  */
 export function taskDispatchMiddleware(options: {
   model?: BaseChatModel;

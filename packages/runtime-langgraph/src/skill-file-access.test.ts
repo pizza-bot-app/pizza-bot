@@ -129,7 +129,7 @@ const skills: SkillCatalog = new Map([
   ],
 ]);
 
-describe("skill worker files", () => {
+describe("subagent files", () => {
   it("reads its sibling reference without rereading its own skill", async () => {
     const model = new SkillFileReadingModel({});
     const agent = await createPizzaBotAgent("Delegate this request.", { model, skills });
