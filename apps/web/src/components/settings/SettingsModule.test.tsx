@@ -42,18 +42,23 @@ describe("SettingsModule tool-call limit", () => {
   it("shows separate limits for Pizza Bot and skill agents", () => {
     const html = renderSettings(40, 80);
 
-    expect(html).toContain('aria-label="Pizza Bot tool calls per run"');
-    expect(html).toContain('aria-label="Skill agent tool calls per run"');
+    expect(html).toContain('aria-label="Pizza Bot tool calls per response"');
+    expect(html).toContain('aria-label="Skill agent tool calls per task"');
     expect(html.match(/type="number" min="1"/g)).toHaveLength(2);
-    expect(html).toContain('aria-label="No limit: Pizza Bot tool calls per run"');
-    expect(html).toContain('aria-label="No limit: Skill agent tool calls per run"');
+    expect(html.match(/placeholder="No limit"/g)).toHaveLength(2);
+    expect(html.match(/Leave empty for no limit\./g)).toHaveLength(2);
+    expect(html).not.toContain('aria-label="No limit: Pizza Bot tool calls per response"');
+    expect(html).not.toContain('aria-label="No limit: Skill agent tool calls per task"');
   });
 
-  it("disables each number field when its no-limit toggle is selected", () => {
+  it("shows an empty number field when a limit is disabled", () => {
     const html = renderSettings(-1, -1);
 
-    expect(html).toMatch(/<input(?=[^>]*aria-label="Pizza Bot tool calls per run")(?=[^>]*disabled="")[^>]*>/);
-    expect(html).toMatch(/<input(?=[^>]*aria-label="Skill agent tool calls per run")(?=[^>]*disabled="")[^>]*>/);
-    expect(html.match(/aria-checked="true"/g)).toHaveLength(2);
+    expect(html).toMatch(
+      /<input(?=[^>]*aria-label="Pizza Bot tool calls per response")(?=[^>]*value="")[^>]*>/,
+    );
+    expect(html).toMatch(
+      /<input(?=[^>]*aria-label="Skill agent tool calls per task")(?=[^>]*value="")[^>]*>/,
+    );
   });
 });

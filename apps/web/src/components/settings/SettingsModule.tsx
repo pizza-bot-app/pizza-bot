@@ -20,7 +20,6 @@ import type { DesktopConnection } from "../../use-desktop-connection.js";
 import { ConnectionSettings } from "./ConnectionSettings.js";
 import { LocalFoldersSettings } from "./LocalFoldersSettings.js";
 import type { ApiClient } from "@/api-client";
-import { DEFAULT_SETTINGS } from "@pizza-bot/core";
 
 export interface SettingsModuleProps {
   client: ApiClient;
@@ -89,51 +88,37 @@ function positiveToolCallLimit(value: string): number | undefined {
 interface ToolCallLimitSettingProps {
   label: string;
   hint: string;
-  noLimitHint: string;
   value: number;
-  defaultValue: number;
   onChange: (value: number) => void;
 }
 
-function ToolCallLimitSetting({
-  label,
-  hint,
-  noLimitHint,
-  value,
-  defaultValue,
-  onChange,
-}: ToolCallLimitSettingProps) {
-  const [draft, setDraft] = useState(String(value > 0 ? value : defaultValue));
-  const noLimit = value === -1;
+function ToolCallLimitSetting({ label, hint, value, onChange }: ToolCallLimitSettingProps) {
+  const [draft, setDraft] = useState(value > 0 ? String(value) : "");
 
   useEffect(() => {
-    if (value > 0) setDraft(String(value));
+    setDraft(value > 0 ? String(value) : "");
   }, [value]);
 
   const save = () => {
+    if (draft.trim() === "") {
+      onChange(-1);
+      return;
+    }
+
     const next = positiveToolCallLimit(draft);
     if (next !== undefined) {
       onChange(next);
       return;
     }
-    setDraft(String(defaultValue));
-  };
 
-  const toggleNoLimit = () => {
-    if (noLimit) {
-      const next = positiveToolCallLimit(draft) ?? defaultValue;
-      setDraft(String(next));
-      onChange(next);
-      return;
-    }
-    onChange(-1);
+    setDraft(value > 0 ? String(value) : "");
   };
 
   return (
     <div className="settings-row settings-row-adaptive">
       <div className="settings-row-text">
         <div className="settings-row-label">{label}</div>
-        <div className="settings-row-hint">{noLimit ? noLimitHint : hint}</div>
+        <div className="settings-row-hint">{hint}</div>
       </div>
       <div className="settings-limit-control">
         <input
@@ -142,22 +127,13 @@ function ToolCallLimitSetting({
           min={1}
           step={1}
           value={draft}
-          disabled={noLimit}
+          placeholder={L.noToolCallLimitLabel}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={save}
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
           }}
           aria-label={label}
-        />
-        <span className="settings-limit-label">{L.noToolCallLimitLabel}</span>
-        <button
-          type="button"
-          role="switch"
-          className="switch"
-          aria-checked={noLimit}
-          aria-label={`${L.noToolCallLimitLabel}: ${label}`}
-          onClick={toggleNoLimit}
         />
       </div>
     </div>
@@ -358,17 +334,13 @@ export function SettingsModule({
                 <ToolCallLimitSetting
                   label={L.maxToolCallsLabel}
                   hint={L.maxToolCallsHint}
-                  noLimitHint={L.noToolCallLimitHint}
                   value={maxToolCalls}
-                  defaultValue={DEFAULT_SETTINGS.maxToolCalls}
                   onChange={onMaxToolCallsChange}
                 />
                 <ToolCallLimitSetting
                   label={L.maxSkillToolCallsLabel}
                   hint={L.maxSkillToolCallsHint}
-                  noLimitHint={L.noSkillToolCallLimitHint}
                   value={maxSkillToolCalls}
-                  defaultValue={DEFAULT_SETTINGS.maxSkillToolCalls}
                   onChange={onMaxSkillToolCallsChange}
                 />
               </section>
