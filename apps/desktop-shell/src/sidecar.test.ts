@@ -1,15 +1,19 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { Readable } from "node:stream";
 import { build } from "esbuild";
 import {
+  attachOutputCapture,
   fetchWithTimeout,
   startSidecar,
   type HealthProbeReport,
   type Sidecar,
+  type SidecarChildExitReport,
 } from "./sidecar.js";
 
 const shellRoot = path.resolve(__dirname, "..");
@@ -274,6 +278,7 @@ describe("startSidecar (real api-server)", () => {
     const fatal = new Promise<Error>((resolve) => {
       resolveFatal = resolve;
     });
+    const exits: SidecarChildExitReport[] = [];
     sidecar = await startSidecar({
       serverModulePath: serverEntry(),
       dataRoot,
@@ -287,6 +292,7 @@ describe("startSidecar (real api-server)", () => {
       maxRestarts: 0,
       fetch: (() => new Promise<Response>(() => {})) as typeof fetch,
       onFatal: (err) => resolveFatal(err),
+      onChildExit: (report) => exits.push(report),
     });
 
     const err = await Promise.race([
@@ -296,6 +302,11 @@ describe("startSidecar (real api-server)", () => {
       ),
     ]);
     expect(err.message).toContain("circuit breaker tripped");
+    // This kill came from the health policy, not the child dying on its own —
+    // onChildExit must still fire, and say so, or the one case the original
+    // bug report opened with (a wedged child) loses its own evidence.
+    expect(exits).toHaveLength(1);
+    expect(exits[0]?.ordered).toBe(true);
   }, 90_000);
 
   it("reports a changed endpoint after recovering a crashed child", async () => {
@@ -337,6 +348,76 @@ describe("startSidecar (real api-server)", () => {
       ).status,
     ).toBe(200);
   }, 90_000);
+
+  it("reports the exit code, signal, and output tail for a death it did not order", async () => {
+    const dataRoot = tempRoot("electron-shell-crash-");
+    const { pluginsDir, builtinSkillsDir } = emptyContributionDirs(dataRoot);
+    const exits: SidecarChildExitReport[] = [];
+    sidecar = await startSidecar({
+      serverModulePath: serverEntry(),
+      dataRoot,
+      pluginsDir,
+      builtinSkillsDir,
+      expectedApiVersion: "1",
+      handshakeTimeoutMs: 60_000,
+      healthIntervalMs: 60_000,
+      // This test is about the exit report, not the restart loop: trip the
+      // breaker on the first attempt so no replacement child boots and
+      // competes with afterEach's stop() for the hook's time budget.
+      maxRestarts: 0,
+      onFatal: () => {},
+      // The child's structured logger only duplicates to stdout outside test
+      // mode (`state.console` is `NODE_ENV !== "test"`); force it on so this
+      // test can assert the tail actually captured it. A packaged build that
+      // ever sets NODE_ENV=production would silently stop duplicating too —
+      // this assertion is only meaningful because packaged builds leave it unset.
+      extraEnv: { NODE_ENV: "development" },
+      onChildExit: (report) => exits.push(report),
+    });
+
+    process.kill(sidecar.handshake.pid, "SIGKILL");
+    await vi.waitFor(() => expect(exits).toHaveLength(1), { timeout: 30_000 });
+
+    const [exit] = exits;
+    // Node surfaces a SIGKILL as signalCode on some platforms and as exit code
+    // 137 (128 + SIGKILL) on others; assert on the pair so a failure shows
+    // which one actually came back, not just "expected true".
+    expect({ code: exit?.code, signal: exit?.signal }).not.toEqual({ code: null, signal: null });
+    expect(exit?.ordered).toBe(false);
+    expect(exit?.stdoutTail).toContain("listening on");
+  }, 30_000);
+});
+
+describe("attachOutputCapture", () => {
+  function fakeChild(stdout: Readable): ChildProcess {
+    // The function only ever touches stdout/stderr; the rest of ChildProcess
+    // is irrelevant to it.
+    return { stdout, stderr: undefined } as unknown as ChildProcess;
+  }
+
+  it("keeps a multi-byte character intact when its UTF-8 bytes split across chunks", async () => {
+    const stdout = new Readable({ read() {} });
+    const capture = attachOutputCapture(fakeChild(stdout), []);
+    const emoji = Buffer.from("🍕", "utf8");
+    stdout.push(Buffer.concat([Buffer.from("pizza "), emoji.subarray(0, 2)]));
+    stdout.push(Buffer.concat([emoji.subarray(2), Buffer.from(" bot")]));
+    stdout.push(null);
+    await once(stdout, "end");
+
+    expect(capture.getTails().stdoutTail).toBe("pizza 🍕 bot");
+  });
+
+  it("redacts known secrets from the captured tail", async () => {
+    const stdout = new Readable({ read() {} });
+    const capture = attachOutputCapture(fakeChild(stdout), ["s3cr3t-token-value"]);
+    stdout.push(Buffer.from("auth failed with s3cr3t-token-value\n"));
+    stdout.push(null);
+    await once(stdout, "end");
+
+    const { stdoutTail } = capture.getTails();
+    expect(stdoutTail).not.toContain("s3cr3t-token-value");
+    expect(stdoutTail).toContain("<redacted>");
+  });
 });
 
 describe("fetchWithTimeout", () => {
