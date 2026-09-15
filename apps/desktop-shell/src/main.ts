@@ -411,6 +411,23 @@ async function bootSidecar(dataRoot: string, apiToken: string): Promise<Sidecar>
         killing,
       });
     },
+    // `ordered` distinguishes a kill this supervisor decided (health-probe
+    // kill, a failed resume — usually a *reaction* to something already
+    // wrong, e.g. a wedged event loop) from the child dying unprompted. Either
+    // way the tails ship: a native crash or OOM kill never reaches a JS
+    // exception handler, so they're often the only evidence of why.
+    onChildExit: ({ code, signal, ordered, stdoutTail, stderrTail }) => {
+      const context = {
+        event: "desktop.sidecar_child_exited",
+        code,
+        signal,
+        ordered,
+        ...(stdoutTail ? { stdoutTail } : {}),
+        ...(stderrTail ? { stderrTail } : {}),
+      };
+      if (ordered) shellLogger.warn("Sidecar process exited after a supervisor-ordered kill", context);
+      else shellLogger.error("Sidecar process exited unexpectedly", undefined, context);
+    },
     onReady: (hs) => {
       console.log(`[shell] sidecar ready on port ${hs.port} (pid ${hs.pid})`);
     },

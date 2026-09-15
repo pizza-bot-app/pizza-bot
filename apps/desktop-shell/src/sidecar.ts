@@ -2,6 +2,7 @@
 import { fork, execFileSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { createRequire } from "node:module";
+import { StringDecoder } from "node:string_decoder";
 import { pathToFileURL } from "node:url";
 import {
   isDesktopSecretName,
@@ -93,12 +94,32 @@ export interface SidecarOptions {
   onEndpointChanged?: (baseUrl: string, handshake: SidecarHandshake) => void;
   /** Reports every probe the child did not answer as healthy, kill or not. */
   onHealthProbeFailed?: (report: HealthProbeReport) => void;
+  /**
+   * Reports every exit other than a `stop()` shutdown, carrying the last text
+   * the child printed. `ordered` distinguishes a kill this supervisor itself
+   * decided (health policy, a failed resume) from the child dying on its own —
+   * but the output still ships either way: a kill is usually a *reaction* to
+   * something already wrong (a wedged event loop, thrashing on OOM), and a
+   * native crash or OOM kill never reaches a JS exception handler at all, so
+   * this captured output is often the only surviving evidence of the cause.
+   */
+  onChildExit?: (report: SidecarChildExitReport) => void;
 }
 
 export interface HealthProbeReport {
   outcome: ProbeOutcome;
   consecutiveFailures: number;
   killing: boolean;
+}
+
+export interface SidecarChildExitReport {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  /** True when this supervisor itself ordered the kill that produced this exit. */
+  ordered: boolean;
+  /** Last text of the child's stdout/stderr, oldest-first, capped per stream. */
+  stdoutTail: string;
+  stderrTail: string;
 }
 
 export interface Sidecar {
@@ -179,7 +200,71 @@ function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
-async function spawnOnce(opts: SidecarOptions): Promise<{ child: ChildProcess; handshake: SidecarHandshake }> {
+/** Characters of trailing output kept per stream; enough for a stack trace, not a memory leak. */
+const OUTPUT_TAIL_CHARS = 8_000;
+
+/** Slicing a JS string can strand a lone low surrogate at the cut point. */
+function clampTail(text: string): string {
+  if (text.length <= OUTPUT_TAIL_CHARS) return text;
+  const sliced = text.slice(-OUTPUT_TAIL_CHARS);
+  const first = sliced.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? sliced.slice(1) : sliced;
+}
+
+let stdioErrorGuardInstalled = false;
+/**
+ * `process.stdout`/`stderr` are this process's own streams, reused across every
+ * spawn, so a dead-pipe write on one must not raise an unhandled `'error'` and
+ * take Electron's main process down with it — install the no-op listener once.
+ */
+function installStdioErrorGuard(): void {
+  if (stdioErrorGuardInstalled) return;
+  stdioErrorGuardInstalled = true;
+  process.stdout.on("error", () => {});
+  process.stderr.on("error", () => {});
+}
+
+export interface OutputCapture {
+  getTails(): { stdoutTail: string; stderrTail: string };
+}
+
+/**
+ * Tees the child's stdout/stderr to this process (dev console visibility) while
+ * also keeping a bounded, redacted tail of each, so a death with no JS
+ * exception handler — a native crash, an OOM kill — still leaves a trace in
+ * `onChildExit`.
+ */
+export function attachOutputCapture(
+  child: ChildProcess,
+  knownSecrets: readonly string[],
+): OutputCapture {
+  installStdioErrorGuard();
+  const redact = (text: string): string => {
+    let out = text;
+    for (const secret of knownSecrets) out = out.split(secret).join("<redacted>");
+    return out;
+  };
+  const tee = (
+    source: NodeJS.ReadableStream | null | undefined,
+    sink: NodeJS.WritableStream,
+  ): (() => string) => {
+    let decoder: StringDecoder | undefined;
+    let tail = "";
+    source?.pipe(sink);
+    source?.on("data", (chunk: Buffer) => {
+      decoder ??= new StringDecoder("utf8");
+      tail = clampTail(tail + decoder.write(chunk));
+    });
+    return () => redact(tail);
+  };
+  const readStdout = tee(child.stdout, process.stdout);
+  const readStderr = tee(child.stderr, process.stderr);
+  return { getTails: () => ({ stdoutTail: readStdout(), stderrTail: readStderr() }) };
+}
+
+async function spawnOnce(
+  opts: SidecarOptions,
+): Promise<{ child: ChildProcess; handshake: SidecarHandshake; output: OutputCapture }> {
   const handshakeTimeoutMs = opts.handshakeTimeoutMs ?? 30_000;
 
   // Packaged natives are rebuilt for Electron's ABI; development natives target
@@ -221,10 +306,19 @@ async function spawnOnce(opts: SidecarOptions): Promise<{ child: ChildProcess; h
       PIZZA_DATA_ROOT: opts.dataRoot,
       PIZZA_ALLOW_LOCAL_FOLDER_CONFIGURATION: "1",
     },
-    stdio: ["ignore", "inherit", "inherit", "ipc"],
+    // Piped (not "inherit") so a native crash's stderr survives the process,
+    // not just the terminal it happened to be attached to.
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
     // POSIX process groups make MCP grandchildren killable as one tree.
     detached: !isWindows,
   });
+  // These values live only in the child's env (below), never in this process's
+  // own — its structured logger's env-derived redaction never sees them, so
+  // raw captured output needs its own pass to keep them out of the desktop log.
+  const knownSecrets = [opts.apiToken, ...Object.values(opts.extraEnv ?? {})].filter(
+    (value): value is string => typeof value === "string" && value.length >= 4,
+  );
+  const output = attachOutputCapture(child, knownSecrets);
 
   return await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -246,11 +340,18 @@ async function spawnOnce(opts: SidecarOptions): Promise<{ child: ChildProcess; h
         );
         return;
       }
-      resolve({ child, handshake: msg });
+      resolve({ child, handshake: msg, output });
     };
     const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       cleanup();
-      reject(new Error(`sidecar exited before handshake (code=${code} signal=${signal})`));
+      const { stderrTail } = output.getTails();
+      reject(
+        new Error(
+          `sidecar exited before handshake (code=${code} signal=${signal})${
+            stderrTail ? `; stderr: ${stderrTail}` : ""
+          }`,
+        ),
+      );
     };
     const onError = (err: Error): void => {
       cleanup();
@@ -284,6 +385,7 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
 
   let child: ChildProcess;
   let handshake: SidecarHandshake;
+  let output: OutputCapture;
   let baseUrl: string;
   let stopped = false;
   let healthTimer: NodeJS.Timeout | undefined;
@@ -291,10 +393,16 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
   let restartAttempts = 0;
   let restartInFlight: Promise<void> | undefined;
   let secretRequestId = 0;
+  // Tags onChildExit's report as `ordered` when this child is the one the
+  // supervisor itself just killed (health policy, a failed resume). Keyed on
+  // the child, not a bare flag, so a kill that never lands can't mislabel a
+  // later, unrelated exit as ordered.
+  let killOrdered: ChildProcess | undefined;
 
   const boot = await spawnOnce(opts);
   child = boot.child;
   handshake = boot.handshake;
+  output = boot.output;
   baseUrl = `http://127.0.0.1:${handshake.port}`;
   health = initialHealthState(Date.now());
   opts.onReady?.(handshake);
@@ -384,6 +492,7 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
         }
         child = replacement.child;
         handshake = replacement.handshake;
+        output = replacement.output;
         baseUrl = `http://127.0.0.1:${handshake.port}`;
         health = initialHealthState(Date.now());
         attach();
@@ -410,6 +519,9 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
 
   const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
     if (stopped) return;
+    const ordered = killOrdered === child;
+    killOrdered = undefined;
+    opts.onChildExit?.({ code, signal, ordered, ...output.getTails() });
     void restart(`child exited (code=${code} signal=${signal})`);
   };
   function attach(): void {
@@ -496,6 +608,7 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
       }
       if (decision.kill) {
         if (child.exitCode === null && child.signalCode === null) {
+          killOrdered = child;
           killTree(child, "SIGKILL");
         } else {
           void restart(`health probe ${outcome}`);
@@ -531,6 +644,7 @@ export async function startSidecar(opts: SidecarOptions): Promise<Sidecar> {
       const healthy = await ping();
       if (!healthy) {
         if (child.exitCode === null && child.signalCode === null) {
+          killOrdered = child;
           killTree(child, "SIGKILL");
         }
         return false;
