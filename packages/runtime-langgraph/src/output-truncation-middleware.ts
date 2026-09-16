@@ -21,7 +21,7 @@ const REASON_KEYS = [
   "stopReason",
 ] as const;
 
-function reachedOutputLimit(message: AIMessage): boolean {
+export function reachedOutputLimit(message: AIMessage): boolean {
   for (const key of REASON_KEYS) {
     const value = message.response_metadata[key];
     if (typeof value !== "string") continue;

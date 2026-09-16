@@ -35,6 +35,7 @@ import { modelCallLimitMiddleware, toolCallLimitMiddleware } from "langchain";
 import { buildBackend } from "./backend.js";
 import { toolErrorRecoveryMiddleware } from "./tool-error-middleware.js";
 import { outputTruncationMiddleware } from "./output-truncation-middleware.js";
+import { truncatedTurnMiddleware } from "./truncated-turn-middleware.js";
 import {
   SUBAGENT_MODEL_CALL_COUNT,
   subagentFinalizationMiddleware,
@@ -333,6 +334,9 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
       toolCalls: deps.maxToolCalls ?? AGENT_RUN_LIMITS.orchestrator.toolCalls,
     }),
     toolErrorRecoveryMiddleware(),
+    // Subagents get outputTruncationMiddleware (an agent-facing notice) instead;
+    // this one is for the human, so it belongs to the orchestrator alone.
+    truncatedTurnMiddleware(),
     currentDateTimeMiddleware(),
   ];
   if (deps.localFolders) {
