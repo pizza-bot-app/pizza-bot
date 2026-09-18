@@ -1,0 +1,78 @@
+name: Claude
+
+# Comment events fire in this repository's context rather than the fork's, so
+# unlike claude-code-review.yml this workflow reaches Bedrock on a fork pull
+# request. It is the only way to review one.
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened]
+
+permissions:
+  # Write so "@claude fix ..." can push a commit, not just review. Commits made
+  # with GITHUB_TOKEN do not trigger CI; pass a GitHub App token instead if that
+  # matters.
+  contents: write
+  pull-requests: write
+  issues: write
+  # Lets GitHub mint the OIDC token that AWS exchanges for role credentials.
+  id-token: write
+  # Lets Claude read CI results on a pull request.
+  actions: read
+
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # The action enforces write access itself, but only after the credential
+      # steps have run. On a public repository any comment containing the
+      # trigger phrase reaches those steps, so reject unauthorized actors before
+      # a role session exists.
+      - name: Verify actor has write access
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          level=$(gh api \
+            "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" \
+            --jq .permission 2>/dev/null || echo none)
+          case "$level" in
+            admin | write) echo "${{ github.actor }}: $level" ;;
+            *) echo "::error::${{ github.actor }} lacks write access (permission: $level)" && exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-west-2
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          use_bedrock: "true"
+          # Pinning the full model ID stops Claude Code from deriving a us.
+          # profile from AWS_REGION. It does not confine the run to one model:
+          # background tasks also invoke Haiku and Sonnet, inheriting the
+          # global. prefix, so the role's policy must allow those profiles too.
+          claude_args: |
+            --model global.anthropic.claude-opus-5
+            --max-turns 30
