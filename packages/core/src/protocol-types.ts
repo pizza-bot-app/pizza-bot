@@ -64,6 +64,11 @@ export interface SerializedMessage {
 
 export interface ThreadStateValues {
   messages?: SerializedMessage[];
+  /**
+   * Graph state written by the orchestrator's `truncatedTurnMiddleware`:
+   * the last turn ended at `finish_reason: "length"` with no visible text.
+   */
+  truncated?: boolean;
   [channel: string]: unknown;
 }
 

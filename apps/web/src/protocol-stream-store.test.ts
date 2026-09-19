@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { TRUNCATED_NOTICE } from "@/projection";
 interface FakeController {
   initialThreadId?: string;
   isLoading: boolean;
   rootMessages: unknown[];
+  rootValues: Record<string, unknown>;
   subagents: Map<string, unknown>;
   submits: Array<{ input: unknown; opts: unknown }>;
   acquiredNamespaces: string[][];
@@ -67,6 +69,7 @@ vi.mock("@langchain/langgraph-sdk/stream", () => {
     private subs = new Set<() => void>();
     isLoading = false;
     rootMessages: unknown[] = [];
+    rootValues: Record<string, unknown> = {};
     subagents = new Map<string, unknown>();
     submits: Array<{ input: unknown; opts: unknown }> = [];
     acquiredNamespaces: string[][] = [];
@@ -98,7 +101,7 @@ vi.mock("@langchain/langgraph-sdk/stream", () => {
       },
       getSnapshot: () => ({
         messages: this.rootMessages,
-        values: {},
+        values: this.rootValues,
         isLoading: this.isLoading,
         error: this.rootError,
         interrupt: this.interrupt,
@@ -524,6 +527,37 @@ describe("ProtocolStreamStore steering-enqueue", () => {
       errorText: "Could not load credentials from any providers",
       errorCode: "AUTH_EXPIRED",
     });
+  });
+
+  it("surfaces the truncated-turn notice from values, without marking the run an error", async () => {
+    await store.attach(TID, false);
+    await store.send(TID, "summarize the thread");
+    await flush();
+
+    last.rootValues = { truncated: true };
+    last.isLoading = false;
+    last.notify();
+
+    expect(store.getSlice(TID)).toMatchObject({
+      status: "idle",
+      errorText: undefined,
+      truncatedNotice: TRUNCATED_NOTICE,
+    });
+  });
+
+  it("clears the truncated-turn notice once a later turn publishes truncated: false", async () => {
+    await store.attach(TID, false);
+    await store.send(TID, "summarize the thread");
+    await flush();
+    last.rootValues = { truncated: true };
+    last.isLoading = false;
+    last.notify();
+    expect(store.getSlice(TID).truncatedNotice).toBe(TRUNCATED_NOTICE);
+
+    last.rootValues = { truncated: false };
+    last.notify();
+
+    expect(store.getSlice(TID).truncatedNotice).toBeUndefined();
   });
 
   it("clears a prior run error once the next run resolves", async () => {

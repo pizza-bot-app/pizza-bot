@@ -1,4 +1,10 @@
-import { ASSISTANT_ID, classifyError, type HitlDecision, type AttachmentMeta } from "@pizza-bot/core";
+import {
+  ASSISTANT_ID,
+  classifyError,
+  type HitlDecision,
+  type AttachmentMeta,
+  type ThreadStateValues,
+} from "@pizza-bot/core";
 import {
   buildBatchResumeCommand,
   messagesToUI,
@@ -6,6 +12,7 @@ import {
   usageFromMessages,
   overlayInterrupt,
   parseInterruptActions,
+  TRUNCATED_NOTICE,
   type ThreadSlice,
   type StreamStatus,
   type RawMessage,
@@ -33,6 +40,7 @@ const EMPTY_SLICE: ThreadSlice = {
   attached: false,
   queued: [],
   usage: undefined,
+  truncatedNotice: undefined,
 };
 
 export type HydrationStatus = "unattached" | "loading" | "ready" | "error";
@@ -370,6 +378,9 @@ export class ProtocolStreamStore {
       rootError ?? (e.hydrationStatus === "error" ? e.hydrationError : undefined);
     const errorText = status === "error" ? errorMessage(surfacedError) : undefined;
     const errorCode = errorText !== undefined ? classifyError(surfacedError) : undefined;
+    const truncatedNotice = (root.values as ThreadStateValues | undefined)?.truncated
+      ? TRUNCATED_NOTICE
+      : undefined;
 
     if (e.hydrationStatus === "ready" && !root.isLoading && !root.interrupt) {
       messages = sealOpenToolCalls(messages);
@@ -381,6 +392,7 @@ export class ProtocolStreamStore {
       status,
       errorText,
       errorCode,
+      truncatedNotice,
       ...(e.runId ? { runId: e.runId } : { runId: undefined }),
       attached: e.hydrationStatus === "ready",
       hydrationStatus: e.hydrationStatus,
@@ -791,6 +803,7 @@ function sliceEqual(a: ProtocolThreadSlice, b: ProtocolThreadSlice): boolean {
     a.status === b.status &&
     a.errorText === b.errorText &&
     a.errorCode === b.errorCode &&
+    a.truncatedNotice === b.truncatedNotice &&
     a.runId === b.runId &&
     a.attached === b.attached &&
     a.hydrationStatus === b.hydrationStatus &&
