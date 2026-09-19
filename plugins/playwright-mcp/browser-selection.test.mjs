@@ -8,6 +8,7 @@ import {
   hasBrowserSelection,
   installedBrowser,
   needsHeadlessMode,
+  needsSandboxOptOut,
 } from "./browser-selection.mjs";
 
 test("recognizes explicit browser selection flags", () => {
@@ -117,6 +118,12 @@ test("uses headless mode on Linux without a display server", () => {
     false,
   );
   assert.equal(needsHeadlessMode({ platform: "darwin", env: {} }), false);
+});
+
+test("opts out of the Chromium sandbox only on Linux", () => {
+  assert.equal(needsSandboxOptOut({ platform: "linux" }), true);
+  assert.equal(needsSandboxOptOut({ platform: "darwin" }), false);
+  assert.equal(needsSandboxOptOut({ platform: "win32" }), false);
 });
 
 test("reports a missing configured browser through MCP initialization", { timeout: 10_000 }, async (t) => {
