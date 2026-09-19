@@ -30,15 +30,11 @@ import {
 } from "@pizza-bot/core";
 import type { ThreadStateValues } from "@pizza-bot/core";
 import type { ProtocolEvent, StateSnapshot } from "@langchain/langgraph";
-import { RunnableLambda } from "@langchain/core/runnables";
 import { modelCallLimitMiddleware, toolCallLimitMiddleware } from "langchain";
 import { buildBackend } from "./backend.js";
 import { toolErrorRecoveryMiddleware } from "./tool-error-middleware.js";
 import { outputTruncationMiddleware } from "./output-truncation-middleware.js";
-import {
-  SUBAGENT_MODEL_CALL_COUNT,
-  subagentFinalizationMiddleware,
-} from "./subagent-finalization-middleware.js";
+import { subagentFinalizationMiddleware } from "./subagent-finalization-middleware.js";
 import { attachmentInlineMiddleware } from "./attachment-inline-middleware.js";
 import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
 import { localFolderContextMiddleware } from "./local-folder-context-middleware.js";
@@ -93,29 +89,6 @@ function runLimitMiddleware(limits: RunLimits): unknown[] {
     }));
   }
   return middleware;
-}
-
-// DeepAgents returns arbitrary child state to the parent; limiter counters are invocation-local.
-const SUBAGENT_STATE_EXCLUSIONS = [
-  "threadModelCallCount",
-  "runModelCallCount",
-  "threadToolCallCount",
-  "runToolCallCount",
-  SUBAGENT_MODEL_CALL_COUNT,
-] as const;
-
-function excludeSubagentLocalState(state: Record<string, unknown>): Record<string, unknown> {
-  const filtered = { ...state };
-  for (const key of SUBAGENT_STATE_EXCLUSIONS) delete filtered[key];
-  return filtered;
-}
-
-function isolateSubagentLocalState(runnable: ReturnType<typeof createSubAgent>) {
-  return RunnableLambda.from(async (state: Record<string, unknown>, config) => {
-    const input = excludeSubagentLocalState(state) as Parameters<typeof runnable.invoke>[0];
-    const result = await runnable.invoke(input, config);
-    return excludeSubagentLocalState(result as Record<string, unknown>);
-  });
 }
 
 /**
@@ -352,18 +325,16 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
     return {
       name: subagent.name,
       description: subagent.description,
-      runnable: isolateSubagentLocalState(
-        // Compiled subagents bypass createDeepAgent's declarative filesystem/skills normalization.
-        createSubAgent({
-          ...subagent,
-          model,
-          tools: subagent.tools ?? [],
-          middleware: [
-            createFilesystemMiddleware({ backend }),
-            ...(subagent.middleware ?? []),
-          ],
-        }),
-      ),
+      // Compiled subagents bypass createDeepAgent's declarative filesystem/skills normalization.
+      runnable: createSubAgent({
+        ...subagent,
+        model,
+        tools: subagent.tools ?? [],
+        middleware: [
+          createFilesystemMiddleware({ backend }),
+          ...(subagent.middleware ?? []),
+        ],
+      }),
     };
   });
 
