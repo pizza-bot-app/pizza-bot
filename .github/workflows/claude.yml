@@ -73,6 +73,12 @@ jobs:
           # profile from AWS_REGION. It does not confine the run to one model:
           # background tasks also invoke Haiku and Sonnet, inheriting the
           # global. prefix, so the role's policy must allow those profiles too.
+          #
+          # Overshooting --max-turns fails the job even when the review itself
+          # succeeded and posted, so keep the cap clear of what a real review
+          # costs; timeout-minutes is the actual runaway guard. No --allowedTools
+          # here on purpose: naming any tool would replace the action's curated
+          # default set, which is already the right one for answering a mention.
           claude_args: |
             --model global.anthropic.claude-opus-5
-            --max-turns 30
+            --max-turns 60

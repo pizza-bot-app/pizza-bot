@@ -186,6 +186,26 @@ commenting actor has write access before the credentials step, because the actio
 enforces that itself only afterwards — on a public repository any comment carrying
 the trigger phrase otherwise mints a role session first.
 
+Two things about `claude_args` cost a run before they were understood, and neither
+is visible in the workflow file:
+
+- **`--allowedTools` replaces the action's default tool set, it does not extend
+  it.** A mention-triggered run gets a curated default — the read tools, the
+  comment and CI tools, and scoped `git` writes — but naming a single tool
+  discards all of it. `claude-code-review.yml` therefore has to list `Read` and
+  friends itself; without them the review can only see the diff and cannot open a
+  file to check what it suspects.
+- **Overshooting `--max-turns` fails the job even when the review succeeded.** The
+  action compares the turn count afterwards, so a finished, posted review still
+  ends in a red check and a comment reading "Claude encountered an error". A real
+  review of five files took 31 turns. `timeout-minutes` is the honest runaway
+  guard; the turn cap is only a backstop and belongs well above what a review
+  costs.
+
+Neither workflow installs the repository's dependencies, so Claude reviews
+statically and cannot run `npm test` to check a suspicion. Granting that would
+mean executing a contributor's code inside a job holding the Bedrock role.
+
 ### Bedrock trust setup
 
 One IAM role serves both workflows, dedicated to this purpose so its policy stays
