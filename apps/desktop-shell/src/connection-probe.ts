@@ -65,10 +65,10 @@ export async function probeRemoteConnection(
     return { remoteUrl, apiVersion: body.apiVersion };
   } catch (err) {
     if (controller.signal.aborted) {
-      throw new Error("The backend connection timed out.");
+      throw new Error("The backend connection timed out.", { cause: err });
     }
     if (err instanceof Error) throw err;
-    throw new Error(String(err));
+    throw new Error(String(err), { cause: err });
   } finally {
     clearTimeout(timer);
   }

@@ -22,7 +22,7 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
-    "@langchain/langgraph-sdk": "~1.9.28",
+    "@langchain/langgraph-sdk": "~1.9.31",
     "@langchain/protocol": "^0.0.18",
     "@pizza-bot/core": "*",
     "@pizza-bot/logging": "*"

@@ -5,7 +5,7 @@ export interface StoredZipInput {
 }
 
 /** Builds a minimal uncompressed ZIP for route and parser tests. */
-export function storedZip(files: StoredZipInput[]): Uint8Array {
+export function storedZip(files: StoredZipInput[]): Uint8Array<ArrayBuffer> {
   const localParts: Uint8Array[] = [];
   const centralParts: Uint8Array[] = [];
   let offset = 0;
@@ -55,7 +55,7 @@ export function storedZip(files: StoredZipInput[]): Uint8Array {
   return concat([...localParts, ...centralParts, end]);
 }
 
-function concat(parts: Uint8Array[]): Uint8Array {
+function concat(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
   const output = new Uint8Array(parts.reduce((sum, part) => sum + part.byteLength, 0));
   let offset = 0;
   for (const part of parts) {

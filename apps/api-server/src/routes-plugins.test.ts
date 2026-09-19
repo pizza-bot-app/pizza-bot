@@ -10,7 +10,7 @@ import { storedZip } from "./test-utils/stored-zip.js";
 import { MAX_PLUGIN_ARCHIVE_BYTES } from "./plugin-import.js";
 import { multipartRequestLimit } from "./request-limits.js";
 
-function uploadForm(bytes: Uint8Array, filename = "plugin.zip"): FormData {
+function uploadForm(bytes: Uint8Array<ArrayBuffer>, filename = "plugin.zip"): FormData {
   const form = new FormData();
   form.set("file", new File([bytes], filename, { type: "application/zip" }));
   return form;

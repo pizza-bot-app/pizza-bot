@@ -131,7 +131,7 @@ are written — keep them in mind when adding assertions or temp-dir cleanup:
 `npm install` does not need MSVC — see CONTRIBUTING's setup note for how
 `allowScripts` denies `better-sqlite3`'s implicit `node-gyp rebuild`, which
 would otherwise be both mandatory (node-gyp fails at *configure* without a
-toolchain) and unused (prebuilt binaries ship for every platform). Electron 43
+toolchain) and unused (prebuilt binaries ship for every platform). Electron 44
 has no `postinstall`; `index.js` downloads the binary lazily on first launch.
 
 ## Verify in the browser, not just tests

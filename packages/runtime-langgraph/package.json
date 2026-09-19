@@ -17,10 +17,10 @@
     "@langchain/core": "^1.2.9",
     "@langchain/langgraph": "^1.4.10",
     "@pizza-bot/core": "*",
-    "deepagents": "^1.13.2",
+    "deepagents": "^1.14.0",
     "langchain": "^1.5.10"
   },
   "optionalDependencies": {
-    "@langchain/quickjs": "0.6.1"
+    "@langchain/quickjs": "0.6.4"
   }
 }

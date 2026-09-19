@@ -8,7 +8,7 @@
     "test": "node --test browser-selection.test.mjs"
   },
   "dependencies": {
-    "@playwright/mcp": "0.0.79",
-    "playwright": "1.63.0-alpha-2026-08-05"
+    "@playwright/mcp": "0.0.80",
+    "playwright": "1.63.0"
   }
 }
