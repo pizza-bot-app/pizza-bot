@@ -52,7 +52,7 @@ jobs:
           # required for the inline-comment tool even though the skill's own
           # frontmatter names it, because the action starts that MCP server only
           # when claude_args asks for it. Nothing listed executes the pull
-          # request's own code, which is what keeps a fork's branch safe to read.
+          # request's own code, which a build or test command would.
           #
           # Pinning the full model ID stops Claude Code from deriving a us.
           # profile from AWS_REGION. It does not confine the run to one model:
