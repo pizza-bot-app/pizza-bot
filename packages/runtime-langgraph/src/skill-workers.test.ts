@@ -5,22 +5,7 @@ import {
   type SkillCatalogEntry,
   type SkillInterruptOn,
 } from "@pizza-bot/core";
-import {
-  codeInterpreterOptions,
-  evalFilesystemWritable,
-  resolveSkillSubagents,
-} from "./index.js";
-
-function folder(readOnly: boolean) {
-  return {
-    id: readOnly ? "docs" : "scratch",
-    label: "grant",
-    path: "/host/grant",
-    virtualPath: "/local/grant",
-    readOnly,
-    createdAt: "2026-01-01T00:00:00.000Z",
-  };
-}
+import { codeInterpreterOptions, resolveSkillSubagents } from "./index.js";
 
 function skill(
   id: string,
@@ -161,37 +146,25 @@ describe("resolveSkillSubagents", () => {
 
 describe("eval capability", () => {
   it("enables task fan-out only for Pizza Bot", () => {
-    expect(codeInterpreterOptions(false, false)).toMatchObject({ subagents: false });
-    expect(codeInterpreterOptions(true, false)).toMatchObject({
-      executionTimeoutMs: 120_000,
-      subagents: true,
-    });
+    expect(codeInterpreterOptions(false)).toMatchObject({ subagents: false });
+    expect(codeInterpreterOptions(true)).toMatchObject({ subagents: true });
   });
 
-  it("bridges read-only filesystem tools until a writable target exists", () => {
-    expect(codeInterpreterOptions(false, false).ptc).toEqual([
+  it("bridges the filesystem tools, reads and writes alike", () => {
+    expect(codeInterpreterOptions(false).ptc).toEqual([
       "ls",
       "read_file",
       "glob",
       "grep",
+      "write_file",
+      "edit_file",
     ]);
-    expect(codeInterpreterOptions(false, true).ptc).toContain("write_file");
-    expect(codeInterpreterOptions(false, true).ptc).toContain("edit_file");
   });
 
-  it("never bridges MCP tools, which would escape a skill's interruptOn", () => {
-    expect(codeInterpreterOptions(true, true).ptc.every((ref) => !ref.includes(":")))
-      .toBe(true);
-  });
-
-  it("reads writability from live settings", () => {
-    expect(evalFilesystemWritable({})).toBe(false);
-    expect(evalFilesystemWritable({ localFolders: () => [folder(true)] })).toBe(false);
-    expect(evalFilesystemWritable({ localFolders: () => [folder(true), folder(false)] }))
-      .toBe(true);
-    expect(evalFilesystemWritable({ memoriesDir: "/data/memories" })).toBe(true);
-    expect(
-      evalFilesystemWritable({ memoriesDir: "/data/memories", memoryEnabled: () => false }),
-    ).toBe(false);
+  it("keeps the bounds a paging loop depends on", () => {
+    expect(codeInterpreterOptions(true)).toMatchObject({
+      maxResultChars: 8_000,
+      executionTimeoutMs: 120_000,
+    });
   });
 });

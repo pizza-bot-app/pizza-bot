@@ -141,42 +141,40 @@ function mcpToolRefs(refs: readonly string[]): string[] {
   return refs.filter((ref) => ref !== BUILTIN_EVAL_TOOL_REF);
 }
 
-const EVAL_READ_TOOLS = ["ls", "read_file", "glob", "grep"] as const;
-const EVAL_WRITE_TOOLS = ["write_file", "edit_file"] as const;
-
 /**
- * A grant configured read-write, or durable memory left on, is what earns the
- * sandbox its mutating filesystem tools. The backend still gates every call, so
- * this only narrows which tools the generated code can name.
+ * The filesystem tools bridged into the sandbox as the `tools.*` namespace. The
+ * mutating two are bridged unconditionally: the backend re-reads each grant's
+ * `readOnly` flag per call, so a withheld tool would duplicate a gate that is
+ * already live while the bridge is fixed at build time.
  */
-export function evalFilesystemWritable(deps: RuntimeDeps): boolean {
-  if (deps.memoriesDir && (deps.memoryEnabled?.() ?? true)) return true;
-  return (deps.localFolders?.() ?? []).some((folder) => !folder.readOnly);
-}
+const EVAL_PTC_TOOLS = [
+  "ls",
+  "read_file",
+  "glob",
+  "grep",
+  "write_file",
+  "edit_file",
+] as const;
 
-/** Filesystem tools bridged into the sandbox as the `tools.*` namespace. */
-export function evalPtcTools(writable: boolean): string[] {
-  return writable ? [...EVAL_READ_TOOLS, ...EVAL_WRITE_TOOLS] : [...EVAL_READ_TOOLS];
-}
-
-export function codeInterpreterOptions(hasSubagents: boolean, writable: boolean) {
+export function codeInterpreterOptions(hasSubagents: boolean) {
   return {
     // Only MCP tools are withheld: reaching them from code would bypass the HITL
     // approval a skill declares through `interruptOn`.
-    ptc: evalPtcTools(writable),
-    // The budget must cover awaited host work — subagent dispatch and paged reads.
+    ptc: [...EVAL_PTC_TOOLS] as string[],
+    // Deliberately above the upstream default: the sandbox exists so bulk data
+    // stays inside it and only a distillate returns through this string.
+    maxResultChars: 8_000,
+    // The budget must cover awaited host work — paged reads in an orchestrator or
+    // a skill worker, and subagent dispatch where it is enabled.
     executionTimeoutMs: 120_000,
     subagents: hasSubagents,
   } as const;
 }
 
-async function codeInterpreterMiddleware(
-  hasSubagents: boolean,
-  writable: boolean,
-): Promise<unknown> {
+async function codeInterpreterMiddleware(hasSubagents: boolean): Promise<unknown> {
   try {
     const { createCodeInterpreterMiddleware } = await import("@langchain/quickjs");
-    return createCodeInterpreterMiddleware(codeInterpreterOptions(hasSubagents, writable));
+    return createCodeInterpreterMiddleware(codeInterpreterOptions(hasSubagents));
   } catch {
     throw new Error(
       `An agent declares "${BUILTIN_EVAL_TOOL_REF}" but @langchain/quickjs is not installed. ` +
@@ -235,7 +233,7 @@ export async function resolveSkillSubagents(
         middleware.push(localFolderContextMiddleware(deps.localFolders));
       }
       if (hasEvalTool(entry.declaredTools)) {
-        middleware.push(await codeInterpreterMiddleware(false, evalFilesystemWritable(deps)));
+        middleware.push(await codeInterpreterMiddleware(false));
       }
       const tools = resolveToolRefs(
         mcpToolRefs(entry.declaredTools),
@@ -362,10 +360,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
     subagents: subagents ?? [],
   }));
   // The sandbox's task() global only has somewhere to dispatch when subagents exist.
-  middleware.push(await codeInterpreterMiddleware(
-    Boolean(subagents?.length),
-    evalFilesystemWritable(deps),
-  ));
+  middleware.push(await codeInterpreterMiddleware(Boolean(subagents?.length)));
 
   const params: Record<string, unknown> = {
     systemPrompt,

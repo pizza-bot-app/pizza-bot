@@ -231,17 +231,19 @@ in `core/src/protocol-types.ts`:
 - **Sandboxed evaluation** is `@langchain/quickjs`'s code interpreter, and the
   QuickJS guest has no filesystem of its own. Its bridges are the `task()` global
   and the `tools.*` namespace, into which the runtime exposes exactly the
-  DeepAgents filesystem tools (`ls`/`read_file`/`glob`/`grep`, plus
-  `write_file`/`edit_file` once a writable grant or durable memory exists) as
-  camelCase functions. Paging a large file through `read_file`'s `offset`/`limit`
-  inside `eval` is how bulk data is processed without entering the conversation.
-  Upstream special-cases `read_file` by name, stripping the `cat -n` line numbers
-  and `@@ … @@` status header the tool shows in a transcript, so a page arrives in
-  the guest as raw content; no other bridged tool gets that treatment. MCP tools
-  are deliberately withheld: reaching one from generated code would
-  bypass the approval a skill declares through `interruptOn`. The bridged list is
-  fixed when the graph compiles, so `GraphManager` treats grant writability as a
-  rebuild-forcing setting even though the backend gate itself stays live.
+  DeepAgents filesystem tools (`ls`/`read_file`/`glob`/`grep`/`write_file`/
+  `edit_file`) as camelCase functions. Paging a large file through `read_file`'s
+  `offset`/`limit` inside `eval` is how bulk data is processed without entering the
+  conversation. Upstream special-cases `read_file` by name, stripping the `cat -n`
+  line numbers and `@@ … @@` status header the tool shows in a transcript, so a
+  page arrives in the guest as raw content; no other bridged tool gets that
+  treatment. MCP tools are deliberately withheld: reaching one from generated code
+  would bypass the approval a skill declares through `interruptOn`. Writes are not
+  narrowed at the bridge — the composite backend re-reads each grant's `readOnly`
+  flag on every call, so it refuses the write and names why, whereas the bridged
+  list is fixed when the graph compiles and would freeze a live gate. Sandbox
+  bounds are upstream's defaults except `maxResultChars`, raised because a
+  distillate is all that should come back through that string.
 - **Model context limits** are resolved by each inference-provider adapter from
   effective local configuration or provider metadata, with models.dev filling
   missing catalog fields. The adapter publishes the same available limit as

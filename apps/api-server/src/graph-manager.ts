@@ -12,11 +12,7 @@ import {
   type SkillAvailability,
   type SkillCatalog,
 } from "@pizza-bot/core";
-import {
-  createPizzaBotAgent,
-  evalFilesystemWritable,
-  type LangGraphAgent,
-} from "@pizza-bot/runtime-langgraph";
+import { createPizzaBotAgent, type LangGraphAgent } from "@pizza-bot/runtime-langgraph";
 import type { ToolCatalog } from "@pizza-bot/plugin-sdk";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
@@ -38,8 +34,6 @@ interface RuntimeSettingsSnapshot {
   memoriesEnabled: boolean;
   maxToolCalls: number;
   maxSubagentToolCalls: number;
-  /** Fixes the sandbox's bridged filesystem tools at build time. */
-  evalFilesystemWritable: boolean;
 }
 
 export interface CapabilityReplacement {
@@ -302,7 +296,6 @@ export class GraphManager {
         : false,
       maxToolCalls: this.getMaxToolCalls(),
       maxSubagentToolCalls: this.getMaxSubagentToolCalls(),
-      evalFilesystemWritable: evalFilesystemWritable(dependencies),
     };
   }
 
@@ -313,8 +306,7 @@ export class GraphManager {
       current.addendum === this.appliedRuntimeSettings.addendum &&
       current.memoriesEnabled === this.appliedRuntimeSettings.memoriesEnabled &&
       current.maxToolCalls === this.appliedRuntimeSettings.maxToolCalls &&
-      current.maxSubagentToolCalls === this.appliedRuntimeSettings.maxSubagentToolCalls &&
-      current.evalFilesystemWritable === this.appliedRuntimeSettings.evalFilesystemWritable
+      current.maxSubagentToolCalls === this.appliedRuntimeSettings.maxSubagentToolCalls
     );
   }
 
