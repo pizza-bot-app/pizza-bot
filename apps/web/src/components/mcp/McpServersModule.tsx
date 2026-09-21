@@ -97,7 +97,7 @@ export function McpServersModule({
   );
 }
 
-function McpServerActions({
+export function McpServerActions({
   server,
   deleteBlockedReason,
   onEdit,
@@ -262,9 +262,7 @@ function McpServerDetail({
         enablement={enablement}
         reconnectControl={reconnectControl}
         dependents={dependents}
-        deleteBlockedReason={deleteBlockedReason}
         onSave={handleSave}
-        onDelete={() => requestDelete(selected)}
         onCancel={leaveEditor}
       />
     );

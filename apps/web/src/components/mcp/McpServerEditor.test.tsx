@@ -52,17 +52,11 @@ describe("McpServerEditor", () => {
     )).not.toContain("The ID is fixed once created");
   });
 
-  it("shows a disabled Delete with the blocking reason when skills depend on the server", () => {
-    const html = render({
-      onDelete: vi.fn(),
-      deleteBlockedReason: "Required by Email Triage. Disable that skill first.",
-    });
-    expect(html).toMatch(
-      /<button[^>]*resource-editor-delete[^>]*disabled=""[^>]*title="Required by Email Triage\. Disable that skill first\."/,
-    );
-  });
-
-  it("pins the actions footer so Delete, Cancel and Save stay reachable", () => {
-    expect(render()).toContain('class="resource-editor-actions sticky"');
+  it("keeps destructive actions out of the form: only Cancel and Save in the footer", () => {
+    const html = render();
+    const footer = html.slice(html.indexOf('<footer class="resource-editor-actions"'));
+    expect(footer).toContain(">Cancel</button>");
+    expect(footer).toContain(">Save</button>");
+    expect(footer).not.toContain("Delete");
   });
 });

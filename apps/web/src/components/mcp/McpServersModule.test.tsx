@@ -1,8 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { McpServerRow } from "@/api-client";
-import { AppToastProvider } from "../AppToast.js";
-import { McpServersModule } from "./McpServersModule.js";
+import { McpServerActions } from "./McpServersModule.js";
 
 function server(overrides: Partial<McpServerRow> = {}): McpServerRow {
   return {
@@ -17,30 +16,24 @@ function server(overrides: Partial<McpServerRow> = {}): McpServerRow {
   };
 }
 
-function render(row: McpServerRow): string {
+function render(row: McpServerRow, deleteBlockedReason?: string): string {
   return renderToStaticMarkup(
-    <AppToastProvider>
-      <McpServersModule
-        servers={[row]}
-        onCreate={vi.fn()}
-        onUpdate={vi.fn()}
-        onSetEnabled={vi.fn()}
-        onReconnect={vi.fn()}
-        onDelete={vi.fn()}
-        onGetDoc={vi.fn()}
-        onGetTools={vi.fn()}
-        onOpenPlugins={vi.fn()}
-      />
-    </AppToastProvider>,
+    <McpServerActions
+      server={row}
+      deleteBlockedReason={deleteBlockedReason}
+      onEdit={vi.fn()}
+      onDelete={vi.fn()}
+      onOpenPlugins={vi.fn()}
+    />,
   );
 }
 
-const buttons = (html: string) =>
-  [...html.matchAll(/<button[^>]*>(?:(?!<\/button>).)*<\/button>/gs)].map((m) => m[0]);
 const button = (html: string, label: string) =>
-  buttons(html).find((b) => b.includes(`aria-label="${label}"`) || new RegExp(`>\\s*${label}</button>$`).test(b));
+  [...html.matchAll(/<button[^>]*>(?:(?!<\/button>).)*<\/button>/gs)]
+    .map((m) => m[0])
+    .find((b) => b.includes(`aria-label="${label}"`) || new RegExp(`>\\s*${label}</button>$`).test(b));
 
-describe("McpServersModule detail actions", () => {
+describe("McpServerActions", () => {
   it("offers live Edit and Delete icon actions for a custom server", () => {
     const html = render(server());
     expect(button(html, "Edit outlook")).toContain("plugin-card-action");
@@ -59,13 +52,7 @@ describe("McpServersModule detail actions", () => {
   });
 
   it("disables Delete with the blocking reason when enabled skills depend on the server", () => {
-    const html = render(
-      server({
-        dependentSkills: [
-          { id: "triage", name: "Email Triage", source: "user", enabled: true },
-        ],
-      }),
-    );
+    const html = render(server(), "Required by Email Triage. Disable that skill first.");
     expect(button(html, "Edit outlook")).not.toContain("disabled");
     expect(button(html, "Delete outlook")).toMatch(
       /title="Required by Email Triage\. Disable that skill first\."[^>]*disabled=""/,
