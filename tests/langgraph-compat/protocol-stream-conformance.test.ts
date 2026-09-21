@@ -456,10 +456,9 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       .filter((d) => d.tool_call_id === "eval-bridge-1" && d.event === "tool-finished")
       .map((d) => JSON.stringify(d))
       .join("");
-    expect(evalResult).not.toBe("");
-    for (const name of ["ls", "readFile", "glob", "grep", "writeFile", "editFile"]) {
-      expect(evalResult).toContain(name);
-    }
+    // The exact sorted set, so an extra reachable tool fails too. Asserting the
+    // names one by one would let "ls" pass on the word "tools" alone.
+    expect(evalResult).toContain("editFile,glob,grep,ls,readFile,writeFile");
     expect(evalResult).not.toContain("filesystem-mcp-server");
     expect(evalResult).not.toContain("filesystemMcpServer");
   });

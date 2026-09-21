@@ -241,9 +241,13 @@ in `core/src/protocol-types.ts`:
   would bypass the approval a skill declares through `interruptOn`. Writes are not
   narrowed at the bridge — the composite backend re-reads each grant's `readOnly`
   flag on every call, so it refuses the write and names why, whereas the bridged
-  list is fixed when the graph compiles and would freeze a live gate. Sandbox
-  bounds are upstream's defaults except `maxResultChars`, raised because a
-  distillate is all that should come back through that string.
+  list is fixed when the graph compiles and would freeze a live gate. Two sandbox
+  bounds are pinned here: `maxResultChars`, raised because a distillate is all that
+  should come back through that string, and `executionTimeoutMs`, which has to
+  cover awaited host work — paged reads and subagent dispatch — rather than a
+  synchronous computation. The rest (`maxPtcCalls`, the memory and stack ceilings)
+  deliberately track upstream's defaults and will move with a `@langchain/quickjs`
+  bump.
 - **Model context limits** are resolved by each inference-provider adapter from
   effective local configuration or provider metadata, with models.dev filling
   missing catalog fields. The adapter publishes the same available limit as
