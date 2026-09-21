@@ -8,7 +8,8 @@ interface KeyedDocValue<D> {
 
 // Cached documents keep repeat selection changes stable while each visit
 // revalidates against the server. `undefined` = still loading, `null` = the
-// server reported the document absent.
+// document is unavailable (absent or the fetch failed); callers retry via
+// `reloadToken`.
 export function useKeyedDoc<D>(
   key: string | null,
   fetcher: (key: string) => Promise<D | undefined>,
@@ -27,13 +28,15 @@ export function useKeyedDoc<D>(
   useEffect(() => {
     if (key === null) return;
     let alive = true;
-    void fetcher(key).then((d) => {
-      if (!alive) return;
-      const next = { key, reloadToken, doc: d ?? null };
-      if (d) cache.current.set(key, next);
-      else cache.current.delete(key);
-      setResolved(next);
-    });
+    void fetcher(key)
+      .catch(() => undefined)
+      .then((d) => {
+        if (!alive) return;
+        const next = { key, reloadToken, doc: d ?? null };
+        if (d) cache.current.set(key, next);
+        else cache.current.delete(key);
+        setResolved(next);
+      });
     return () => {
       alive = false;
     };
