@@ -1703,6 +1703,10 @@ button.sidebar-folder-row:hover,
   display: flex; flex-direction: column; gap: 8px; padding: 14px 0;
   border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
 }
+/* In the card every following block draws its own top rule, so only the top edge separates here. */
+.resource-card > .capability-enablement,
+.resource-card > .mcp-reconnect { border-bottom: 0; }
+.resource-card > .mcp-reconnect { border-top: 1px solid var(--border); }
 .capability-enablement-row {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
 }
