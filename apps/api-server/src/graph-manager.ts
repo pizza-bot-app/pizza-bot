@@ -12,7 +12,11 @@ import {
   type SkillAvailability,
   type SkillCatalog,
 } from "@pizza-bot/core";
-import { createPizzaBotAgent, type LangGraphAgent } from "@pizza-bot/runtime-langgraph";
+import {
+  createPizzaBotAgent,
+  evalFilesystemWritable,
+  type LangGraphAgent,
+} from "@pizza-bot/runtime-langgraph";
 import type { ToolCatalog } from "@pizza-bot/plugin-sdk";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
@@ -26,6 +30,16 @@ export interface GraphManagerOptions {
   getMaxToolCalls?: () => number;
   /** Read at every graph build so a skill tool-call limit change takes effect on rebuild. */
   getMaxSubagentToolCalls?: () => number;
+}
+
+/** Every field here forces a graph rebuild when it changes between runs. */
+interface RuntimeSettingsSnapshot {
+  addendum: string;
+  memoriesEnabled: boolean;
+  maxToolCalls: number;
+  maxSubagentToolCalls: number;
+  /** Fixes the sandbox's bridged filesystem tools at build time. */
+  evalFilesystemWritable: boolean;
 }
 
 export interface CapabilityReplacement {
@@ -71,12 +85,7 @@ export class GraphManager {
   private agentImpl?: LangGraphAgent;
   private readonly cache = new Map<string, Promise<LangGraphAgent>>();
   private updates: Promise<void> = Promise.resolve();
-  private appliedRuntimeSettings?: {
-    addendum: string;
-    memoriesEnabled: boolean;
-    maxToolCalls: number;
-    maxSubagentToolCalls: number;
-  };
+  private appliedRuntimeSettings?: RuntimeSettingsSnapshot;
 
   constructor(opts: GraphManagerOptions) {
     this.modelId = opts.modelId;
@@ -285,12 +294,7 @@ export class GraphManager {
     this.cache.set(this.modelId, Promise.resolve(agent));
   }
 
-  private readRuntimeSettings(dependencies: RuntimeDeps): {
-    addendum: string;
-    memoriesEnabled: boolean;
-    maxToolCalls: number;
-    maxSubagentToolCalls: number;
-  } {
+  private readRuntimeSettings(dependencies: RuntimeDeps): RuntimeSettingsSnapshot {
     return {
       addendum: this.getPersonaAddendum(),
       memoriesEnabled: dependencies.memoriesDir
@@ -298,6 +302,7 @@ export class GraphManager {
         : false,
       maxToolCalls: this.getMaxToolCalls(),
       maxSubagentToolCalls: this.getMaxSubagentToolCalls(),
+      evalFilesystemWritable: evalFilesystemWritable(dependencies),
     };
   }
 
@@ -308,7 +313,8 @@ export class GraphManager {
       current.addendum === this.appliedRuntimeSettings.addendum &&
       current.memoriesEnabled === this.appliedRuntimeSettings.memoriesEnabled &&
       current.maxToolCalls === this.appliedRuntimeSettings.maxToolCalls &&
-      current.maxSubagentToolCalls === this.appliedRuntimeSettings.maxSubagentToolCalls
+      current.maxSubagentToolCalls === this.appliedRuntimeSettings.maxSubagentToolCalls &&
+      current.evalFilesystemWritable === this.appliedRuntimeSettings.evalFilesystemWritable
     );
   }
 

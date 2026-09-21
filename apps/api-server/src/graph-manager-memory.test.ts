@@ -8,7 +8,10 @@ import { registerBuiltinProviders } from "@pizza-bot/inference-providers";
 import { createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
 import { GraphManager } from "./graph-manager.js";
 
-vi.mock("@pizza-bot/runtime-langgraph", () => ({
+vi.mock("@pizza-bot/runtime-langgraph", async () => ({
+  ...(await vi.importActual<typeof import("@pizza-bot/runtime-langgraph")>(
+    "@pizza-bot/runtime-langgraph",
+  )),
   createPizzaBotAgent: vi.fn(async () => ({})),
 }));
 
@@ -45,6 +48,36 @@ describe("GraphManager memory settings", () => {
     const [enabledPrompt, enabledDeps] = vi.mocked(createPizzaBotAgent).mock.calls.at(-1)!;
     expect(enabledPrompt).toContain(PIZZA_BOT_MEMORY_PROMPT);
     expect((enabledDeps as RuntimeDeps).memoryEnabled?.()).toBe(true);
+  });
+
+  it("rebuilds when a grant becomes writable, since eval's tool bridge is fixed at build", async () => {
+    const models = new ModelRegistry();
+    await registerBuiltinProviders(models);
+    let readOnly = true;
+    const registry = new GraphManager({
+      modelId: MODEL_ID,
+      models,
+      dependencies: {
+        localFolders: () => [{
+          id: "notes",
+          label: "Notes",
+          path: "/host/notes",
+          virtualPath: "/local/notes",
+          readOnly,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }],
+      },
+    });
+
+    await registry.initialize(await models.buildModel(MODEL_ID));
+    expect(vi.mocked(createPizzaBotAgent)).toHaveBeenCalledTimes(1);
+
+    await registry.ensureSettings();
+    expect(vi.mocked(createPizzaBotAgent)).toHaveBeenCalledTimes(1);
+
+    readOnly = false;
+    await registry.ensureSettings();
+    expect(vi.mocked(createPizzaBotAgent)).toHaveBeenCalledTimes(2);
   });
 
   it("rebuilds with the current orchestrator and subagent tool-call limits", async () => {
