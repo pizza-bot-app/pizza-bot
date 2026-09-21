@@ -1,48 +1,60 @@
 import type { McpServerRow, McpToolInfo } from "@/api-client";
 import { ChevronLeft, Cable, Puzzle, Globe, TerminalSquare } from "lucide-react";
-import { Badge } from "../ui/badge.js";
+import { ProvenanceBadge } from "../ProvenanceBadge.js";
 import { L } from "../../lexicon.js";
 import { useState, type ReactNode } from "react";
 import { CapabilityStatusDot, type CapabilityVisualState } from "../CapabilityControls.js";
 import { McpToolsDialog } from "./McpToolsDialog.js";
 
+export function mcpVisualState(server: McpServerRow): CapabilityVisualState {
+  if (!server.enabled || server.status === "disabled") return "disabled";
+  if (server.status === "loading" || server.status === "retrying") return "loading";
+  if (server.status === "connected") return "active";
+  if (server.status === "crashed") return "crashed";
+  return "unavailable";
+}
+
+export function mcpStatusLabel(server: McpServerRow): string {
+  if (!server.enabled || server.status === "disabled") return "Disabled";
+  switch (server.status) {
+    case "connected":
+      return `Connected · ${server.toolCount} tool${server.toolCount === 1 ? "" : "s"}`;
+    case "loading":
+    case "retrying":
+      return "Connecting…";
+    case "crashed":
+      return "Crashed";
+    default:
+      return "Failed to connect";
+  }
+}
+
 export interface McpServerCardProps {
   server: McpServerRow;
   onBack?: () => void;
   onGetTools?: (id: string) => Promise<McpToolInfo[]>;
+  actions?: ReactNode;
   enablement?: ReactNode;
   reconnectControl?: ReactNode;
   dependents?: ReactNode;
+  loadError?: ReactNode;
 }
 
 export function McpServerCard({
   server,
+  actions,
   enablement,
   reconnectControl,
   dependents,
+  loadError,
   onBack,
   onGetTools,
 }: McpServerCardProps) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const isStdio = "command" in server.entry;
+  const statusLabel = mcpStatusLabel(server);
   const toolsLabel = `${server.toolCount} tool${server.toolCount === 1 ? "" : "s"}`;
-  const statusLabel =
-    server.status === "connected"
-      ? `Connected · ${toolsLabel}`
-      : server.status === "disabled"
-        ? "Disabled"
-        : "Not connected";
   const canListTools = server.status === "connected" && onGetTools !== undefined;
-  const visualState: CapabilityVisualState =
-    !server.enabled || server.status === "disabled"
-      ? "disabled"
-      : server.status === "connected"
-        ? "active"
-        : server.status === "crashed"
-          ? "crashed"
-        : server.status === "loading" || server.status === "retrying"
-          ? "loading"
-          : "unavailable";
 
   return (
     <div className="resource-card">
@@ -58,10 +70,10 @@ export function McpServerCard({
         <div className="resource-card-titles">
           <div className="resource-card-name-row">
             <h2 className="resource-card-name">{server.id}</h2>
-            <Badge variant="secondary">{L.pluginBadge}</Badge>
+            <ProvenanceBadge provenance={server.source} />
           </div>
           <p className="resource-card-desc">
-            <CapabilityStatusDot state={visualState} label={statusLabel} />{" "}
+            <CapabilityStatusDot state={mcpVisualState(server)} label={statusLabel} />{" "}
             {canListTools ? (
               <>
                 Connected ·{" "}
@@ -85,8 +97,10 @@ export function McpServerCard({
             </p>
           )}
         </div>
+        {actions && <div className="resource-card-actions">{actions}</div>}
       </header>
 
+      {loadError}
       {enablement}
       {reconnectControl}
 

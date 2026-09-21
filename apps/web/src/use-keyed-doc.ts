@@ -7,12 +7,13 @@ interface KeyedDocValue<D> {
 }
 
 // Cached documents keep repeat selection changes stable while each visit
-// revalidates against the server.
+// revalidates against the server. `undefined` = still loading, `null` = the
+// server reported the document absent.
 export function useKeyedDoc<D>(
   key: string | null,
   fetcher: (key: string) => Promise<D | undefined>,
   reloadToken?: unknown,
-): D | null {
+): D | null | undefined {
   const cache = useRef(new Map<string, KeyedDocValue<D>>());
   const [resolved, setResolved] = useState<KeyedDocValue<D> | null>(null);
   const cached = key === null ? undefined : cache.current.get(key);
@@ -21,7 +22,7 @@ export function useKeyedDoc<D>(
       ? resolved.doc
       : cached && Object.is(cached.reloadToken, reloadToken)
         ? cached.doc
-        : null;
+        : undefined;
 
   useEffect(() => {
     if (key === null) return;
