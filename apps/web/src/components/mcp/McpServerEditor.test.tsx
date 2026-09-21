@@ -3,24 +3,66 @@ import { describe, expect, it, vi } from "vitest";
 import { AppToastProvider } from "../AppToast.js";
 import { McpServerEditor } from "./McpServerEditor.js";
 
+const remote = {
+  id: "remote",
+  source: "user" as const,
+  entry: {
+    type: "http" as const,
+    url: "https://example.com/mcp",
+    headers: { Authorization: "Bearer secret-token" },
+  },
+};
+
+function render(props: Partial<Parameters<typeof McpServerEditor>[0]> = {}): string {
+  return renderToStaticMarkup(
+    <AppToastProvider>
+      <McpServerEditor server={remote} onSave={vi.fn()} onCancel={vi.fn()} {...props} />
+    </AppToastProvider>,
+  );
+}
+
 describe("McpServerEditor", () => {
   it("offers only transports supported by the server schema", () => {
-    const html = renderToStaticMarkup(
-      <AppToastProvider>
-        <McpServerEditor
-          server={{
-            id: "remote",
-            source: "user",
-            entry: { type: "http", url: "https://example.com/mcp" },
-          }}
-          onSave={vi.fn()}
-          onCancel={vi.fn()}
-        />
-      </AppToastProvider>,
-    );
-
+    const html = render();
     expect(html).toContain('<option value="http" selected="">');
     expect(html).toContain('<option value="sse">');
     expect(html).not.toContain('value="ws"');
+  });
+
+  it("masks secret values by default with a per-row reveal toggle", () => {
+    const html = render();
+    expect(html).toContain('type="password"');
+    expect(html).toContain('value="Bearer secret-token"');
+    expect(html).toContain('aria-label="Show Authorization value"');
+    expect(html).toContain('aria-pressed="false"');
+  });
+
+  it("keeps Save disabled until the draft differs from the stored entry", () => {
+    const html = render();
+    expect(html).toMatch(/<button[^>]*class="btn-primary"[^>]*disabled=""[^>]*>Save<\/button>/);
+  });
+
+  it("explains why the name cannot be changed on an existing server", () => {
+    const html = render();
+    expect(html).toContain("The ID is fixed once created");
+    expect(renderToStaticMarkup(
+      <AppToastProvider>
+        <McpServerEditor server={null} onSave={vi.fn()} onCancel={vi.fn()} />
+      </AppToastProvider>,
+    )).not.toContain("The ID is fixed once created");
+  });
+
+  it("shows a disabled Delete with the blocking reason when skills depend on the server", () => {
+    const html = render({
+      onDelete: vi.fn(),
+      deleteBlockedReason: "Required by Email Triage. Disable that skill first.",
+    });
+    expect(html).toMatch(
+      /<button[^>]*resource-editor-delete[^>]*disabled=""[^>]*title="Required by Email Triage\. Disable that skill first\."/,
+    );
+  });
+
+  it("pins the actions footer so Delete, Cancel and Save stay reachable", () => {
+    expect(render()).toContain('class="resource-editor-actions sticky"');
   });
 });
