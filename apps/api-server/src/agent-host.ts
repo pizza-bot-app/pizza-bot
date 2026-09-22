@@ -37,6 +37,7 @@ import {
   SettingsStore,
   ProviderConfigStore,
   ThreadActivityStore,
+  ApprovalVerdictStore,
   CapabilityPreferencesStore,
   LocalFolderStore,
   RunMaintenance,
@@ -341,6 +342,7 @@ export class AgentHost {
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
   readonly threadActivity: ThreadActivityStore;
+  readonly approvalVerdicts: ApprovalVerdictStore;
   readonly capabilityPreferences: CapabilityPreferencesStore;
   readonly localFolders: LocalFolderStore;
   modelId: string;
@@ -404,6 +406,7 @@ export class AgentHost {
     this.settings = this.appDb.settings;
     this.providerConfigs = this.appDb.providerConfigs;
     this.threadActivity = this.appDb.threadActivity;
+    this.approvalVerdicts = this.appDb.approvalVerdicts;
     this.capabilityPreferences = this.appDb.capabilityPreferences;
     this.localFolders = this.appDb.localFolders;
     this.explicitModelId = explicitModelId ?? process.env.PIZZA_MODEL ?? null;
@@ -523,6 +526,7 @@ export class AgentHost {
       this.attachments?.deleteByThread(threadId);
       this.evidence?.deleteByThread(threadId);
       this.threadActivity.deleteByThread(threadId);
+      this.approvalVerdicts.deleteByThread(threadId);
       const deleted = this.threadStore.delete(threadId);
       this.search.deleteThread(threadId);
       // SqliteSaver.deleteThread skips its lazy schema setup on an unopened database.

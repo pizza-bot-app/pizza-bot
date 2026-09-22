@@ -8,7 +8,7 @@ import { SettingsStore } from "./settings.js";
 import { ProviderConfigStore } from "./provider-configs.js";
 import { AttachmentStore } from "./attachments.js";
 import { EvidenceStore } from "./evidence.js";
-import { ThreadActivityStore } from "./thread-activity.js";
+import { ApprovalVerdictStore, ThreadActivityStore } from "./thread-activity.js";
 import { CapabilityPreferencesStore } from "./capability-preferences.js";
 import { LocalFolderStore } from "./local-folders.js";
 import { ensurePrivateDirectory, ensurePrivateFile } from "./private-files.js";
@@ -24,6 +24,7 @@ export interface AppDatabase {
   settings: SettingsStore;
   providerConfigs: ProviderConfigStore;
   threadActivity: ThreadActivityStore;
+  approvalVerdicts: ApprovalVerdictStore;
   capabilityPreferences: CapabilityPreferencesStore;
   localFolders: LocalFolderStore;
   /** Attachment metadata is in SQLite; bytes remain in `attachmentsDir`. */
@@ -59,6 +60,7 @@ export function openAppDatabase(
     settings: new SettingsStore(db),
     providerConfigs: new ProviderConfigStore(db),
     threadActivity: new ThreadActivityStore(db),
+    approvalVerdicts: new ApprovalVerdictStore(db),
     capabilityPreferences: new CapabilityPreferencesStore(db),
     localFolders: new LocalFolderStore(db),
     ...(attachmentsDir ? { attachments: new AttachmentStore(db, attachmentsDir) } : {}),

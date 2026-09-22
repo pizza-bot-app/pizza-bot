@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROUNDING_ARGUMENT } from "@pizza-bot/plugin-sdk";
+import { GROUNDING_ARGUMENT } from "@pizza-bot/core";
 import { applySkillGrounding } from "./skill-grounding.js";
 
 function tool(name: string, properties: Record<string, unknown>) {
@@ -40,7 +40,9 @@ describe("applySkillGrounding", () => {
     const description = (tools[0] as { description: string }).description;
     expect(description).toContain("Send mail.");
     expect(description).toContain("Provenance contract");
-    expect(description).toContain("verbatim");
+    // The audit resolves a span by searching the argument, so the contract must ask for
+    // the model's own wording rather than the evidence's.
+    expect(description).toContain("never the evidence's wording");
   });
 
   it("never passes verifiedArgs through to the upstream config", () => {
