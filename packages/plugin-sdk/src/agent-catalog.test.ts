@@ -61,6 +61,20 @@ describe("parseAgentMd", () => {
     const again = parseAgentMd("planner", composeAgentMd(parsed), { source: "user" });
     expect(again).toEqual(parsed);
   });
+
+  it("round-trips verifiedArgs under a tool's approval policy", () => {
+    const fields = {
+      id: "mailer",
+      description: "Sends mail.",
+      systemPrompt: "Send it.",
+      declaredTools: ["mcp:outlook:send_email"],
+      interruptOn: {
+        "mcp:outlook:send_email": { allowedDecisions: ["approve" as const, "edit" as const], verifiedArgs: ["body"] },
+      },
+    };
+    expect(parseAgentMd("mailer", composeAgentMd(fields), { source: "user" })?.interruptOn)
+      .toEqual(fields.interruptOn);
+  });
 });
 
 describe("agent catalogs", () => {

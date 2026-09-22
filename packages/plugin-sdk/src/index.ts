@@ -3,6 +3,7 @@ export * from "./wildcard.js";
 export * from "./loader.js";
 export * from "./plugin-host.js";
 export { splitFrontmatter } from "./frontmatter.js";
+export * from "./mcp-grounding.js";
 export * from "./skill-catalog.js";
 export * from "./agent-catalog.js";
 export * from "./skill-tool-migration.js";
