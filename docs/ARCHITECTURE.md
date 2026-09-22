@@ -228,8 +228,20 @@ in `core/src/protocol-types.ts`:
     CB -->|"/memories/"| MEM["Memories dir on disk<br/>only while Memory is on in Settings"]
     CB -->|"/local/&lt;id&gt;/"| LF["Granted folders on disk<br/>read-only unless the grant allows writes"]
   ```
-- **Sandboxed evaluation** is `@langchain/quickjs`'s code interpreter, and the
-  QuickJS guest has no filesystem of its own. Its bridges are the `task()` global
+- **Sandboxed evaluation** is `@langchain/quickjs`'s code interpreter, hosted on a
+  worker thread: `runtime-langgraph`'s `code-interpreter-middleware.ts` wraps
+  upstream's middleware and keeps only the thread boundary, with `eval-worker.ts`
+  as the thread entry. Guest code holds whichever thread it runs on for its whole
+  execution — the interpreter's deadline aborts it but never yields — so running it
+  on the server's thread stops the event loop for as long as the guest computes,
+  and the desktop supervisor SIGKILLs a sidecar that stops answering health probes.
+  Bridged calls travel back to the main thread, which owns the graph execution
+  context a filesystem write needs; that hop must pass the eval tool's config
+  explicitly, because the worker's message handler runs outside the call's async
+  context. Cancellation terminates the worker rather than disposing the isolate.
+  The packaged server emits the worker as a second esbuild entry beside `index.js`,
+  since both resolve the QuickJS wasm as a sibling file.
+  The QuickJS guest has no filesystem of its own. Its bridges are the `task()` global
   and the `tools.*` namespace, into which the runtime exposes exactly the
   DeepAgents filesystem tools (`ls`/`read_file`/`glob`/`grep`/`write_file`/
   `edit_file`) as camelCase functions. Paging a large file through `read_file`'s

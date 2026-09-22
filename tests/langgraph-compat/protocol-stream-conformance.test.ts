@@ -462,4 +462,33 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
     expect(evalResult).not.toContain("filesystem-mcp-server");
     expect(evalResult).not.toContain("filesystemMcpServer");
   });
+
+  it("a bridged write from inside the sandbox reaches values.files", async () => {
+    // The guest runs on a worker thread, so its tool calls are satisfied back on
+    // this one, outside the eval call's async context. If that hop ever lost the
+    // run config, the write would succeed in the sandbox and vanish from state.
+    const events = await collectProtocol(
+      new ScriptedModel([
+        new AIMessage({
+          content: "",
+          tool_calls: [{
+            id: "eval-write-1",
+            name: "eval",
+            args: {
+              code: "await tools.writeFile({ file_path: '/guest.txt', content: 'from the guest' })",
+            },
+            type: "tool_call",
+          }],
+        }),
+        new AIMessage({ content: "Wrote it." }),
+      ]),
+    );
+
+    const sawFile = events.some((e) => {
+      if (channelOf(e) !== "values") return false;
+      const files = (e.params.data as { files?: Record<string, unknown> })?.files;
+      return files !== undefined && "/guest.txt" in files;
+    });
+    expect(sawFile).toBe(true);
+  });
 });

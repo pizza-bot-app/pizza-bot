@@ -38,6 +38,7 @@ import { subagentFinalizationMiddleware } from "./subagent-finalization-middlewa
 import { attachmentInlineMiddleware } from "./attachment-inline-middleware.js";
 import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
 import { localFolderContextMiddleware } from "./local-folder-context-middleware.js";
+import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 import { taskDispatchMiddleware } from "./task-dispatch-middleware.js";
 import { streamProtocolEvents, toLangGraphInput, type ProtocolCapableGraph } from "./stream-protocol.js";
 
@@ -173,12 +174,13 @@ export function codeInterpreterOptions(hasSubagents: boolean) {
 
 async function codeInterpreterMiddleware(hasSubagents: boolean): Promise<unknown> {
   try {
-    const { createCodeInterpreterMiddleware } = await import("@langchain/quickjs");
-    return createCodeInterpreterMiddleware(codeInterpreterOptions(hasSubagents));
-  } catch {
+    return await createWorkerCodeInterpreterMiddleware(codeInterpreterOptions(hasSubagents));
+  } catch (error) {
+    if (error instanceof Error && !/Cannot find (module|package)/.test(error.message)) throw error;
     throw new Error(
       `An agent declares "${BUILTIN_EVAL_TOOL_REF}" but @langchain/quickjs is not installed. ` +
         "Install the optional dependency to enable sandboxed evaluation.",
+      { cause: error },
     );
   }
 }
