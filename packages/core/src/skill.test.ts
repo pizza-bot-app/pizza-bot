@@ -230,6 +230,25 @@ describe("splitSkillMd / composeSkillMd", () => {
         "      - approve\n      - edit\n      - reject\n",
     );
   });
+
+  it("emits verifiedArgs under the tool's policy", () => {
+    const md = composeSkillMd(
+      "Mailer",
+      "Sends mail",
+      "# Mail",
+      ["mcp:outlook:send_email"],
+      {
+        "mcp:outlook:send_email": {
+          allowedDecisions: ["approve", "edit"],
+          verifiedArgs: ["body"],
+        },
+      },
+    );
+    expect(md).toContain(
+      'interruptOn:\n  "mcp:outlook:send_email":\n    allowedDecisions:\n' +
+        '      - approve\n      - edit\n    verifiedArgs:\n      - "body"\n',
+    );
+  });
 });
 
 describe("skillInfoOf", () => {
@@ -291,6 +310,42 @@ describe("parseSkillInterruptOn", () => {
         allowedDecisions: ["approve", "edit", "reject"],
       },
       "mcp:calendar:create_event": true,
+    });
+  });
+
+  it("reads verifiedArgs, dedupes, and omits the key when absent", () => {
+    expect(
+      parseSkillInterruptOn({
+        interruptOn: {
+          "mcp:outlook:send_email": {
+            allowedDecisions: ["approve", "edit"],
+            verifiedArgs: ["body", "body", " subject "],
+          },
+          "mcp:outlook:reply": { allowedDecisions: ["approve"] },
+        },
+      }),
+    ).toEqual({
+      "mcp:outlook:send_email": {
+        allowedDecisions: ["approve", "edit"],
+        verifiedArgs: ["body", "subject"],
+      },
+      "mcp:outlook:reply": { allowedDecisions: ["approve"] },
+    });
+  });
+
+  it("ignores unusable verifiedArgs rather than failing the whole policy", () => {
+    expect(
+      parseSkillInterruptOn({
+        interruptOn: {
+          "mcp:test:a": { allowedDecisions: ["approve"], verifiedArgs: [42, null, "body"] },
+          "mcp:test:b": { allowedDecisions: ["approve"], verifiedArgs: "subject, body" },
+          "mcp:test:c": { allowedDecisions: ["approve"], verifiedArgs: 7 },
+        },
+      }),
+    ).toEqual({
+      "mcp:test:a": { allowedDecisions: ["approve"], verifiedArgs: ["body"] },
+      "mcp:test:b": { allowedDecisions: ["approve"], verifiedArgs: ["subject", "body"] },
+      "mcp:test:c": { allowedDecisions: ["approve"] },
     });
   });
 

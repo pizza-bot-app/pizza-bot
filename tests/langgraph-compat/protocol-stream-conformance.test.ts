@@ -5,7 +5,7 @@ import { BUILTIN_EVAL_TOOL_REF, PIZZA_BOT_AGENT } from "@pizza-bot/core";
 import type { RunInput, RunOptions, SkillCatalog, SkillInterruptOn } from "@pizza-bot/core";
 import type { ProtocolEvent } from "@langchain/langgraph";
 import { MemorySaver } from "@langchain/langgraph";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
@@ -13,6 +13,8 @@ import { z } from "zod";
 class ScriptedModel extends BaseChatModel<Record<string, never>> {
   private i = 0;
   readonly boundToolSets: string[][] = [];
+  /** Each model call's prompt, so a test can assert what the model was actually shown. */
+  readonly prompts: BaseMessage[][] = [];
   constructor(private readonly script: AIMessage[]) {
     super({});
   }
@@ -23,7 +25,10 @@ class ScriptedModel extends BaseChatModel<Record<string, never>> {
     this.boundToolSets.push(tools.map((item) => item.name));
     return this;
   }
-  async _generate(): Promise<{ generations: Array<{ message: AIMessage; text: string }> }> {
+  async _generate(
+    messages: BaseMessage[],
+  ): Promise<{ generations: Array<{ message: AIMessage; text: string }> }> {
+    this.prompts.push(messages);
     const msg = this.script[Math.min(this.i, this.script.length - 1)]!;
     this.i++;
     return { generations: [{ message: msg, text: typeof msg.content === "string" ? msg.content : "" }] };
@@ -328,6 +333,114 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
     expect(resumed.some(
       (e) => channelOf(e) === "tools" && (e.params.data as { event?: string }).event === "tool-error",
     )).toBe(false);
+  });
+
+  it("a citing skill's research is recorded and its evidence id reaches the model", async () => {
+    const search = tool(() => "The renewal date is March 4th.", {
+      name: "mailer__search",
+      description: "search mail",
+      schema: z.object({ query: z.string() }),
+    });
+    // A JSON-schema tool, as an MCP server supplies: grounding injects into that shape.
+    const send = tool(() => "sent", {
+      name: "mailer__send",
+      description: "send mail",
+      schema: {
+        type: "object",
+        properties: { body: { type: "string" } },
+        required: ["body"],
+      },
+    });
+    const recorded: Array<{ threadId: string; runId: string; toolRef: string; body: string }> = [];
+    const model = new ScriptedModel([
+      new AIMessage({
+        content: "",
+        tool_calls: [{
+          id: "task-1",
+          name: "task",
+          args: { description: "confirm the renewal", subagent_type: "specialist" },
+          type: "tool_call",
+        }],
+      }),
+      new AIMessage({
+        content: "",
+        tool_calls: [{
+          id: "search-1",
+          name: "mailer__search",
+          args: { query: "renewal" },
+          type: "tool_call",
+        }],
+      }),
+      new AIMessage({
+        content: "",
+        tool_calls: [{
+          id: "send-1",
+          name: "mailer__send",
+          args: {
+            body: "The renewal date is March 4th.",
+            _grounding: [{
+              arg: "body",
+              text: "The renewal date is March 4th.",
+              evidenceId: "ev_1",
+            }],
+          },
+          type: "tool_call",
+        }],
+      }),
+    ]);
+    const agent = await createPizzaBotAgent(PIZZA_BOT_AGENT.systemPrompt, {
+      model,
+      tools: { "mcp:mailer:search": search, "mcp:mailer:send": send },
+      catalog: { mailer: ["search", "send"] },
+      skills: skillCatalog(
+        "specialist",
+        "Handles delegated sends.",
+        "Search, then send what you found.",
+        ["mcp:mailer:search", "mcp:mailer:send"],
+        {
+          "mcp:mailer:send": { allowedDecisions: ["approve", "reject"], verifiedArgs: ["body"] },
+        },
+      ),
+      evidenceRecorder: async (entry) => {
+        recorded.push({
+          threadId: entry.threadId,
+          runId: entry.runId,
+          toolRef: entry.toolRef,
+          body: entry.body,
+        });
+        return { ...entry, id: `ev_${recorded.length}`, excerpt: entry.body, createdAt: "t" };
+      },
+      checkpointer: new MemorySaver(),
+    });
+
+    const threadId = `proto_grounding_${Math.random().toString(36).slice(2)}`;
+    const events: ProtocolEvent[] = [];
+    for await (const ev of agent.streamProtocol(
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "confirm it" }] }] },
+      { threadId, runId: "run_grounding" },
+    )) {
+      events.push(ev);
+    }
+
+    // Only the research is evidence: the gated send is the action under review.
+    expect(recorded).toEqual([{
+      threadId,
+      runId: "run_grounding",
+      toolRef: "mcp:mailer:search",
+      body: "The renewal date is March 4th.",
+    }]);
+
+    // Without the marker in its own prompt the model has no id it could cite.
+    const shown = model.prompts.flat().map((message) => String(message.content));
+    expect(shown.some((content) => content.includes("[evidence ev_1]"))).toBe(true);
+
+    const requested = events.find((e) => channelOf(e) === "input.requested");
+    const args = (requested!.params.data as {
+      payload: { actionRequests: Array<{ args: Record<string, unknown> }> };
+    }).payload.actionRequests[0]!.args;
+    expect(args._grounding).toEqual([
+      { arg: "body", text: "The renewal date is March 4th.", evidenceId: "ev_1" },
+    ]);
   });
 
   it("a subagent can receive an MCP tool whose original name is reserved", async () => {

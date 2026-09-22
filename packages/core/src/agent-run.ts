@@ -10,6 +10,7 @@ import type { SkillCatalog } from "./skill.js";
 import type { SkillAvailability } from "./skill-readiness.js";
 import type { ToolCatalog } from "./wildcard.js";
 import type { AttachmentResolver } from "./attachment.js";
+import type { EvidenceRecorder } from "./evidence.js";
 import type { LocalFolder } from "./local-folder.js";
 
 export interface Logger {
@@ -51,6 +52,11 @@ export interface RuntimeDeps {
    * state never contains file bytes. Absence disables inlining.
    */
   attachmentResolver?: AttachmentResolver;
+  /**
+   * Records the tool outputs a grounded skill may cite. Server-owned so the agent
+   * cannot forge its own provenance; absence leaves every span uncited.
+   */
+  evidenceRecorder?: EvidenceRecorder;
   /** Per-run root-agent tool-call limit; -1 disables the limiter. */
   maxToolCalls?: number;
   /** Per-run subagent tool-call limit; -1 disables the limiter. */
