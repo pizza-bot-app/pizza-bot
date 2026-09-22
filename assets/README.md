@@ -6,7 +6,7 @@ under the Apache License, Version 2.0 with the rest of this project — see
 
 | File | Used for |
 | --- | --- |
-| `icons/icon.png` | Source master (1024×1024); Linux `deb`/`rpm` package icon |
+| `icons/icon.png` | Source master (1024×1024); Linux `deb`/`rpm` package icon; README header |
 | `icons/icon.icns` | macOS icon without mask padding |
 | `icons/icon.ico` | Windows executable and Squirrel installer icon |
 | `icons/icon-mac.icns` | macOS app + DMG volume icon |

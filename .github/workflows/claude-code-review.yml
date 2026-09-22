@@ -51,8 +51,10 @@ jobs:
           # reviews blind — it cannot open a file it wants to check. It is also
           # required for the inline-comment tool even though the skill's own
           # frontmatter names it, because the action starts that MCP server only
-          # when claude_args asks for it. Nothing listed executes the pull
-          # request's own code, which a build or test command would.
+          # when claude_args asks for it. `gh pr comment` is how the skill reports
+          # a clean review, so omitting it makes a no-findings run post nothing at
+          # all. Nothing listed executes the pull request's own code, which a build
+          # or test command would.
           #
           # Pinning the full model ID stops Claude Code from deriving a us.
           # profile from AWS_REGION. It does not confine the run to one model:
@@ -61,4 +63,4 @@ jobs:
           claude_args: |
             --model global.anthropic.claude-opus-5
             --max-turns 60
-            --allowedTools "Glob,Grep,LS,Read,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "Glob,Grep,LS,Read,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
