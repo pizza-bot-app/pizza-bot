@@ -578,13 +578,24 @@ describe("AgentHost.deleteThread", () => {
       outcome: "success",
       threadTitle: "Order",
     });
+    host.approvalVerdicts.append({
+      verdictId: "approval-1#0",
+      threadId: "t1",
+      runId: "run-1",
+      interruptId: "approval-1",
+      toolName: "mcp:mail:send",
+      decision: "approve",
+      spans: [],
+    });
     expect(host.search.search("anchovy")).toHaveLength(1);
     expect(host.threadActivity.listAfter(0)).toHaveLength(1);
+    expect(host.approvalVerdicts.listByThread("t1")).toHaveLength(1);
 
     await expect(host.deleteThread("t1")).resolves.toBe(true);
     expect(host.threadStore.get("t1")).toBeUndefined();
     expect(host.search.search("anchovy")).toHaveLength(0);
     expect(host.threadActivity.listAfter(0)).toHaveLength(0);
+    expect(host.approvalVerdicts.listByThread("t1")).toHaveLength(0);
   });
 
   it("reports deleted:false before the checkpoint schema has been initialized", async () => {

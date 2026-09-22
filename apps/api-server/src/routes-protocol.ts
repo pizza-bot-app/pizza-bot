@@ -8,11 +8,15 @@ import {
   ProtocolCommandError,
   toProtocolState,
 } from "./protocol-commands.js";
+import { approvalAuditor } from "./approval-audit.js";
 
 const STREAM_HEARTBEAT_MS = 10_000;
 
 export function protocolRoutes(host: AgentHost): Hono {
   const app = new Hono();
+  const auditApproval = host.approvalVerdicts
+    ? approvalAuditor({ verdicts: host.approvalVerdicts, evidence: host.evidence })
+    : undefined;
 
   app.post("/threads/:thread_id/commands", async (c) => {
     const runs = host.protocolRuns;
@@ -38,6 +42,7 @@ export function protocolRoutes(host: AgentHost): Hono {
             return host.agent.getState(id);
           },
         },
+        approvalAuditor: auditApproval,
       });
       if (outcome.kind === "success") {
         if (cmd.method === "input.respond") {

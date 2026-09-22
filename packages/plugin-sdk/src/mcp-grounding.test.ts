@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { GROUNDING_ARGUMENT } from "@pizza-bot/core";
 import {
-  GROUNDING_ARGUMENT,
   injectGroundingArgument,
   resolvableVerifiedArgs,
   stripGroundingArgument,

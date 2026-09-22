@@ -7,6 +7,16 @@
 /** ~64k tokens of text; a single tool result larger than this is clipped at source. */
 export const MAX_EVIDENCE_BODY_BYTES = 256 * 1024;
 
+/** The citation argument a grounded tool's schema carries, stripped before dispatch. */
+export const GROUNDING_ARGUMENT = "_grounding";
+
+/** One cited span, addressed by quoting `text` verbatim out of `arg`. */
+export interface GroundingSpan {
+  arg: string;
+  text: string;
+  evidenceId: string;
+}
+
 export const MAX_EVIDENCE_EXCERPT_CHARS = 280;
 
 /** Bounds one run's ledger; further results are passed through uncitable. */

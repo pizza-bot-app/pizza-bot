@@ -6,6 +6,7 @@ import {
   formatArgumentLabel,
   parseArgumentDraft,
   updateArgumentAtPath,
+  type GroundingView,
 } from "./ApprovalArguments.js";
 
 describe("ApprovalArguments", () => {
@@ -127,6 +128,138 @@ describe("ApprovalArguments", () => {
     expect(html).toContain('<option value="string">Text</option>');
     expect(html).toContain('<option value="number">Number</option>');
     expect(html).toContain('<option value="boolean">Yes / no</option>');
+  });
+});
+
+function groundingView(
+  bodies: Record<string, string>,
+  pending: string[] = [],
+  unavailable: string[] = [],
+  clipped: string[] = [],
+): GroundingView {
+  return {
+    bodies: new Map(
+      Object.entries(bodies).map(([id, text]) => [
+        id,
+        clipped.includes(id) ? { text, truncated: true } : { text },
+      ]),
+    ),
+    pending: new Set(pending),
+    unavailable: new Set(unavailable),
+    hoveredId: null,
+    onHover: () => undefined,
+    onSelect: () => undefined,
+  };
+}
+
+const cited = { arg: "body", text: "renews on March 4th", evidenceId: "ev_1" };
+
+describe("ApprovalArguments citations", () => {
+  it("marks a span the cited source supports and hides the citation argument itself", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalArguments
+        value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
+        grounding={groundingView({ ev_1: "Subscription renews March 4, 2027." })}
+      />,
+    );
+
+    expect(html).toContain("grounding-verifiable");
+    expect(html).toContain(">renews on March 4th</span>");
+    expect(html).toContain("Your plan ");
+    expect(html).not.toContain("Grounding");
+    expect(html).not.toContain("ev_1");
+  });
+
+  it("names the words a cited source does not contain", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalArguments
+        value={{ body: "We waived the $12 fee.", _grounding: [{ ...cited, text: "waived the $12 fee" }] }}
+        grounding={groundingView({ ev_1: "A $12 charge applies." })}
+      />,
+    );
+
+    expect(html).toContain("grounding-asserted");
+    expect(html).toContain("Not in the cited source: waived");
+  });
+
+  it("warns that a cited source may contradict the span instead of clearing it", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalArguments
+        value={{
+          body: "We waived the $12 fee.",
+          _grounding: [{ ...cited, text: "waived the $12 fee" }],
+        }}
+        grounding={groundingView({ ev_1: "The $12 fee is not waived." })}
+      />,
+    );
+
+    expect(html).toContain("grounding-inconclusive");
+    expect(html).toContain("may contradict this");
+    expect(html).not.toContain("grounding-verifiable");
+  });
+
+  it("says a clipped source could not settle the span, rather than calling it unsupported", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalArguments
+        value={{ body: "We waived the $12 fee.", _grounding: [{ ...cited, text: "waived the $12 fee" }] }}
+        grounding={groundingView({ ev_1: "Mailbox export, first page." }, [], [], ["ev_1"])}
+      />,
+    );
+
+    expect(html).toContain("grounding-inconclusive");
+    expect(html).toContain("too large to keep in full");
+    expect(html).not.toContain("grounding-asserted");
+  });
+
+  it("treats a body still in flight as pending rather than unsupported", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalArguments
+        value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
+        grounding={groundingView({}, ["ev_1"])}
+      />,
+    );
+
+    expect(html).toContain("grounding-pending");
+    expect(html).not.toContain("grounding-asserted");
+  });
+
+  it("says a source it could not load went unchecked instead of checking forever", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalArguments
+        value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
+        grounding={groundingView({}, ["ev_1"], ["ev_1"])}
+      />,
+    );
+
+    expect(html).toContain("grounding-unchecked");
+    expect(html).toContain("could not be loaded");
+    expect(html).not.toContain("grounding-pending");
+    expect(html).not.toContain("grounding-asserted");
+  });
+
+  it("leaves arguments unannotated when no citation view is supplied", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalArguments value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }} />,
+    );
+
+    expect(html).not.toContain("grounding-span");
+    expect(html).not.toContain("ev_1");
+  });
+
+  it("keeps the citation argument out of the fields editor", () => {
+    const value = { body: "Hello", _grounding: [cited] };
+    const html = renderToStaticMarkup(
+      <ApprovalArgumentEditor
+        value={value}
+        rawDraft={JSON.stringify(value, null, 2)}
+        rawError={null}
+        onChange={() => undefined}
+        onRawChange={() => undefined}
+      />,
+    );
+
+    expect(html).toContain(">Hello</textarea>");
+    expect(html).not.toContain("ev_1");
   });
 });
 

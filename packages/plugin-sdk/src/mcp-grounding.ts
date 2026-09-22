@@ -4,9 +4,9 @@
  * survive on the persisted tool call, so stripping always clones.
  */
 
-type JsonSchema = Record<string, unknown>;
+import { GROUNDING_ARGUMENT } from "@pizza-bot/core";
 
-export const GROUNDING_ARGUMENT = "_grounding";
+type JsonSchema = Record<string, unknown>;
 
 function isJsonSchema(value: unknown): value is JsonSchema {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -34,8 +34,9 @@ function groundingSchema(verifiedArgs: readonly string[]): JsonSchema {
         text: {
           type: "string",
           description:
-            "The cited span copied verbatim from that argument — character for character, " +
-            "long enough to appear only once in it.",
+            "A span of your own drafted wording, copied character for character out of what " +
+            "you wrote in that argument — never the evidence's phrasing. Long enough to " +
+            "appear only once in the argument.",
         },
         evidenceId: {
           type: "string",
@@ -55,7 +56,9 @@ export function groundingContract(verifiedArgs: readonly string[]): string {
     `Provenance contract: every factual claim in ${argList} that came from an evidence entry MUST`,
     `be cited in \`${GROUNDING_ARGUMENT}\`, one entry per cited span:`,
     "  - `arg`: which argument the span is in.",
-    "  - `text`: the span copied verbatim from that argument, long enough to be unique in it.",
+    "  - `text`: your own drafted words, copied character for character out of that argument",
+    "    and long enough to be unique in it. An exact search of the argument must find it, so",
+    "    quote the sentence you wrote, never the evidence's wording.",
     "  - `evidenceId`: the id of the evidence entry it came from. Never invent an id.",
     "Cite only spans an evidence entry actually supports; leave your own connective prose uncited.",
   ].join("\n");

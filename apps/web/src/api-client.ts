@@ -1,12 +1,14 @@
 /** HTTP client for API server operations. */
 import { createParser } from "eventsource-parser";
 import type {
+  ApprovalVerdict,
   ThreadState,
   Checkpoint,
   TriggerDef,
   AppSettings,
   AppSettingsPatch,
   AttachmentMeta,
+  EvidenceEntry,
   ModelCatalogStatus,
   ProviderAuthMethod,
   ProviderFieldOption,
@@ -519,6 +521,28 @@ export class ApiClient {
     return deletedFlag(
       await this.json("delete thread", `/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" }),
     );
+  }
+
+  /** Metadata only; a citation audit resolves quotes against {@link getEvidence}. */
+  async listEvidence(threadId: string): Promise<EvidenceEntry[]> {
+    const { evidence } = await this.json<{ evidence: EvidenceEntry[] }>(
+      "list evidence",
+      `/threads/${encodeURIComponent(threadId)}/evidence`,
+    );
+    return evidence;
+  }
+
+  async getEvidence(id: string): Promise<EvidenceDoc | undefined> {
+    return this.optional("get evidence", `/evidence/${encodeURIComponent(id)}`);
+  }
+
+  /** Oldest first; each verdict carries the tiers the audit reached at dispatch. */
+  async listApprovalVerdicts(threadId: string): Promise<ApprovalVerdict[]> {
+    const { verdicts } = await this.json<{ verdicts: ApprovalVerdict[] }>(
+      "list approval verdicts",
+      `/threads/${encodeURIComponent(threadId)}/approval-verdicts`,
+    );
+    return verdicts;
   }
 
   /**
@@ -1052,6 +1076,10 @@ export interface McpServerDoc {
 export interface McpToolInfo {
   name: string;
   description?: string;
+}
+
+export interface EvidenceDoc extends EvidenceEntry {
+  body: string;
 }
 
 export interface MemoryInfo {

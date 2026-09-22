@@ -578,8 +578,75 @@ button.sidebar-folder-row:hover,
 .rail-section { margin-bottom: 18px; }
 .rail-section:last-child { margin-bottom: 0; }
 .rail-section-head {
+  display: flex; align-items: baseline; gap: 6px;
   font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
   color: var(--dim); padding: 0 0 10px;
+}
+.rail-section-count { font-weight: 500; letter-spacing: 0; text-transform: none; }
+
+.evidence-cards { list-style: none; margin: 0; padding: 0; }
+.evidence-card {
+  padding-left: 8px; border-left: 2px solid var(--border); margin-top: 4px; border-radius: 0 4px 4px 0;
+}
+.evidence-card:first-child { margin-top: 0; }
+.evidence-card.hovered, .evidence-card.selected { border-left-color: var(--brand); background: var(--panel-2); }
+.evidence-head { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.evidence-head.expandable { cursor: pointer; border-radius: 4px; }
+.evidence-head.expandable:hover { background: var(--panel-2); }
+.evidence-breadcrumb {
+  min-width: 0; font-size: 12px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.evidence-cited {
+  margin-left: auto; flex: 0 0 auto; padding: 0 5px; border-radius: 999px;
+  background: color-mix(in oklch, var(--brand) 18%, transparent);
+  color: var(--text); font-size: 10px; font-weight: 600;
+}
+.evidence-excerpt {
+  font-size: 11.5px; color: var(--dim); line-height: 1.35; margin: 1px 0 2px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.evidence-body {
+  margin: 2px 0 4px; padding: 6px 8px; font-size: 11px; line-height: 1.4;
+  background: var(--code-bg); border-radius: 6px; max-height: 320px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word; color: var(--text);
+}
+.evidence-note { font-size: 10.5px; color: var(--warning); padding: 0 0 4px; }
+
+.verdict-cards { list-style: none; margin: 0; padding: 0; }
+.verdict-card {
+  padding-left: 8px; border-left: 2px solid var(--border); margin-top: 8px;
+}
+.verdict-card:first-child { margin-top: 0; }
+.verdict-head { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; }
+.verdict-tool {
+  min-width: 0; font-size: 12px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.verdict-decision {
+  margin-left: auto; flex: 0 0 auto; padding: 0 5px; border-radius: 999px;
+  font-size: 10px; font-weight: 600; color: var(--text);
+  background: color-mix(in oklch, var(--ok) 18%, transparent);
+}
+.verdict-decision-edit { background: color-mix(in oklch, var(--brand) 18%, transparent); }
+.verdict-note { font-size: 10.5px; color: var(--dim); padding: 0 0 4px; }
+.verdict-field { margin: 4px 0; }
+.verdict-field-label {
+  display: block; color: var(--dim); font-size: 10px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase;
+}
+/* The record shows the text as it went out, so it wraps and keeps its own line breaks. */
+.verdict-field-text {
+  display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.verdict-spans { list-style: none; margin: 2px 0 4px; padding: 0; }
+.verdict-span { margin-top: 4px; font-size: 11.5px; line-height: 1.45; }
+.verdict-span:first-child { margin-top: 0; }
+.verdict-sources { margin-top: 4px; }
+.verdict-span-source {
+  display: block; font-size: 10px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .delegation-groups { list-style: none; margin: 0; padding: 0; }
@@ -690,6 +757,40 @@ button.sidebar-folder-row:hover,
   white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
 }
 .approval-argument-empty { color: var(--dim); font-style: italic; }
+
+/* Cited spans sit inline inside the argument text, so the button keeps the text's own box. */
+.grounding-span {
+  cursor: pointer; border-radius: 2px;
+  text-decoration-line: underline; text-decoration-thickness: 2px;
+  text-underline-offset: 2px; text-decoration-skip-ink: none;
+}
+.grounding-verifiable { text-decoration-color: var(--ok); }
+/* The two gap tiers rank: asserted accuses the draft of stating something the source does
+   not, so it reads red where inconclusive only withholds trust. */
+.grounding-asserted { text-decoration-color: var(--danger, #e5484d); text-decoration-style: wavy; }
+.grounding-inconclusive { text-decoration-color: var(--warning); text-decoration-style: dashed; }
+.grounding-pending { text-decoration-color: var(--border); text-decoration-style: dotted; }
+/* Unchecked is terminal where pending is momentary, so it has to be legible at rest. It
+   shares its look with unresolved: both mean no verdict was reached, not a poor one. */
+.grounding-unchecked,
+.grounding-unresolved { text-decoration-color: var(--dim); text-decoration-style: dotted; }
+/* A figure no citation covers is not cited text, so it gets no span box — but it is the one
+   piece of uncited prose that must not read as ordinary wording. */
+.grounding-unbacked {
+  text-decoration: underline dotted var(--warning);
+  text-decoration-thickness: 2px; text-underline-offset: 2px; text-decoration-skip-ink: none;
+}
+/* A decoration a reviewer has to squint at cannot carry "this was never checked", and the
+   absence of a verdict is not an accusation, so the chip stays neutral and says it in words. */
+.grounding-chip {
+  margin-right: 4px; padding: 0 4px; vertical-align: 1px;
+  border: 1px solid var(--border); border-radius: 3px; background: var(--panel);
+  color: var(--dim); font-size: 9px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; text-decoration: none;
+}
+.grounding-span:hover,
+.grounding-span.hovered,
+.grounding-span:focus-visible { background: var(--panel); outline: none; }
 .approval-argument-scalar {
   min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
 }
