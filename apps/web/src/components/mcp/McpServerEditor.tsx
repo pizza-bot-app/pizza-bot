@@ -68,6 +68,7 @@ export function McpServerEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pasteJsonOpen, setPasteJsonOpen] = useState(false);
+  const [pastedEnabled, setPastedEnabled] = useState<boolean | undefined>(undefined);
 
   const canSave =
     name.trim() !== "" && (transport === "stdio" ? command.trim() !== "" : url.trim() !== "") && !saving;
@@ -84,11 +85,13 @@ export function McpServerEditor({
             args: args.map((a) => a.trim()).filter((a) => a !== ""),
             ...(fromRows(env) ? { env: fromRows(env) } : {}),
             ...(cwd.trim() ? { cwd: cwd.trim() } : {}),
+            ...(pastedEnabled === undefined ? {} : { enabled: pastedEnabled }),
           }
         : {
             type: urlType,
             url: url.trim(),
             ...(fromRows(headers) ? { headers: fromRows(headers) } : {}),
+            ...(pastedEnabled === undefined ? {} : { enabled: pastedEnabled }),
           };
     try {
       await onSave(id, built);
@@ -279,10 +282,12 @@ export function McpServerEditor({
           onCancel={() => setPasteJsonOpen(false)}
           onApply={(pasted) => {
             if (pasted.name) setName(pasted.name);
-            const description =
+            setPastedEnabled(pasted.entry.enabled);
+            const transportSummary =
               "command" in pasted.entry
                 ? `stdio · ${pasted.entry.command}`
                 : `url · ${pasted.entry.url}`;
+            const description = pasted.entry.enabled === false ? `${transportSummary} · disabled` : transportSummary;
             if ("command" in pasted.entry) {
               setTransport("stdio");
               setCommand(pasted.entry.command);

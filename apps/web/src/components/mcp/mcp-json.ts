@@ -6,8 +6,8 @@ export type ParsedMcpJson = {
   warnings: string[];
 };
 
-const STDIO_KEYS = new Set(["type", "command", "args", "env", "cwd"]);
-const URL_KEYS = new Set(["type", "url", "headers"]);
+const STDIO_KEYS = new Set(["type", "command", "args", "env", "cwd", "enabled"]);
+const URL_KEYS = new Set(["type", "url", "headers", "enabled"]);
 
 export type McpJsonResult =
   | { ok: true; value: ParsedMcpJson }
@@ -48,6 +48,11 @@ export function parseMcpJson(input: string): McpJsonResult {
     return { ok: false, error: "The transport type does not match the server fields." };
   }
 
+  const enabled = config.enabled;
+  if (enabled !== undefined && typeof enabled !== "boolean") {
+    return { ok: false, error: "enabled must be true or false." };
+  }
+
   if (typeof command === "string") {
     if (!command.trim()) {
       return { ok: false, error: "command must not be empty." };
@@ -67,6 +72,7 @@ export function parseMcpJson(input: string): McpJsonResult {
           ...(config.args ? { args: config.args } : {}),
           ...(config.env ? { env: config.env } : {}),
           ...(typeof config.cwd === "string" ? { cwd: config.cwd } : {}),
+          ...(enabled === undefined ? {} : { enabled }),
         },
         warnings: collectWarnings(config, STDIO_KEYS, skippedServers),
       },
@@ -84,6 +90,7 @@ export function parseMcpJson(input: string): McpJsonResult {
         ...(type === "sse" ? { type: "sse" as const } : {}),
         url,
         ...(config.headers ? { headers: config.headers } : {}),
+        ...(enabled === undefined ? {} : { enabled }),
       },
       warnings: collectWarnings(config, URL_KEYS, skippedServers),
     },

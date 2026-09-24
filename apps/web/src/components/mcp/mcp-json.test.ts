@@ -58,7 +58,7 @@ describe("parseMcpJson", () => {
       parseMcpJson(
         JSON.stringify({
           mcpServers: {
-            local: { command: "npx", disabled: false, autoApprove: [], timeout: 60, transportType: "stdio", enabled: false },
+            local: { command: "npx", disabled: false, autoApprove: [], timeout: 60, transportType: "stdio" },
           },
         }),
       ),
@@ -67,14 +67,29 @@ describe("parseMcpJson", () => {
       value: {
         name: "local",
         entry: { command: "npx" },
-        warnings: ["Ignored unsupported fields: disabled, autoApprove, timeout, transportType, enabled"],
+        warnings: ["Ignored unsupported fields: disabled, autoApprove, timeout, transportType"],
       },
     });
     expect(
-      parseMcpJson(JSON.stringify({ mcpServers: { remote: { url: "https://example.com/mcp", env: { API_KEY: "x" }, enabled: false } } })),
+      parseMcpJson(JSON.stringify({ mcpServers: { remote: { url: "https://example.com/mcp", env: { API_KEY: "x" } } } })),
     ).toEqual({
       ok: true,
-      value: { name: "remote", entry: { url: "https://example.com/mcp" }, warnings: ["Ignored unsupported fields: env, enabled"] },
+      value: { name: "remote", entry: { url: "https://example.com/mcp" }, warnings: ["Ignored unsupported fields: env"] },
+    });
+  });
+
+  it("carries enabled through on both transports and rejects non-boolean values", () => {
+    expect(parseMcpJson(JSON.stringify({ mcpServers: { local: { command: "npx", enabled: false } } }))).toEqual({
+      ok: true,
+      value: { name: "local", entry: { command: "npx", enabled: false }, warnings: [] },
+    });
+    expect(parseMcpJson(JSON.stringify({ mcpServers: { remote: { url: "https://example.com/mcp", enabled: true } } }))).toEqual({
+      ok: true,
+      value: { name: "remote", entry: { url: "https://example.com/mcp", enabled: true }, warnings: [] },
+    });
+    expect(parseMcpJson(JSON.stringify({ mcpServers: { local: { command: "npx", enabled: "no" } } }))).toEqual({
+      ok: false,
+      error: "enabled must be true or false.",
     });
   });
 
