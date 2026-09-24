@@ -3,6 +3,7 @@ import { delimiter as pathDelimiter } from "node:path";
 import { ToolMessage } from "@langchain/core/messages";
 import { Client } from "@langchain/langgraph-sdk";
 import { PROTOCOL_VERSION } from "@pizza-bot/core";
+import type { StateHistoryOptions } from "@pizza-bot/core";
 import {
   buildApp,
   parseLocalFolderBrowseRoots,
@@ -12,7 +13,7 @@ import type { AgentHost } from "./agent-host.js";
 
 function fakeHost(
   readiness: "warming" | "ready" | "failed" = "ready",
-  historyCalls?: Array<string | undefined>,
+  historyCalls?: StateHistoryOptions[],
   runStarts?: Array<{ threadId: string; configurable?: Record<string, unknown> }>,
   historyTasks?: Array<{
     id: string;
@@ -60,19 +61,28 @@ function fakeHost(
           interrupts: [{ id: "approval-1", value: { action: "send" } }],
         };
       },
-      async *getStateHistory(threadId: string, checkpointNs?: string) {
-        historyCalls?.push(checkpointNs);
-        yield {
-          threadId,
-          checkpointId: "chk2",
-          checkpointNs: checkpointNs ?? "",
-          values: {},
-          next: [],
-          createdAt: "t1",
-          tasks: historyTasks,
-          interrupts: [{ id: "approval-2", value: { action: "delete" } }],
-        };
-        yield { threadId, checkpointId: "chk1", values: {}, next: [], createdAt: "t0" };
+      async *getStateHistory(threadId: string, options?: StateHistoryOptions) {
+        historyCalls?.push(options ?? {});
+        const checkpointNs = options?.checkpointNs;
+        // Mirrors the checkpointer: paging happens at the source, not in the caller.
+        const page = [
+          {
+            threadId,
+            checkpointId: "chk2",
+            checkpointNs: checkpointNs ?? "",
+            values: {},
+            next: [],
+            createdAt: "t1",
+            tasks: historyTasks,
+            interrupts: [{ id: "approval-2", value: { action: "delete" } }],
+          },
+          { threadId, checkpointId: "chk1", values: {}, next: [], createdAt: "t0" },
+        ];
+        const cursor = options?.beforeCheckpointId;
+        // Compares like the checkpointer's `checkpoint_id < ?` rather than locating
+        // the cursor row, so a cursor outside the page behaves as it does in SQL.
+        const after = cursor == null ? page : page.filter((s) => s.checkpointId < cursor);
+        yield* options?.limit == null ? after : after.slice(0, options.limit);
       },
       async updateState(threadId: string) {
         return { checkpointId: "chk2", threadId };
@@ -565,14 +575,14 @@ describe("api-server: checkpoint-shaped state surface", () => {
   });
 
   it("POST /threads/:id/history forwards a scoped `checkpoint.checkpoint_ns`", async () => {
-    const calls: Array<string | undefined> = [];
+    const calls: StateHistoryOptions[] = [];
     const res = await buildApp(fakeHost("ready", calls)).request("/threads/t1/history", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ limit: 1, checkpoint: { checkpoint_ns: "tools:sub-1" } }),
     });
     expect(res.status).toBe(200);
-    expect(calls).toEqual(["tools:sub-1"]);
+    expect(calls).toEqual([{ limit: 1, checkpointNs: "tools:sub-1" }]);
   });
 
   it("preserves checkpoint and Pregel task metadata used for subagent hydration", async () => {
@@ -626,13 +636,13 @@ describe("api-server: checkpoint-shaped state surface", () => {
   });
 
   it("POST /threads/:id/history without a checkpoint scopes to the root thread", async () => {
-    const calls: Array<string | undefined> = [];
+    const calls: StateHistoryOptions[] = [];
     await buildApp(fakeHost("ready", calls)).request("/threads/t1/history", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ limit: 1 }),
     });
-    expect(calls).toEqual([undefined]);
+    expect(calls).toEqual([{ limit: 1 }]);
   });
 
   it("POST /threads/:id/history `before` is an exclusive cursor", async () => {
@@ -643,6 +653,65 @@ describe("api-server: checkpoint-shaped state surface", () => {
     });
     const list = (await res.json()) as Array<{ checkpoint_id: string }>;
     expect(list.map((s) => s.checkpoint_id)).toEqual(["chk1"]);
+  });
+
+  // Resolving the cursor in SQL rather than by locating its row is deliberately
+  // more useful than the equality scan it replaces, which returned nothing here.
+  it("POST /threads/:id/history returns earlier rows for a cursor absent from the page", async () => {
+    const res = await buildApp(fakeHost()).request("/threads/t1/history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ limit: 10, before: { configurable: { checkpoint_id: "chk15" } } }),
+    });
+    const list = (await res.json()) as Array<{ checkpoint_id: string }>;
+    expect(list.map((s) => s.checkpoint_id)).toEqual(["chk1"]);
+  });
+
+  it("POST /threads/:id/history returns a full page for a cursor newer than every row", async () => {
+    const res = await buildApp(fakeHost()).request("/threads/t1/history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ limit: 10, before: { configurable: { checkpoint_id: "chk3" } } }),
+    });
+    const list = (await res.json()) as Array<{ checkpoint_id: string }>;
+    expect(list.map((s) => s.checkpoint_id)).toEqual(["chk2", "chk1"]);
+  });
+
+  it("POST /threads/:id/history forwards the SDK's second-page cursor with the limit", async () => {
+    const calls: StateHistoryOptions[] = [];
+    await buildApp(fakeHost("ready", calls)).request("/threads/t1/history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ limit: 20, before: { configurable: { checkpoint_id: "chk2" } } }),
+    });
+    expect(calls).toEqual([{ limit: 20, beforeCheckpointId: "chk2" }]);
+  });
+
+  it("GET /threads/:id/history requests a bounded page", async () => {
+    const calls: StateHistoryOptions[] = [];
+    await buildApp(fakeHost("ready", calls)).request("/threads/t1/history");
+    expect(calls).toEqual([{ limit: 10 }]);
+  });
+
+  // JSON `1e309` parses to Infinity, which the saver would interpolate as `LIMIT NaN`,
+  // so these cases are sent as raw bodies rather than through JSON.stringify.
+  it.each([
+    ["fractional", '{"limit":2.7}', 2],
+    ["above the maximum", '{"limit":1000000}', 100],
+    ["zero", '{"limit":0}', 10],
+    ["negative", '{"limit":-5}', 10],
+    ["infinite", '{"limit":1e309}', 10],
+    ["non-numeric", '{"limit":"20"}', 10],
+    ["absent", "{}", 10],
+  ])("POST /threads/:id/history bounds a %s `limit`", async (_label, body, expected) => {
+    const calls: StateHistoryOptions[] = [];
+    const res = await buildApp(fakeHost("ready", calls)).request("/threads/t1/history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([{ limit: expected }]);
   });
 
 });

@@ -20,6 +20,7 @@ import {
   type ThreadState,
   type ThreadCheckpoint,
   type ThreadTask,
+  type StateHistoryOptions,
   type Checkpoint,
   type SkillCatalog,
   type SkillCatalogEntry,
@@ -370,7 +371,10 @@ interface CompiledGraph extends ProtocolCapableGraph {
     config: Record<string, unknown>,
   ): Promise<AsyncIterable<unknown>>;
   getState(config: Record<string, unknown>): Promise<StateSnapshot>;
-  getStateHistory(config: Record<string, unknown>): AsyncIterable<StateSnapshot>;
+  getStateHistory(
+    config: Record<string, unknown>,
+    options?: { limit?: number; before?: { configurable?: { checkpoint_id?: string } } },
+  ): AsyncIterable<StateSnapshot>;
   updateState(
     config: Record<string, unknown>,
     values: unknown,
@@ -492,11 +496,23 @@ class LangGraphAgent implements AgentHandle {
     };
   }
 
-  async *getStateHistory(threadId: string, checkpointNs?: string): AsyncIterable<ThreadState> {
+  async *getStateHistory(
+    threadId: string,
+    options?: StateHistoryOptions,
+  ): AsyncIterable<ThreadState> {
+    const checkpointNs = options?.checkpointNs;
     const config = {
       configurable: { thread_id: threadId, ...(checkpointNs ? { checkpoint_ns: checkpointNs } : {}) },
     };
-    for await (const snap of this.compiled.getStateHistory(config)) {
+    // The checkpointer only appends SQL LIMIT when it receives one; without it
+    // the saver materializes every row for the thread and namespace at once.
+    const listOptions = {
+      ...(options?.limit != null ? { limit: options.limit } : {}),
+      ...(options?.beforeCheckpointId != null
+        ? { before: { configurable: { checkpoint_id: options.beforeCheckpointId } } }
+        : {}),
+    };
+    for await (const snap of this.compiled.getStateHistory(config, listOptions)) {
       const checkpoint = checkpointFromConfig(snap.config);
       const parentCheckpoint = checkpointFromConfig(snap.parentConfig);
       yield {
