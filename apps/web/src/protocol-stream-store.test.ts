@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
 interface FakeController {
   initialThreadId?: string;
   isLoading: boolean;
   rootMessages: unknown[];
+  rootValues: Record<string, unknown>;
   subagents: Map<string, unknown>;
   submits: Array<{ input: unknown; opts: unknown }>;
   acquiredNamespaces: string[][];
@@ -67,6 +69,7 @@ vi.mock("@langchain/langgraph-sdk/stream", () => {
     private subs = new Set<() => void>();
     isLoading = false;
     rootMessages: unknown[] = [];
+    rootValues: Record<string, unknown> = {};
     subagents = new Map<string, unknown>();
     submits: Array<{ input: unknown; opts: unknown }> = [];
     acquiredNamespaces: string[][] = [];
@@ -98,7 +101,7 @@ vi.mock("@langchain/langgraph-sdk/stream", () => {
       },
       getSnapshot: () => ({
         messages: this.rootMessages,
-        values: {},
+        values: this.rootValues,
         isLoading: this.isLoading,
         error: this.rootError,
         interrupt: this.interrupt,
@@ -524,6 +527,37 @@ describe("ProtocolStreamStore steering-enqueue", () => {
       errorText: "Could not load credentials from any providers",
       errorCode: "AUTH_EXPIRED",
     });
+  });
+
+  it("surfaces the truncated-turn flag from values, without marking the run an error", async () => {
+    await store.attach(TID, false);
+    await store.send(TID, "summarize the thread");
+    await flush();
+
+    last.rootValues = { [TRUNCATED_TURN_CHANNEL]: true };
+    last.isLoading = false;
+    last.notify();
+
+    expect(store.getSlice(TID)).toMatchObject({
+      status: "idle",
+      errorText: undefined,
+      truncated: true,
+    });
+  });
+
+  it("clears the truncated-turn flag once a later turn publishes false", async () => {
+    await store.attach(TID, false);
+    await store.send(TID, "summarize the thread");
+    await flush();
+    last.rootValues = { [TRUNCATED_TURN_CHANNEL]: true };
+    last.isLoading = false;
+    last.notify();
+    expect(store.getSlice(TID).truncated).toBe(true);
+
+    last.rootValues = { [TRUNCATED_TURN_CHANNEL]: false };
+    last.notify();
+
+    expect(store.getSlice(TID).truncated).toBe(false);
   });
 
   it("clears a prior run error once the next run resolves", async () => {

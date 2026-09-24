@@ -35,7 +35,10 @@ describe("PIZZA_BOT_AGENT", () => {
       "do not normalize their case, punctuation, or percent escapes",
     );
     expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
-      "`eval` interpreter is computation-only",
+      "await tools.readFile({ file_path, offset, limit })",
+    );
+    expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
+      "page through it in `eval` with `offset`/`limit`",
     );
     expect(PIZZA_BOT_AGENT.systemPrompt).toContain(
       "Never offer or claim an operation unless a matching tool is available",

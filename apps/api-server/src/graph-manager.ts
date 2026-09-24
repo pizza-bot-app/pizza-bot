@@ -28,6 +28,14 @@ export interface GraphManagerOptions {
   getMaxSubagentToolCalls?: () => number;
 }
 
+/** Every field here forces a graph rebuild when it changes between runs. */
+interface RuntimeSettingsSnapshot {
+  addendum: string;
+  memoriesEnabled: boolean;
+  maxToolCalls: number;
+  maxSubagentToolCalls: number;
+}
+
 export interface CapabilityReplacement {
   skills?: SkillCatalog;
   tools?: Record<string, unknown>;
@@ -71,12 +79,7 @@ export class GraphManager {
   private agentImpl?: LangGraphAgent;
   private readonly cache = new Map<string, Promise<LangGraphAgent>>();
   private updates: Promise<void> = Promise.resolve();
-  private appliedRuntimeSettings?: {
-    addendum: string;
-    memoriesEnabled: boolean;
-    maxToolCalls: number;
-    maxSubagentToolCalls: number;
-  };
+  private appliedRuntimeSettings?: RuntimeSettingsSnapshot;
 
   constructor(opts: GraphManagerOptions) {
     this.modelId = opts.modelId;
@@ -285,12 +288,7 @@ export class GraphManager {
     this.cache.set(this.modelId, Promise.resolve(agent));
   }
 
-  private readRuntimeSettings(dependencies: RuntimeDeps): {
-    addendum: string;
-    memoriesEnabled: boolean;
-    maxToolCalls: number;
-    maxSubagentToolCalls: number;
-  } {
+  private readRuntimeSettings(dependencies: RuntimeDeps): RuntimeSettingsSnapshot {
     return {
       addendum: this.getPersonaAddendum(),
       memoriesEnabled: dependencies.memoriesDir

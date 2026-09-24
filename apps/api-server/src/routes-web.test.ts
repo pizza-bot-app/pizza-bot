@@ -54,6 +54,24 @@ describe("api-server: browser app", () => {
     expect(await (await app.request("/ping")).json()).toEqual({ status: "Healthy" });
   });
 
+  // serveStatic sends Last-Modified and answers no conditional request, so a
+  // shell without Cache-Control gets heuristic freshness and pins the browser to
+  // the hashed bundles of whichever build it cached.
+  it("keeps the app shell and the name-stable files out of the browser cache", async () => {
+    const app = buildApp(fakeHost(), {}, {}, { dir: webDir });
+    const shell = await app.request("/", { headers: HTML });
+    expect(shell.headers.get("cache-control")).toBe("no-store");
+    expect((await app.request("/favicon.ico")).headers.get("cache-control")).toBe("no-store");
+    // The static mount sits ahead of every API route, so a miss must not stamp them.
+    expect((await app.request("/ping")).headers.get("cache-control")).toBeNull();
+  });
+
+  it("lets the browser keep content-hashed assets forever", async () => {
+    const app = buildApp(fakeHost(), {}, {}, { dir: webDir });
+    const res = await app.request("/assets/app.js");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+  });
+
   it("generates pizza-config.js instead of serving the placeholder on disk", async () => {
     const app = buildApp(fakeHost(), {}, {}, { dir: webDir });
     const res = await app.request("/pizza-config.js");

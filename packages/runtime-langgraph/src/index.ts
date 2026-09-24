@@ -33,11 +33,12 @@ import type { ProtocolEvent, StateSnapshot } from "@langchain/langgraph";
 import { modelCallLimitMiddleware, toolCallLimitMiddleware } from "langchain";
 import { buildBackend } from "./backend.js";
 import { toolErrorRecoveryMiddleware } from "./tool-error-middleware.js";
-import { outputTruncationMiddleware } from "./output-truncation-middleware.js";
+import { outputTruncationMiddleware, truncatedTurnMiddleware } from "./output-truncation-middleware.js";
 import { subagentFinalizationMiddleware } from "./subagent-finalization-middleware.js";
 import { attachmentInlineMiddleware } from "./attachment-inline-middleware.js";
 import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
 import { localFolderContextMiddleware } from "./local-folder-context-middleware.js";
+import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 import { taskDispatchMiddleware } from "./task-dispatch-middleware.js";
 import { streamProtocolEvents, toLangGraphInput, type ProtocolCapableGraph } from "./stream-protocol.js";
 
@@ -141,27 +142,45 @@ function mcpToolRefs(refs: readonly string[]): string[] {
   return refs.filter((ref) => ref !== BUILTIN_EVAL_TOOL_REF);
 }
 
+/**
+ * The filesystem tools bridged into the sandbox as the `tools.*` namespace. The
+ * mutating two are bridged unconditionally: the backend re-reads each grant's
+ * `readOnly` flag per call, so a withheld tool would duplicate a gate that is
+ * already live while the bridge is fixed at build time.
+ */
+const EVAL_PTC_TOOLS = [
+  "ls",
+  "read_file",
+  "glob",
+  "grep",
+  "write_file",
+  "edit_file",
+] as const;
+
 export function codeInterpreterOptions(hasSubagents: boolean) {
   return {
-    memoryLimitBytes: 32 * 1024 * 1024,
-    maxStackSizeBytes: 320 * 1024,
-    executionTimeoutMs: hasSubagents ? 120_000 : 15_000,
-    maxPtcCalls: 16,
+    // Only MCP tools are withheld: reaching them from code would bypass the HITL
+    // approval a skill declares through `interruptOn`.
+    ptc: [...EVAL_PTC_TOOLS] as string[],
+    // Deliberately above the upstream default: the sandbox exists so bulk data
+    // stays inside it and only a distillate returns through this string.
     maxResultChars: 8_000,
-    captureConsole: true,
+    // The budget must cover awaited host work — paged reads in an orchestrator or
+    // a skill worker, and subagent dispatch where it is enabled.
+    executionTimeoutMs: 120_000,
     subagents: hasSubagents,
   } as const;
 }
 
 async function codeInterpreterMiddleware(hasSubagents: boolean): Promise<unknown> {
   try {
-    const { createCodeInterpreterMiddleware } = await import("@langchain/quickjs");
-    // PTC is intentionally omitted: eval cannot invoke arbitrary agent tools.
-    return createCodeInterpreterMiddleware(codeInterpreterOptions(hasSubagents));
-  } catch {
+    return await createWorkerCodeInterpreterMiddleware(codeInterpreterOptions(hasSubagents));
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code !== "ERR_MODULE_NOT_FOUND") throw error;
     throw new Error(
       `An agent declares "${BUILTIN_EVAL_TOOL_REF}" but @langchain/quickjs is not installed. ` +
         "Install the optional dependency to enable sandboxed evaluation.",
+      { cause: error },
     );
   }
 }
@@ -306,6 +325,9 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
       toolCalls: deps.maxToolCalls ?? AGENT_RUN_LIMITS.orchestrator.toolCalls,
     }),
     toolErrorRecoveryMiddleware(),
+    // Subagents get outputTruncationMiddleware (an agent-facing notice) instead;
+    // this one is for the human, so it belongs to the orchestrator alone.
+    truncatedTurnMiddleware(),
     currentDateTimeMiddleware(),
   ];
   if (deps.localFolders) {

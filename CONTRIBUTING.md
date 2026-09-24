@@ -176,7 +176,7 @@ keep full access, which makes `@claude` the only way to review an outside
 contributor's branch. Dependabot is skipped for a related reason — it gets its own
 secret store — and a lockfile bump is already `audit.yml`'s job.
 
-Both workflows pin `global.anthropic.claude-opus-5`. Pinning the full model ID
+Both workflows pin `global.anthropic.claude-opus-5-5`. Pinning the full model ID
 matters: left unpinned, Claude Code derives a region-prefixed profile from
 `AWS_REGION` and would call a `us.` one instead. Pinning does not confine a run
 to that one model, though — a review also invokes Haiku and Sonnet for background
