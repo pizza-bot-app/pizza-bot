@@ -210,6 +210,24 @@ in `core/src/protocol-types.ts`:
   Standalone directory browsing is a separate, operator-configured capability:
   the API lists directories only beneath canonical
   `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS` and never follows symlinks while browsing.
+
+  One backend is shared by the orchestrator and every skill worker. Workers
+  inherit the thread's `/` state files and their writes merge back, and the
+  memory setting and folder grants apply to the whole thread rather than to one
+  skill:
+
+  ```mermaid
+  flowchart LR
+    subgraph Thread["One thread"]
+      O[Orchestrator]
+      W1[Skill worker A]
+      W2[Skill worker B]
+    end
+    O & W1 & W2 --> CB{{"Shared CompositeBackend"}}
+    CB -->|"/ (incl. /skills/)"| SB["StateBackend<br/>thread checkpoint · not on disk"]
+    CB -->|"/memories/"| MEM["Memories dir on disk<br/>only while Memory is on in Settings"]
+    CB -->|"/local/&lt;id&gt;/"| LF["Granted folders on disk<br/>read-only unless the grant allows writes"]
+  ```
 - **Model context limits** are resolved by each inference-provider adapter from
   effective local configuration or provider metadata, with models.dev filling
   missing catalog fields. The adapter publishes the same available limit as
