@@ -317,6 +317,7 @@ button.sidebar-folder-row:hover,
   background: var(--panel-2); color: var(--text); font: inherit;
 }
 .sidebar-modal-input:focus { outline: none; border-color: var(--brand); }
+.mcp-json-input { min-height: 220px; padding: 10px 12px; resize: vertical; line-height: 1.45; }
 .sidebar-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .sidebar-modal-btn {
   padding: 7px 14px; border: 1px solid var(--border); border-radius: 8px;
@@ -1698,7 +1699,6 @@ button.sidebar-folder-row:hover,
 .resource-editor { display: flex; flex-direction: column; gap: 0; max-width: 720px; }
 .resource-editor-head { margin-bottom: 8px; }
 .resource-editor-title { margin: 0; font-size: 17px; font-weight: 700; }
-.mcp-json-input { min-height: 220px; padding: 10px 12px; resize: vertical; line-height: 1.45; }
 .mcp-paste-json-btn { align-self: flex-start; }
 .resource-editor-body { display: flex; flex-direction: column; gap: 18px; padding: 12px 0; }
 .resource-editor-actions { display: flex; align-items: center; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
