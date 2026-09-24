@@ -190,7 +190,9 @@ export async function createWorkerCodeInterpreterMiddleware(
             : {}) as Record<string, unknown>,
           session.config,
         );
-        reply({ kind: "settle", id: message.id, value: unwrapToolEnvelope(raw) });
+        const value = unwrapToolEnvelope(raw);
+        if (message.name === "read_file") assertReadNotTruncated(value);
+        reply({ kind: "settle", id: message.id, value });
         return;
       }
       const taskTool = session.taskTool;
@@ -378,6 +380,51 @@ export async function createWorkerCodeInterpreterMiddleware(
       )?.(state, runtime);
     },
   };
+}
+
+const READ_HEADER_RE = /^@@ lines (\d+)-(\d+)(?: of (\d+))?((?: \| [^|]*)*) @@$/;
+
+/**
+ * Upstream's guest bridge strips `read_file`'s status header, the only place a
+ * page cut at the size cap says so, so a cut page must fail rather than pass
+ * for a complete one.
+ */
+function assertReadNotTruncated(value: unknown): void {
+  const text =
+    typeof value === "string"
+      ? value
+      : Array.isArray(value)
+        ? value
+            .map((block: { type?: unknown; text?: unknown }) =>
+              block?.type === "text" && typeof block.text === "string" ? block.text : "",
+            )
+            .join("\n")
+        : "";
+  for (const line of text.split("\n")) {
+    const match = READ_HEADER_RE.exec(line);
+    // Upstream puts bracketed notices above the header; anything else is file content.
+    if (!match) {
+      if (line.startsWith("[")) continue;
+      return;
+    }
+    const [, start, end, total, fields = ""] = match;
+    const of = total === undefined ? "" : ` of ${total}`;
+    if (fields.includes("| truncated mid-line")) {
+      throw new Error(
+        `line ${start}${of} alone exceeds the read size cap, so it cannot be read whole; ` +
+          `continue from offset ${start} to skip it`,
+      );
+    }
+    if (fields.includes("| truncated due to size")) {
+      const fitted = Number(end) - Number(start) + 1;
+      throw new Error(
+        `the page exceeded the read size cap and only lines ${start}-${end}${of} fit; ` +
+          `re-read with offset ${Number(start) - 1} and limit ${fitted}, ` +
+          `then continue from offset ${end}`,
+      );
+    }
+    return;
+  }
 }
 
 function tryParseJson(text: string): unknown {

@@ -254,7 +254,11 @@ in `core/src/protocol-types.ts`:
   conversation. Upstream special-cases `read_file` by name, stripping the `cat -n`
   line numbers and `@@ … @@` status header the tool shows in a transcript, so a
   page arrives in the guest as raw content; no other bridged tool gets that
-  treatment. MCP tools are deliberately withheld: reaching one from generated code
+  treatment. That header is also the only mark of a page DeepAgents cut at its
+  size cap, so the bridge makes such a read throw instead, naming the offset to
+  resume from (and, for a cut page, the limit that fits); an uncut page is
+  unchanged.
+  MCP tools are deliberately withheld: reaching one from generated code
   would bypass the approval a skill declares through `interruptOn`. Writes are not
   narrowed at the bridge — the composite backend re-reads each grant's `readOnly`
   flag on every call, so it refuses the write and names why, whereas the bridged

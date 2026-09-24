@@ -1,7 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { SystemMessage } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
+import { createFilesystemMiddleware, FilesystemBackend } from "deepagents";
 import { z } from "zod";
 import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 
@@ -134,4 +138,111 @@ describe("worker-hosted code interpreter", () => {
 
     expect(await tools[0]!.invoke({ code: "40 + 2" }, config)).toContain("42");
   }, WORKER_TEST_TIMEOUT_MS);
+
+  describe("bridged read_file past the size cap", () => {
+    const LINES = 400;
+    let root: string;
+
+    beforeAll(() => {
+      root = mkdtempSync(join(tmpdir(), "eval-read-cap-"));
+      const body = Array.from({ length: LINES }, (_, i) => `line ${i + 1} ${"x".repeat(40)}`);
+      writeFileSync(join(root, "big.log"), body.join("\n"));
+      writeFileSync(join(root, "wide.log"), ["one", "two", "x".repeat(10_000), "four", "five"].join("\n"));
+    });
+    afterAll(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+
+    async function readingSandbox(): Promise<WorkerMiddleware> {
+      // A 4,000-character cap stands in for the real ~80k one: the whole file is ~20k.
+      const filesystem = createFilesystemMiddleware({
+        backend: new FilesystemBackend({ rootDir: root, virtualMode: true }),
+        toolTokenLimitBeforeEvict: 1_000,
+      });
+      const readFile = filesystem.tools!.find((candidate) => candidate.name === "read_file");
+      const sandboxMiddleware = await sandbox(["read_file"]);
+      await sandboxMiddleware.wrapModelCall(
+        { tools: [readFile], systemMessage: new SystemMessage("") },
+        () => undefined,
+      );
+      return sandboxMiddleware;
+    }
+
+    it("returns an uncut page as bare file content", async () => {
+      const { tools } = await readingSandbox();
+      const output = await tools[0]!.invoke(
+        {
+          code: `JSON.stringify((await tools.readFile({ file_path: "/big.log", offset: 9, limit: 2 })).split(/\\r?\\n/))`,
+        },
+        config,
+      );
+
+      expect(output).toContain(`["line 10 ${"x".repeat(40)}","line 11 ${"x".repeat(40)}"]`);
+    }, WORKER_TEST_TIMEOUT_MS);
+
+    it("fails a cut page with the offset to resume from, so paging loses no line", async () => {
+      const { tools } = await readingSandbox();
+      const code = `
+        const lines = [];
+        const cuts = [];
+        let offset = 0;
+        for (;;) {
+          try {
+            lines.push(...(await tools.readFile({ file_path: "/big.log", offset, limit: 100000 })).split(/\\r?\\n/));
+            break;
+          } catch (error) {
+            const resume = /offset (\\d+) and limit (\\d+)/.exec(error.message);
+            if (!resume) throw error;
+            cuts.push(error.message);
+            const limit = Number(resume[2]);
+            lines.push(...(await tools.readFile({ file_path: "/big.log", offset, limit })).split(/\\r?\\n/));
+            offset += limit;
+          }
+        }
+        const numbers = lines.filter(Boolean).map((line) => Number(line.split(" ")[1]));
+        const inOrder = numbers.every((n, i) => n === i + 1);
+        JSON.stringify({ cuts: cuts.length, firstCut: cuts[0], count: numbers.length, inOrder });
+      `;
+      const output = await tools[0]!.invoke({ code }, config);
+      const result = JSON.parse(/\{.*\}/s.exec(output)![0]) as {
+        cuts: number;
+        firstCut: string;
+        count: number;
+        inOrder: boolean;
+      };
+
+      expect(result.cuts).toBeGreaterThan(1);
+      expect(result.firstCut).toMatch(/size cap.*lines 1-\d+ of 400/);
+      expect(result).toMatchObject({ count: LINES, inOrder: true });
+    }, WORKER_TEST_TIMEOUT_MS);
+
+    it("fails a line wider than the cap with the offset that skips it", async () => {
+      const { tools } = await readingSandbox();
+      const code = `
+        const lines = [];
+        const skipped = [];
+        let offset = 0;
+        while (offset < 5) {
+          try {
+            lines.push(...(await tools.readFile({ file_path: "/wide.log", offset, limit: 1 })).split(/\\r?\\n/));
+            offset += 1;
+          } catch (error) {
+            const resume = /continue from offset (\\d+) to skip it/.exec(error.message);
+            if (!resume) throw error;
+            skipped.push(error.message);
+            offset = Number(resume[1]);
+          }
+        }
+        JSON.stringify({ lines: lines.filter(Boolean), skipped });
+      `;
+      const output = await tools[0]!.invoke({ code }, config);
+      const result = JSON.parse(/\{.*\}/s.exec(output)![0]) as {
+        lines: string[];
+        skipped: string[];
+      };
+
+      expect(result.lines).toEqual(["one", "two", "four", "five"]);
+      expect(result.skipped).toEqual([
+        "Tool 'read_file' failed: line 3 of 5 alone exceeds the read size cap, so it cannot be read whole; continue from offset 3 to skip it",
+      ]);
+    }, WORKER_TEST_TIMEOUT_MS);
+  });
 });
