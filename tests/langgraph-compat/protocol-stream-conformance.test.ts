@@ -491,4 +491,30 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
     });
     expect(sawFile).toBe(true);
   });
+
+  it("parallel evals in one turn both finish and land their bridged writes", async () => {
+    const write = (id: string, path: string) => ({
+      id,
+      name: "eval",
+      args: { code: `await tools.writeFile({ file_path: '${path}', content: '${id}' })` },
+      type: "tool_call" as const,
+    });
+    const events = await collectProtocol(
+      new ScriptedModel([
+        new AIMessage({
+          content: "",
+          tool_calls: [write("eval-par-1", "/first.txt"), write("eval-par-2", "/second.txt")],
+        }),
+        new AIMessage({ content: "Wrote both." }),
+      ]),
+    );
+
+    const finalFiles = events
+      .filter((e) => channelOf(e) === "values")
+      .map((e) => (e.params.data as { files?: Record<string, unknown> })?.files ?? {})
+      .at(-1);
+    expect(Object.keys(finalFiles ?? {})).toEqual(
+      expect.arrayContaining(["/first.txt", "/second.txt"]),
+    );
+  });
 });

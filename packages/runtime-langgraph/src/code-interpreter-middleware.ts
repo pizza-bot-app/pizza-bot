@@ -29,7 +29,11 @@ const SUBAGENT_CONCURRENCY = 32;
  */
 const WORKER_RESPONSE_GRACE_MS = 10_000;
 
-/** An invocation that never reaches `afterAgent` (failed, or paused on approval) must not pin its worker. */
+/**
+ * An invocation that never reaches `afterAgent` (failed, or paused on approval)
+ * must not pin its worker. Measured from the last eval, so a longer gap between
+ * evals in one invocation also resets the guest's globals.
+ */
 const SESSION_IDLE_MS = 10 * 60_000;
 
 /**
@@ -128,6 +132,12 @@ export async function createWorkerCodeInterpreterMiddleware(
 
   const middlewareId = randomUUID();
   const sessions = new Map<string, SandboxSession>();
+  /**
+   * Evals in one session run one at a time: a bridged call carries no trace of
+   * which eval issued it, so it can only run under the config of the one eval
+   * in flight — and one model turn can emit several evals at once.
+   */
+  const evalQueues = new Map<string, Promise<unknown>>();
   let ptcTools: ToolLike[] = [];
   let taskTool: ToolLike | null = null;
   let nextEvalId = 0;
@@ -237,20 +247,25 @@ export async function createWorkerCodeInterpreterMiddleware(
       config,
       pendingEvals: new Map(),
     };
-    worker.on("message", (message: WorkerToHost) => {
-      if (message.kind === "eval-result" || message.kind === "eval-error") {
-        const waiter = session.pendingEvals.get(message.id);
-        session.pendingEvals.delete(message.id);
-        if (message.kind === "eval-result") waiter?.resolve(message.text);
-        else waiter?.reject(new Error(message.error));
-        return;
-      }
-      void settleHostCall(session, message);
-    });
     // A terminated worker exits after its key may already hold a replacement.
     const retire = (reason: Error) => {
       if (sessions.get(key) === session) disposeSession(key, reason);
     };
+    worker.on("message", (message: WorkerToHost) => {
+      if (message.kind === "eval-result" || message.kind === "eval-error") {
+        const waiter = session.pendingEvals.get(message.id);
+        session.pendingEvals.delete(message.id);
+        if (message.kind === "eval-result") {
+          waiter?.resolve(message.text);
+        } else {
+          waiter?.reject(new Error(message.error));
+          // A host-side throw means the isolate itself is suspect.
+          retire(new Error("the sandbox failed and was restarted"));
+        }
+        return;
+      }
+      void settleHostCall(session, message);
+    });
     worker.on("error", (error: unknown) =>
       retire(error instanceof Error ? error : new Error(String(error))),
     );
@@ -259,54 +274,69 @@ export async function createWorkerCodeInterpreterMiddleware(
     return session;
   }
 
+  function runEval(key: string, code: string, config: RunnableConfig): Promise<string> {
+    if (config.signal?.aborted) {
+      return Promise.reject(new Error("the sandbox run was cancelled"));
+    }
+    const session = sessions.get(key) ?? startSession(key, config);
+    session.config = config;
+    clearTimeout(session.idleTimer);
+
+    const id = ++nextEvalId;
+    return new Promise<string>((resolve, reject) => {
+      const settle = () => {
+        clearTimeout(watchdog);
+        config.signal?.removeEventListener("abort", onAbort);
+        session.pendingEvals.delete(id);
+        if (session.pendingEvals.size === 0 && sessions.get(key) === session) {
+          session.idleTimer = setTimeout(() => disposeSession(key), SESSION_IDLE_MS);
+          session.idleTimer.unref();
+        }
+      };
+      const onAbort = () => {
+        settle();
+        // Terminating is the only way to stop guest code that never awaits, and
+        // discarding the whole isolate avoids upstream's dispose-during-GC crash.
+        disposeSession(key, new Error("the run was cancelled"));
+        reject(new Error("the sandbox run was cancelled"));
+      };
+      const watchdog = setTimeout(() => {
+        settle();
+        disposeSession(key);
+        reject(new Error("the sandbox worker stopped responding and was restarted"));
+      }, options.executionTimeoutMs + WORKER_RESPONSE_GRACE_MS);
+      session.pendingEvals.set(id, {
+        resolve: (text) => {
+          settle();
+          resolve(text);
+        },
+        reject: (error) => {
+          settle();
+          reject(error);
+        },
+      });
+      config.signal?.addEventListener("abort", onAbort, { once: true });
+      session.worker.postMessage({
+        kind: "eval",
+        id,
+        code,
+        timeoutMs: options.executionTimeoutMs,
+      } satisfies HostToWorker);
+    });
+  }
+
   const evalTool = tool(
     async (input: { code: string }, config: RunnableConfig): Promise<string> => {
       const key = sessionKey(config.configurable);
-      const session = sessions.get(key) ?? startSession(key, config);
-      session.config = config;
-      clearTimeout(session.idleTimer);
-
-      const id = ++nextEvalId;
-      return await new Promise<string>((resolve, reject) => {
-        const settle = () => {
-          clearTimeout(watchdog);
-          config.signal?.removeEventListener("abort", onAbort);
-          session.pendingEvals.delete(id);
-          if (session.pendingEvals.size === 0 && sessions.get(key) === session) {
-            session.idleTimer = setTimeout(() => disposeSession(key), SESSION_IDLE_MS);
-            session.idleTimer.unref();
-          }
-        };
-        const onAbort = () => {
-          settle();
-          // Terminating is the only way to stop guest code that never awaits, and
-          // discarding the whole isolate avoids upstream's dispose-during-GC crash.
-          disposeSession(key, new Error("the run was cancelled"));
-          reject(new Error("the sandbox run was cancelled"));
-        };
-        const watchdog = setTimeout(() => {
-          settle();
-          disposeSession(key);
-          reject(new Error("the sandbox worker stopped responding and was restarted"));
-        }, options.executionTimeoutMs + WORKER_RESPONSE_GRACE_MS);
-        session.pendingEvals.set(id, {
-          resolve: (text) => {
-            settle();
-            resolve(text);
-          },
-          reject: (error) => {
-            settle();
-            reject(error);
-          },
-        });
-        config.signal?.addEventListener("abort", onAbort, { once: true });
-        session.worker.postMessage({
-          kind: "eval",
-          id,
-          code: input.code,
-          timeoutMs: options.executionTimeoutMs,
-        } satisfies HostToWorker);
+      const run = (evalQueues.get(key) ?? Promise.resolve()).then(() =>
+        runEval(key, input.code, config),
+      );
+      const tail = run.catch(() => {});
+      evalQueues.set(key, tail);
+      void tail.then(() => {
+        if (evalQueues.get(key) === tail) evalQueues.delete(key);
       });
+      return await run;
     },
     {
       name: template.name,
