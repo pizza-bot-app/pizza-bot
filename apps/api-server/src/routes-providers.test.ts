@@ -395,13 +395,18 @@ describe("provider routes", () => {
     });
 
   it("re-points the live default without a restart", async () => {
+    host.providerConfigs.setAutomaticModel("anthropic:claude-sonnet-5");
     const res = await setDefault("anthropic:claude-opus-5");
     expect(res.status).toBe(200);
     expect(host.modelId).toBe("anthropic:claude-opus-5");
     const status = (await (await app.request("/status")).json()) as { model: string };
     expect(status.model).toBe("anthropic:claude-opus-5");
-    const models = (await (await app.request("/models")).json()) as { default: string };
+    const models = (await (await app.request("/models")).json()) as {
+      default: string;
+      automatic: string | null;
+    };
     expect(models.default).toBe("anthropic:claude-opus-5");
+    expect(models.automatic).toBe("anthropic:claude-sonnet-5");
     const agent = await host.agentFor(undefined);
     expect(agent).toBe(await host.agentFor(undefined));
   });

@@ -167,7 +167,7 @@ function DefaultModelRow({
 }) {
   const notify = useAppToast();
   const [busy, setBusy] = useState(false);
-  const automaticModel = models.models.find((model) => model.id === models.default);
+  const automaticModel = models.models.find((model) => model.id === models.automatic);
   const savedModelUnavailable =
     defaultModel !== null && !models.models.some((model) => model.id === defaultModel);
   const change = async (value: string) => {

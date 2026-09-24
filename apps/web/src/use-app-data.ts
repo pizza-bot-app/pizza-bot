@@ -279,7 +279,7 @@ export function useModels(
       forceRefresh.current = false;
       return client.listModels(includeDisabled, force);
     }, [client, includeDisabled]),
-    { models: [], providers: [], default: "" } as ModelsInfo,
+    { models: [], providers: [], default: "", automatic: null } as ModelsInfo,
   );
   const retry = useCallback(() => {
     forceRefresh.current = true;
