@@ -147,6 +147,7 @@ describe("worker-hosted code interpreter", () => {
       root = mkdtempSync(join(tmpdir(), "eval-read-cap-"));
       const body = Array.from({ length: LINES }, (_, i) => `line ${i + 1} ${"x".repeat(40)}`);
       writeFileSync(join(root, "big.log"), body.join("\n"));
+      writeFileSync(join(root, "wide.log"), ["one", "two", "x".repeat(10_000), "four", "five"].join("\n"));
     });
     afterAll(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
@@ -211,6 +212,37 @@ describe("worker-hosted code interpreter", () => {
       expect(result.cuts).toBeGreaterThan(1);
       expect(result.firstCut).toMatch(/size cap.*lines 1-\d+ of 400/);
       expect(result).toMatchObject({ count: LINES, inOrder: true });
+    }, WORKER_TEST_TIMEOUT_MS);
+
+    it("fails a line wider than the cap with the offset that skips it", async () => {
+      const { tools } = await readingSandbox();
+      const code = `
+        const lines = [];
+        const skipped = [];
+        let offset = 0;
+        while (offset < 5) {
+          try {
+            lines.push(...(await tools.readFile({ file_path: "/wide.log", offset, limit: 1 })).split(/\\r?\\n/));
+            offset += 1;
+          } catch (error) {
+            const resume = /continue from offset (\\d+) to skip it/.exec(error.message);
+            if (!resume) throw error;
+            skipped.push(error.message);
+            offset = Number(resume[1]);
+          }
+        }
+        JSON.stringify({ lines: lines.filter(Boolean), skipped });
+      `;
+      const output = await tools[0]!.invoke({ code }, config);
+      const result = JSON.parse(/\{.*\}/s.exec(output)![0]) as {
+        lines: string[];
+        skipped: string[];
+      };
+
+      expect(result.lines).toEqual(["one", "two", "four", "five"]);
+      expect(result.skipped).toEqual([
+        "Tool 'read_file' failed: line 3 of 5 alone exceeds the read size cap, so it cannot be read whole; continue from offset 3 to skip it",
+      ]);
     }, WORKER_TEST_TIMEOUT_MS);
   });
 });

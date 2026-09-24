@@ -400,14 +400,19 @@ function assertReadNotTruncated(value: unknown): void {
             )
             .join("\n")
         : "";
-  for (const line of text.split("\n", 4)) {
+  for (const line of text.split("\n")) {
     const match = READ_HEADER_RE.exec(line);
-    if (!match) continue;
+    // Upstream puts bracketed notices above the header; anything else is file content.
+    if (!match) {
+      if (line.startsWith("[")) continue;
+      return;
+    }
     const [, start, end, total, fields = ""] = match;
     const of = total === undefined ? "" : ` of ${total}`;
     if (fields.includes("| truncated mid-line")) {
       throw new Error(
-        `line ${start}${of} alone exceeds the read size cap, so it cannot be read whole`,
+        `line ${start}${of} alone exceeds the read size cap, so it cannot be read whole; ` +
+          `continue from offset ${start} to skip it`,
       );
     }
     if (fields.includes("| truncated due to size")) {
