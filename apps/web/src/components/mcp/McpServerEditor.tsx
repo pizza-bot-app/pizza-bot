@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { McpServerDoc, McpServerEntryWire } from "@/api-client";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import { ChevronLeft, FileJson, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, ChevronLeft, FileJson, Plus, Trash2 } from "lucide-react";
 import { L } from "../../lexicon.js";
 import { slugify } from "../../lib/utils.js";
 import { useAppToast } from "../AppToast.js";
@@ -348,7 +348,15 @@ function PasteMcpJsonDialog({
             placeholder={'{"mcpServers":{"my-server":{"command":"npx","args":["-y","..."]}}}'}
             aria-label="MCP server JSON"
           />
-          {error && <div className="sidebar-modal-error" role="alert">{error}</div>}
+          {error && (
+            <div className="mcp-json-error" role="alert">
+              <AlertCircle className="mcp-json-error-icon" size={17} />
+              <div>
+                <div className="mcp-json-error-title">Could not read this configuration</div>
+                <div className="mcp-json-error-text">{error}</div>
+              </div>
+            </div>
+          )}
           <div className="sidebar-modal-actions">
             <button type="button" className="sidebar-modal-btn" onClick={onCancel}>Cancel</button>
             <button type="button" className="sidebar-modal-btn primary" onClick={apply} disabled={!value.trim()}>

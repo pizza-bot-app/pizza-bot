@@ -318,6 +318,16 @@ button.sidebar-folder-row:hover,
 }
 .sidebar-modal-input:focus { outline: none; border-color: var(--brand); }
 .mcp-json-input { min-height: 220px; padding: 10px 12px; resize: vertical; line-height: 1.45; }
+.mcp-json-error {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px;
+  margin-top: 12px; padding: 11px 12px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--bad) 55%, var(--border));
+  background: color-mix(in srgb, var(--bad) 10%, var(--panel));
+  animation: toast-in .18s ease-out;
+}
+.mcp-json-error-icon { margin-top: 1px; color: var(--bad); }
+.mcp-json-error-title { font-size: 13px; font-weight: 700; }
+.mcp-json-error-text { margin-top: 2px; color: var(--dim); font-size: 12px; line-height: 1.4; word-break: break-word; }
 .sidebar-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .sidebar-modal-btn {
   padding: 7px 14px; border: 1px solid var(--border); border-radius: 8px;
