@@ -7,12 +7,36 @@ export interface WebAppOptions {
   apiToken?: string;
 }
 
+const HASHED_ASSET_PREFIX = "/assets/";
+
+/**
+ * Vite content-hashes everything under `assets/`; the shell and the icons keep
+ * their names across builds. `serveStatic` sends only `Last-Modified` and answers
+ * no conditional request, so a name-stable file left without `Cache-Control` falls
+ * to a browser's heuristic freshness — and a stale shell pins the client to the
+ * previous build's hashed bundles.
+ */
+function cacheControlFor(path: string): string {
+  return path.startsWith(HASHED_ASSET_PREFIX)
+    ? "public, max-age=31536000, immutable"
+    : "no-store";
+}
+
 /**
  * Must be mounted ahead of bearer auth: a browser has to load the app and its
  * configuration before it can present a token.
  */
 export function mountWebApp(app: Hono, options: WebAppOptions): void {
-  const files = serveStatic({ root: options.dir });
+  // serveStatic builds its Response before it calls onFound, so a Cache-Control
+  // set on the context there never reaches it. Mark the hit and stamp the Response
+  // itself; a miss resolves undefined and falls through to the API routes.
+  const served = new WeakSet<object>();
+  const files = serveStatic({
+    root: options.dir,
+    onFound: (_path, c) => {
+      served.add(c);
+    },
+  });
 
   // Generated per request instead of built into the bundle so one image serves
   // any origin. The token it carries is readable by every client that can reach
@@ -35,6 +59,10 @@ export function mountWebApp(app: Hono, options: WebAppOptions): void {
       return next();
     }
     // Any path without a matching file falls through to the API routes.
-    return files(c, next);
+    const res = await files(c, next);
+    if (res && served.delete(c)) {
+      res.headers.set("Cache-Control", cacheControlFor(c.req.path));
+    }
+    return res;
   });
 }

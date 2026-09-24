@@ -1,4 +1,11 @@
-import { ASSISTANT_ID, classifyError, type HitlDecision, type AttachmentMeta } from "@pizza-bot/core";
+import {
+  ASSISTANT_ID,
+  classifyError,
+  type HitlDecision,
+  type AttachmentMeta,
+  type ThreadStateValues,
+  TRUNCATED_TURN_CHANNEL,
+} from "@pizza-bot/core";
 import {
   buildBatchResumeCommand,
   messagesToUI,
@@ -33,6 +40,7 @@ const EMPTY_SLICE: ThreadSlice = {
   attached: false,
   queued: [],
   usage: undefined,
+  truncated: false,
 };
 
 export type HydrationStatus = "unattached" | "loading" | "ready" | "error";
@@ -370,6 +378,7 @@ export class ProtocolStreamStore {
       rootError ?? (e.hydrationStatus === "error" ? e.hydrationError : undefined);
     const errorText = status === "error" ? errorMessage(surfacedError) : undefined;
     const errorCode = errorText !== undefined ? classifyError(surfacedError) : undefined;
+    const truncated = (root.values as ThreadStateValues | undefined)?.[TRUNCATED_TURN_CHANNEL] === true;
 
     if (e.hydrationStatus === "ready" && !root.isLoading && !root.interrupt) {
       messages = sealOpenToolCalls(messages);
@@ -381,6 +390,7 @@ export class ProtocolStreamStore {
       status,
       errorText,
       errorCode,
+      truncated,
       ...(e.runId ? { runId: e.runId } : { runId: undefined }),
       attached: e.hydrationStatus === "ready",
       hydrationStatus: e.hydrationStatus,
@@ -791,6 +801,7 @@ function sliceEqual(a: ProtocolThreadSlice, b: ProtocolThreadSlice): boolean {
     a.status === b.status &&
     a.errorText === b.errorText &&
     a.errorCode === b.errorCode &&
+    a.truncated === b.truncated &&
     a.runId === b.runId &&
     a.attached === b.attached &&
     a.hydrationStatus === b.hydrationStatus &&
