@@ -296,15 +296,10 @@ export function McpServerEditor({
               setHeaders(toRows(pasted.entry.headers));
             }
             setPasteJsonOpen(false);
-            if (pasted.warnings.length > 0) {
-              notify({
-                title: "Fields populated from JSON",
-                description: [description, ...pasted.warnings].join(" · "),
-                tone: "warning",
-              });
-            } else {
-              notify({ title: "Fields populated from JSON", description, tone: "success" });
-            }
+            notify({ title: "Fields populated from JSON", description, tone: "success" });
+            pasted.warnings.forEach((warning) =>
+              notify({ title: "Not applied from JSON", description: warning, tone: "warning" }),
+            );
           }}
         />
       )}
