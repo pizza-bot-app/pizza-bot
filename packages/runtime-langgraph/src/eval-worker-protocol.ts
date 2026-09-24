@@ -32,4 +32,5 @@ export type HostCallRequest =
 
 export type WorkerToHost =
   | { kind: "eval-result"; id: number; text: string }
+  | { kind: "eval-error"; id: number; error: string }
   | (HostCallRequest & { id: number });

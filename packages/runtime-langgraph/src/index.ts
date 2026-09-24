@@ -176,7 +176,7 @@ async function codeInterpreterMiddleware(hasSubagents: boolean): Promise<unknown
   try {
     return await createWorkerCodeInterpreterMiddleware(codeInterpreterOptions(hasSubagents));
   } catch (error) {
-    if (error instanceof Error && !/Cannot find (module|package)/.test(error.message)) throw error;
+    if ((error as { code?: unknown } | null)?.code !== "ERR_MODULE_NOT_FOUND") throw error;
     throw new Error(
       `An agent declares "${BUILTIN_EVAL_TOOL_REF}" but @langchain/quickjs is not installed. ` +
         "Install the optional dependency to enable sandboxed evaluation.",

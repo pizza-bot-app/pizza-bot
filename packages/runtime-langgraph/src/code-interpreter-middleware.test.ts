@@ -11,7 +11,22 @@ interface WorkerMiddleware {
 
 let middleware: WorkerMiddleware | null = null;
 
-const config: RunnableConfig = { configurable: { thread_id: "sandbox-test" } };
+/** LangGraph's namespace shapes: `<invocation>|tools:<id>` and `<invocation>|<after_agent node>`. */
+function toolCall(invocation: string): RunnableConfig {
+  return {
+    configurable: { thread_id: "sandbox-test", checkpoint_ns: `${invocation}|tools:call` },
+  };
+}
+function afterAgentRuntime(invocation: string): unknown {
+  return {
+    configurable: {
+      thread_id: "sandbox-test",
+      checkpoint_ns: `${invocation}|CodeInterpreterMiddleware.after_agent:node`,
+    },
+  };
+}
+
+const config = toolCall("tools:root");
 
 async function sandbox(): Promise<WorkerMiddleware> {
   middleware = (await createWorkerCodeInterpreterMiddleware({
@@ -24,7 +39,8 @@ async function sandbox(): Promise<WorkerMiddleware> {
 }
 
 afterEach(async () => {
-  await middleware?.afterAgent?.({}, config);
+  await middleware?.afterAgent?.({}, afterAgentRuntime("tools:root"));
+  await middleware?.afterAgent?.({}, afterAgentRuntime("tools:root|1"));
   middleware = null;
 });
 
@@ -57,4 +73,20 @@ describe("worker-hosted code interpreter", () => {
 
     expect(ticks).toBeGreaterThan(20);
   }, 20_000);
+
+  it("gives concurrent invocations of one agent separate sessions", async () => {
+    // Parallel runs of one skill share this middleware instance and thread; only
+    // the namespace tells them apart, and LangGraph suffixes the second one.
+    const { tools, afterAgent } = await sandbox();
+    const first = toolCall("tools:root");
+    const second = toolCall("tools:root|1");
+    await Promise.all([
+      tools[0]!.invoke({ code: "globalThis.owner = 'first'" }, first),
+      tools[0]!.invoke({ code: "globalThis.owner = 'second'" }, second),
+    ]);
+    await afterAgent?.({}, afterAgentRuntime("tools:root"));
+
+    expect(await tools[0]!.invoke({ code: "owner" }, second)).toContain("second");
+    expect(await tools[0]!.invoke({ code: "typeof owner" }, first)).toContain("undefined");
+  });
 });

@@ -75,9 +75,18 @@ port.on("message", (message: HostToWorker) => {
     return;
   }
   void (async () => {
-    // Formatting happens here so only a string crosses back: a dumped guest value
-    // can hold shapes `postMessage` refuses to clone.
-    const text = formatReplResult(await session.eval(message.code, message.timeoutMs));
-    port.postMessage({ kind: "eval-result", id: message.id, text } as WorkerToHost);
+    try {
+      // Formatting happens here so only a string crosses back: a dumped guest value
+      // can hold shapes `postMessage` refuses to clone.
+      const text = formatReplResult(await session.eval(message.code, message.timeoutMs));
+      port.postMessage({ kind: "eval-result", id: message.id, text } as WorkerToHost);
+    } catch (error) {
+      // Without a reply the host would wait out the watchdog on a healthy worker.
+      port.postMessage({
+        kind: "eval-error",
+        id: message.id,
+        error: error instanceof Error ? error.message : String(error),
+      } as WorkerToHost);
+    }
   })();
 });

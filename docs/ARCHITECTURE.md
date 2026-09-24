@@ -239,6 +239,11 @@ in `core/src/protocol-types.ts`:
   context a filesystem write needs; that hop must pass the eval tool's config
   explicitly, because the worker's message handler runs outside the call's async
   context. Cancellation terminates the worker rather than disposing the isolate.
+  Each agent invocation gets its own worker, keyed by the `checkpoint_ns` prefix
+  its eval calls and `afterAgent` share, so parallel runs of one skill neither swap
+  configs nor tear each other down; and since upstream's eval queue is
+  module-global, per-worker hosting also stops evals in different agents from
+  serializing behind one another.
   The packaged server emits the worker as a second esbuild entry beside `index.js`,
   since both resolve the QuickJS wasm as a sibling file.
   The QuickJS guest has no filesystem of its own. Its bridges are the `task()` global

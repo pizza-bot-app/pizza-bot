@@ -23,8 +23,14 @@ export interface SandboxOptions {
 /** Mirrors the fixed cap upstream applies when `subagents` is enabled. */
 const SUBAGENT_CONCURRENCY = 32;
 
-/** Grace past the guest deadline before a silent worker counts as wedged. */
+/**
+ * Grace past the guest deadline before a silent worker counts as wedged. The
+ * deadline is wall-clock, so time the guest spends awaiting host work counts.
+ */
 const WORKER_RESPONSE_GRACE_MS = 10_000;
+
+/** An invocation that never reaches `afterAgent` (failed, or paused on approval) must not pin its worker. */
+const SESSION_IDLE_MS = 10 * 60_000;
 
 /**
  * Under tsx and vitest this module is still TypeScript, so the worker beside it
@@ -86,9 +92,18 @@ function commandContent(command: { update?: unknown }): unknown {
 
 interface SandboxSession {
   worker: Worker;
+  /** Fixed at start: the guest's `tools.*` namespace is generated from these. */
+  ptcTools: ToolLike[];
+  taskTool: ToolLike | null;
   /** Refreshed per eval: a bridged call must run under the calling run's config. */
   config: RunnableConfig;
   pendingEvals: Map<number, { resolve: (text: string) => void; reject: (error: Error) => void }>;
+  idleTimer?: ReturnType<typeof setTimeout>;
+}
+
+interface SessionConfigurable {
+  thread_id?: string;
+  checkpoint_ns?: string;
 }
 
 export async function createWorkerCodeInterpreterMiddleware(
@@ -117,10 +132,23 @@ export async function createWorkerCodeInterpreterMiddleware(
   let taskTool: ToolLike | null = null;
   let nextEvalId = 0;
 
+  /**
+   * One session per agent invocation. An eval call's `checkpoint_ns` ends in its
+   * own `tools:<id>` segment and `afterAgent`'s in its own node segment, so the
+   * prefix before the last segment is the invocation both share — and LangGraph
+   * keeps it distinct across concurrent invocations of the same subagent.
+   */
+  function sessionKey(configurable: SessionConfigurable | undefined): string {
+    const ns = configurable?.checkpoint_ns ?? "";
+    const invocation = ns.includes("|") ? ns.slice(0, ns.lastIndexOf("|")) : "";
+    return `${configurable?.thread_id ?? "__default__"}:${invocation}:${middlewareId}`;
+  }
+
   function disposeSession(key: string, reason?: Error): void {
     const session = sessions.get(key);
     if (!session) return;
     sessions.delete(key);
+    clearTimeout(session.idleTimer);
     for (const waiter of session.pendingEvals.values()) {
       waiter.reject(reason ?? new Error("the sandbox worker was shut down"));
     }
@@ -141,7 +169,7 @@ export async function createWorkerCodeInterpreterMiddleware(
     };
     try {
       if (message.kind === "tool-call") {
-        const target = ptcTools.find((candidate) => candidate.name === message.name);
+        const target = session.ptcTools.find((candidate) => candidate.name === message.name);
         if (!target) throw new Error(`tool '${message.name}' is not bridged into the sandbox`);
         // The config is passed explicitly because this handler runs from the
         // worker's message event, outside the eval call's async context — the
@@ -155,6 +183,7 @@ export async function createWorkerCodeInterpreterMiddleware(
         reply({ kind: "settle", id: message.id, value: unwrapToolEnvelope(raw) });
         return;
       }
+      const taskTool = session.taskTool;
       if (!taskTool) throw new Error("subagent dispatch is not available in this sandbox");
       const responseSchema = message.responseSchema;
       if (responseSchema !== undefined) validateResponseSchema(responseSchema);
@@ -201,32 +230,41 @@ export async function createWorkerCodeInterpreterMiddleware(
     const worker = new Worker(WORKER_ENTRY, { workerData, execArgv: WORKER_EXEC_ARGV });
     // A wedged sandbox must never be the reason the process cannot exit.
     worker.unref();
-    const session: SandboxSession = { worker, config, pendingEvals: new Map() };
+    const session: SandboxSession = {
+      worker,
+      ptcTools,
+      taskTool,
+      config,
+      pendingEvals: new Map(),
+    };
     worker.on("message", (message: WorkerToHost) => {
-      if (message.kind === "eval-result") {
+      if (message.kind === "eval-result" || message.kind === "eval-error") {
         const waiter = session.pendingEvals.get(message.id);
         session.pendingEvals.delete(message.id);
-        waiter?.resolve(message.text);
+        if (message.kind === "eval-result") waiter?.resolve(message.text);
+        else waiter?.reject(new Error(message.error));
         return;
       }
       void settleHostCall(session, message);
     });
+    // A terminated worker exits after its key may already hold a replacement.
+    const retire = (reason: Error) => {
+      if (sessions.get(key) === session) disposeSession(key, reason);
+    };
     worker.on("error", (error: unknown) =>
-      disposeSession(key, error instanceof Error ? error : new Error(String(error))),
+      retire(error instanceof Error ? error : new Error(String(error))),
     );
-    worker.on("exit", (code) => {
-      if (code !== 0) disposeSession(key, new Error(`the sandbox worker exited with code ${code}`));
-    });
+    worker.on("exit", (code) => retire(new Error(`the sandbox worker exited with code ${code}`)));
     sessions.set(key, session);
     return session;
   }
 
   const evalTool = tool(
     async (input: { code: string }, config: RunnableConfig): Promise<string> => {
-      const key = `${config.configurable?.thread_id ?? "__default__"}:${middlewareId}`;
+      const key = sessionKey(config.configurable);
       const session = sessions.get(key) ?? startSession(key, config);
-      // The tool list is fixed when the worker starts, so only the config moves.
       session.config = config;
+      clearTimeout(session.idleTimer);
 
       const id = ++nextEvalId;
       return await new Promise<string>((resolve, reject) => {
@@ -234,6 +272,10 @@ export async function createWorkerCodeInterpreterMiddleware(
           clearTimeout(watchdog);
           config.signal?.removeEventListener("abort", onAbort);
           session.pendingEvals.delete(id);
+          if (session.pendingEvals.size === 0 && sessions.get(key) === session) {
+            session.idleTimer = setTimeout(() => disposeSession(key), SESSION_IDLE_MS);
+            session.idleTimer.unref();
+          }
         };
         const onAbort = () => {
           settle();
@@ -297,8 +339,8 @@ export async function createWorkerCodeInterpreterMiddleware(
         handler,
       );
     },
-    afterAgent: async (state: unknown, runtime: { configurable?: { thread_id?: string } }) => {
-      disposeSession(`${runtime.configurable?.thread_id ?? "__default__"}:${middlewareId}`);
+    afterAgent: async (state: unknown, runtime: { configurable?: SessionConfigurable }) => {
+      disposeSession(sessionKey(runtime.configurable));
       return await (
         upstream.afterAgent as
           | ((s: unknown, r: unknown) => Promise<unknown>)
