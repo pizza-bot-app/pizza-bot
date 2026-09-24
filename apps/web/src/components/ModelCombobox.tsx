@@ -58,10 +58,21 @@ export function ModelCombobox({
   const firstEnabled = Math.max(rows.findIndex((row) => !row.disabled), 0);
   const optionId = (index: number) => `${listId}-option-${index}`;
 
+  const refocusOnEnable = useRef(false);
   const close = (restoreFocus: boolean) => {
     setOpen(false);
-    if (restoreFocus) triggerRef.current?.focus();
+    if (!restoreFocus) return;
+    refocusOnEnable.current = true;
+    triggerRef.current?.focus();
   };
+
+  // A parent that disables the picker while it saves a pick drops the trigger's focus to <body>.
+  useEffect(() => {
+    if (disabled) return;
+    const dropped = document.activeElement === document.body || document.activeElement === null;
+    if (refocusOnEnable.current && dropped) triggerRef.current?.focus();
+    refocusOnEnable.current = false;
+  }, [disabled, open]);
 
   // Popover layers consume Escape before the chat-zone binding returns focus.
   useLayer("model-combobox", { active: open, onEscape: () => close(true) });
