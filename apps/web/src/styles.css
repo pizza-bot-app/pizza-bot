@@ -1073,9 +1073,11 @@ button.sidebar-folder-row:hover,
   pointer-events: auto; animation: toast-in .18s ease-out;
 }
 .app-toast.success { border-color: color-mix(in oklch, var(--ok) 45%, var(--border)); }
+.app-toast.warning { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .app-toast.error { border-color: color-mix(in oklch, var(--bad) 55%, var(--border)); }
 .app-toast-icon { margin-top: 1px; color: var(--info); }
 .app-toast.success .app-toast-icon { color: var(--ok); }
+.app-toast.warning .app-toast-icon { color: var(--warn); }
 .app-toast.error .app-toast-icon { color: var(--bad); }
 .app-toast-content { min-width: 0; }
 .app-toast-title { font-size: 13px; font-weight: 700; }

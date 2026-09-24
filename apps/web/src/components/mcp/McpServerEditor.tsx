@@ -300,7 +300,7 @@ export function McpServerEditor({
               notify({
                 title: "Fields populated from JSON",
                 description: [description, ...pasted.warnings].join(" · "),
-                tone: "info",
+                tone: "warning",
               });
             } else {
               notify({ title: "Fields populated from JSON", description, tone: "success" });
