@@ -44,6 +44,15 @@ describe("parseMcpJson", () => {
     expect(parseMcpJson(JSON.stringify({ mcpServers: { remote: { url: "https://example.com", headers: { Port: 8080 } } } }))).toMatchObject({ ok: false });
   });
 
+  it("rejects urls the server would refuse, before they reach the form", () => {
+    for (const url of ["", "   ", "not a url", "example.com/mcp", "http://"]) {
+      expect(parseMcpJson(JSON.stringify({ mcpServers: { remote: { url } } }))).toEqual({
+        ok: false,
+        error: "url must be a valid URL.",
+      });
+    }
+  });
+
   it("enforces mutually exclusive transports and type values", () => {
     expect(parseMcpJson(JSON.stringify({ mcpServers: { invalid: { command: "uvx", url: "https://example.com" } } }))).toMatchObject({ ok: false });
     expect(parseMcpJson(JSON.stringify({ mcpServers: { invalid: {} } }))).toMatchObject({ ok: false });

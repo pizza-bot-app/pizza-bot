@@ -82,6 +82,9 @@ export function parseMcpJson(input: string): McpJsonResult {
   if (typeof url !== "string" || !isStringRecord(config.headers)) {
     return { ok: false, error: "url must be a string and header values must be strings." };
   }
+  if (!URL.canParse(url)) {
+    return { ok: false, error: "url must be a valid URL." };
+  }
   return {
     ok: true,
     value: {
