@@ -296,7 +296,15 @@ export function McpServerEditor({
               setHeaders(toRows(pasted.entry.headers));
             }
             setPasteJsonOpen(false);
-            notify({ title: "Fields populated from JSON", description, tone: "success" });
+            if (pasted.warnings.length > 0) {
+              notify({
+                title: "Fields populated from JSON",
+                description: [description, ...pasted.warnings].join(" · "),
+                tone: "info",
+              });
+            } else {
+              notify({ title: "Fields populated from JSON", description, tone: "success" });
+            }
           }}
         />
       )}

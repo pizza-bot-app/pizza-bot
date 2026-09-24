@@ -3,7 +3,11 @@ import type { McpServerEntryWire } from "@/api-client";
 export type ParsedMcpJson = {
   name: string;
   entry: McpServerEntryWire;
+  warnings: string[];
 };
+
+const STDIO_KEYS = new Set(["type", "command", "args", "env", "cwd"]);
+const URL_KEYS = new Set(["type", "url", "headers"]);
 
 export type McpJsonResult =
   | { ok: true; value: ParsedMcpJson }
@@ -21,8 +25,7 @@ export function parseMcpJson(input: string): McpJsonResult {
     return { ok: false, error: "JSON must contain an mcpServers object." };
   }
 
-  const names = Object.keys(parsed.mcpServers);
-  const name = names[0];
+  const [name, ...skippedServers] = Object.keys(parsed.mcpServers);
   const config = name ? parsed.mcpServers[name] : undefined;
   if (!name || !isRecord(config)) {
     return { ok: false, error: "mcpServers must contain a server configuration." };
@@ -65,6 +68,7 @@ export function parseMcpJson(input: string): McpJsonResult {
           ...(config.env ? { env: config.env } : {}),
           ...(typeof config.cwd === "string" ? { cwd: config.cwd } : {}),
         },
+        warnings: collectWarnings(config, STDIO_KEYS, skippedServers),
       },
     };
   }
@@ -81,8 +85,17 @@ export function parseMcpJson(input: string): McpJsonResult {
         url,
         ...(config.headers ? { headers: config.headers } : {}),
       },
+      warnings: collectWarnings(config, URL_KEYS, skippedServers),
     },
   };
+}
+
+function collectWarnings(config: Record<string, unknown>, known: Set<string>, skippedServers: string[]): string[] {
+  const unknown = Object.keys(config).filter((key) => !known.has(key));
+  return [
+    ...(skippedServers.length > 0 ? [`Only the first server was used; skipped: ${skippedServers.join(", ")}`] : []),
+    ...(unknown.length > 0 ? [`Ignored unsupported fields: ${unknown.join(", ")}`] : []),
+  ];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
