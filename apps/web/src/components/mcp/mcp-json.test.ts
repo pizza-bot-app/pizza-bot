@@ -58,6 +58,10 @@ describe("parseMcpJson", () => {
     expect(parseMcpJson(JSON.stringify({ mcpServers: { invalid: {} } }))).toMatchObject({ ok: false });
     expect(parseMcpJson(JSON.stringify({ mcpServers: { invalid: { type: "stdio", url: "https://example.com" } } }))).toMatchObject({ ok: false });
     expect(parseMcpJson(JSON.stringify({ mcpServers: { invalid: { type: "grpc", url: "https://example.com" } } }))).toMatchObject({ ok: false });
+    expect(parseMcpJson(JSON.stringify({ mcpServers: { invalid: { type: "http", command: "npx" } } }))).toEqual({
+      ok: false,
+      error: "The transport type does not match the server fields.",
+    });
     expect(parseMcpJson(JSON.stringify({ mcpServers: { remote: { type: "streamable-http", url: "https://example.com" } } }))).toMatchObject({ ok: true });
     expect(parseMcpJson(JSON.stringify({ mcpServers: { local: { type: "stdio", command: "npx" } } }))).toMatchObject({ ok: true });
   });

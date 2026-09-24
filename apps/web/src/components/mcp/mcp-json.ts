@@ -33,7 +33,7 @@ export function parseMcpJson(input: string): McpJsonResult {
 
   const command = config.command;
   const url = config.url;
-  if (typeof command === "string" && url !== undefined || command !== undefined && url !== undefined) {
+  if (command !== undefined && url !== undefined) {
     return { ok: false, error: "A server cannot define both command and url." };
   }
   if (command === undefined && url === undefined) {
@@ -44,7 +44,9 @@ export function parseMcpJson(input: string): McpJsonResult {
   if (type !== undefined && type !== "stdio" && type !== "http" && type !== "streamable-http" && type !== "sse") {
     return { ok: false, error: "Unknown MCP transport type." };
   }
-  if (type === "stdio" && command === undefined || type !== "stdio" && type !== undefined && url === undefined) {
+  const typeWantsStdio = type === "stdio";
+  const typeWantsUrl = type !== undefined && type !== "stdio";
+  if ((typeWantsStdio && command === undefined) || (typeWantsUrl && url === undefined)) {
     return { ok: false, error: "The transport type does not match the server fields." };
   }
 
@@ -56,9 +58,6 @@ export function parseMcpJson(input: string): McpJsonResult {
   if (typeof command === "string") {
     if (!command.trim()) {
       return { ok: false, error: "command must not be empty." };
-    }
-    if (type !== undefined && type !== "stdio") {
-      return { ok: false, error: "The transport type does not match the server fields." };
     }
     if (!isOptionalStringArray(config.args) || !isStringRecord(config.env)) {
       return { ok: false, error: "args must be strings and env values must be strings." };
