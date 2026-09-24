@@ -39,6 +39,9 @@ export function parseMcpJson(input: string): McpJsonResult {
   if (command === undefined && url === undefined) {
     return { ok: false, error: "A server must define command or url." };
   }
+  if (command !== undefined && typeof command !== "string") {
+    return { ok: false, error: "command must be a string." };
+  }
 
   const type = config.type;
   if (type !== undefined && type !== "stdio" && type !== "http" && type !== "streamable-http" && type !== "sse") {

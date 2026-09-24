@@ -27,6 +27,12 @@ describe("parseMcpJson", () => {
     expect(parseMcpJson(JSON.stringify({ mcpServers: { local: { args: ["server"] } } }))).toMatchObject({ ok: false });
     expect(parseMcpJson(JSON.stringify({ mcpServers: { local: { command: "" } } }))).toMatchObject({ ok: false });
     expect(parseMcpJson(JSON.stringify({ mcpServers: { local: { command: "   " } } }))).toMatchObject({ ok: false });
+    for (const command of [42, null, true, ["npx"]]) {
+      expect(parseMcpJson(JSON.stringify({ mcpServers: { local: { command } } }))).toEqual({
+        ok: false,
+        error: "command must be a string.",
+      });
+    }
     expect(parseMcpJson(JSON.stringify({ mcpServers: { local: { command: "uvx", env: { PORT: 8080 } } } }))).toMatchObject({ ok: false });
     expect(parseMcpJson(JSON.stringify({ mcpServers: { local: { command: "uvx", env: { DEBUG: true } } } }))).toMatchObject({ ok: false });
   });
