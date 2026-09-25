@@ -973,6 +973,8 @@ export interface ModelsInfo {
   }>;
   providers?: ModelCatalogStatus[];
   default: string;
+  /** The model Automatic resolves to, independent of any saved default. */
+  automatic: string | null;
 }
 
 /**

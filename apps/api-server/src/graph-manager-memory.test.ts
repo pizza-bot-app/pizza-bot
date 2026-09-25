@@ -3,6 +3,7 @@ import {
   ModelRegistry,
   PIZZA_BOT_MEMORY_PROMPT,
   type RuntimeDeps,
+  type SkillCatalogEntry,
 } from "@pizza-bot/core";
 import { registerBuiltinProviders } from "@pizza-bot/inference-providers";
 import { createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
@@ -71,5 +72,44 @@ describe("GraphManager memory settings", () => {
     expect((vi.mocked(createPizzaBotAgent).mock.calls.at(-1)![1] as RuntimeDeps).maxToolCalls).toBe(-1);
     expect((vi.mocked(createPizzaBotAgent).mock.calls.at(-1)![1] as RuntimeDeps).maxSubagentToolCalls)
       .toBe(-1);
+  });
+});
+
+describe("GraphManager prompt capabilities", () => {
+  beforeEach(() => {
+    vi.mocked(createPizzaBotAgent).mockClear();
+  });
+
+  it("includes delegation guidance only while a ready skill exists", async () => {
+    const models = new ModelRegistry();
+    await registerBuiltinProviders(models);
+    const skill: SkillCatalogEntry = {
+      id: "mailer",
+      name: "mailer",
+      description: "mailer description",
+      source: "user",
+      declaredTools: [],
+      interruptOn: {},
+      files: [],
+    };
+    const registry = new GraphManager({
+      modelId: MODEL_ID,
+      models,
+      dependencies: { skills: new Map([[skill.id, skill]]) },
+    });
+
+    await registry.initialize(await models.buildModel(MODEL_ID));
+    const [readyPrompt] = vi.mocked(createPizzaBotAgent).mock.calls.at(-1)!;
+    expect(readyPrompt).toContain("through the `task` tool");
+
+    await registry.replaceCapabilities({
+      skills: new Map(),
+      skillAvailability: [{ id: "mailer", name: "Mailer", status: "loading" }],
+    });
+    const [loadingPrompt] = vi.mocked(createPizzaBotAgent).mock.calls.at(-1)!;
+    expect(loadingPrompt).not.toContain("`task`");
+    expect(loadingPrompt).toContain(
+      "\n\nThese specialists are not currently callable:\n- Mailer: still loading",
+    );
   });
 });

@@ -27,6 +27,17 @@ if (!outputArg) {
 
 const outputDir = path.resolve(process.cwd(), outputArg);
 const entry = path.join(apiRoot, "src", "index.ts");
+/**
+ * The sandbox worker is its own entry because `new Worker()` needs a real file on
+ * disk. It must land beside index.js: both find the QuickJS wasm as a sibling.
+ */
+const workerEntry = path.join(
+  repoRoot,
+  "packages",
+  "runtime-langgraph",
+  "src",
+  "eval-worker.ts",
+);
 const requestedNativeTargets = [...new Set(process.argv.slice(3))];
 
 rmSync(outputDir, {
@@ -37,9 +48,21 @@ rmSync(outputDir, {
 });
 mkdirSync(outputDir, { recursive: true });
 
+let quickJsEntry;
+try {
+  quickJsEntry = require.resolve("@langchain/quickjs");
+} catch (error) {
+  if (error?.code !== "MODULE_NOT_FOUND") throw error;
+}
+
 await build({
-  entryPoints: [entry],
-  outfile: path.join(outputDir, "index.js"),
+  // Named entries keep both outputs flat in outputDir; esbuild would otherwise
+  // mirror each entry's path from their common ancestor, the repo root.
+  entryPoints: {
+    index: entry,
+    ...(quickJsEntry ? { "eval-worker": workerEntry } : {}),
+  },
+  outdir: outputDir,
   bundle: true,
   platform: "node",
   format: "esm",
@@ -57,12 +80,6 @@ await build({
   logLevel: "info",
 });
 
-let quickJsEntry;
-try {
-  quickJsEntry = require.resolve("@langchain/quickjs");
-} catch (error) {
-  if (error?.code !== "MODULE_NOT_FOUND") throw error;
-}
 if (quickJsEntry) {
   const quickJsRequire = createRequire(quickJsEntry);
   const wasmSource = quickJsRequire.resolve(

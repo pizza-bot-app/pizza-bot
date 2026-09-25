@@ -145,14 +145,26 @@ describe("resolveSkillSubagents", () => {
 });
 
 describe("eval capability", () => {
-  it("uses bounded defaults and enables task fan-out only for Pizza Bot", () => {
-    expect(codeInterpreterOptions(false)).toMatchObject({
-      executionTimeoutMs: 15_000,
-      subagents: false,
-    });
+  it("enables task fan-out only for Pizza Bot", () => {
+    expect(codeInterpreterOptions(false)).toMatchObject({ subagents: false });
+    expect(codeInterpreterOptions(true)).toMatchObject({ subagents: true });
+  });
+
+  it("bridges the filesystem tools, reads and writes alike", () => {
+    expect(codeInterpreterOptions(false).ptc).toEqual([
+      "ls",
+      "read_file",
+      "glob",
+      "grep",
+      "write_file",
+      "edit_file",
+    ]);
+  });
+
+  it("keeps the bounds a paging loop depends on", () => {
     expect(codeInterpreterOptions(true)).toMatchObject({
+      maxResultChars: 8_000,
       executionTimeoutMs: 120_000,
-      subagents: true,
     });
   });
 });

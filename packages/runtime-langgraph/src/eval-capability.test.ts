@@ -20,6 +20,10 @@ vi.mock("deepagents", async () => {
 
 vi.mock("@langchain/quickjs", () => ({
   createCodeInterpreterMiddleware: mocks.createCodeInterpreterMiddleware,
+  validateResponseSchema: vi.fn(),
+  DEFAULT_MAX_PTC_CALLS: 256,
+  DEFAULT_MEMORY_LIMIT: 1024,
+  DEFAULT_MAX_STACK_SIZE: 512,
 }));
 
 vi.mock("langchain", async () => {
@@ -63,6 +67,19 @@ describe("Pizza Bot graph assembly", () => {
     mocks.createCodeInterpreterMiddleware.mockImplementation((options) => ({
       name: "CodeInterpreterMiddleware",
       options,
+      // The worker wrapper rebuilds the eval tool from upstream's own instance.
+      tools: [
+        {
+          name: "eval",
+          description: "Runs code.",
+          schema: {
+            type: "object",
+            properties: { code: { type: "string" } },
+            required: ["code"],
+          },
+        },
+      ],
+      wrapModelCall: (request: unknown, handler: (r: unknown) => unknown) => handler(request),
     }));
     mocks.modelCallLimitMiddleware.mockReset();
     mocks.modelCallLimitMiddleware.mockReturnValue({ name: "ModelCallLimitMiddleware" });

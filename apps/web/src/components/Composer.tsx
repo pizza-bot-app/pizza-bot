@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -9,17 +8,13 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { Plus, Cloud, ChevronDown, SendHorizontal, Square, X, FileText, Loader2, Search } from "lucide-react";
+import { Plus, SendHorizontal, Square, X, FileText, Loader2 } from "lucide-react";
 import type { ModelsInfo, ApiClient } from "@/api-client";
 import type { AttachmentMeta } from "@pizza-bot/core";
 import { ATTACHMENT_ACCEPT, isImageAttachmentType, resolveAttachmentMediaType } from "@pizza-bot/core";
 import type { PromptHistoryCycler } from "../use-prompt-history.js";
-import { useLayer } from "../hotkeys/index.js";
-import {
-  groupModelsByProvider,
-  providerLabel,
-  reconcileSelectedModel,
-} from "../model-options.js";
+import { reconcileSelectedModel } from "../model-options.js";
+import { ModelCombobox } from "./ModelCombobox.js";
 import { useAttachmentSrc } from "../attachment-src.js";
 import { composerDraftStore } from "../composer-draft-store.js";
 
@@ -61,13 +56,8 @@ export function Composer({
   const initialDraft = useRef(composerDraftStore.get(threadId)).current;
   const [text, setText] = useState(initialDraft.text);
   const [model, setModel] = useState<string>(initialDraft.model || initialModel || "");
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerCursor, setPickerCursor] = useState(0);
-  const [modelQuery, setModelQuery] = useState("");
   const localRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = composerRef ?? localRef;
-  const pickerWrapRef = useRef<HTMLDivElement>(null);
-  const pickerSearchRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composing = useRef(false);
   const draftRevision = useRef(0);
@@ -78,14 +68,6 @@ export function Composer({
   const [attachError, setAttachError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const mounted = useRef(false);
-  const filteredModels = useMemo(() => {
-    const query = modelQuery.trim().toLowerCase();
-    if (!query) return models.models;
-    return models.models.filter((option) =>
-      `${option.displayName} ${option.id} ${option.provider}`.toLowerCase().includes(query),
-    );
-  }, [modelQuery, models.models]);
-
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -158,9 +140,6 @@ export function Composer({
   const sendDisabled =
     uploading > 0 || (!text.trim() && attachments.length === 0);
 
-  // Popover layers consume Escape before the chat-zone binding returns focus.
-  useLayer("composer-picker", { active: pickerOpen, onEscape: () => setPickerOpen(false) });
-
   useEffect(() => {
     setModel((selected) => reconcileSelectedModel(selected || initialModel || "", models));
   }, [initialModel, models]);
@@ -177,25 +156,6 @@ export function Composer({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillToken]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onDocMouseDown = (e: MouseEvent) => {
-      if (!pickerWrapRef.current?.contains(e.target as Node)) setPickerOpen(false);
-    };
-    document.addEventListener("mousedown", onDocMouseDown);
-    return () => document.removeEventListener("mousedown", onDocMouseDown);
-  }, [pickerOpen]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    setModelQuery("");
-    const idx = models.models.findIndex((m) => m.id === model);
-    setPickerCursor(idx === -1 ? 0 : idx);
-    if (models.models.length > 8) {
-      requestAnimationFrame(() => pickerSearchRef.current?.focus());
-    }
-  }, [pickerOpen, model, models.models]);
 
   async function submit(e?: FormEvent, interrupt = false) {
     e?.preventDefault();
@@ -285,34 +245,6 @@ export function Composer({
     }
     setDragOver(false);
   }
-
-  function onPickerKeyDown(e: KeyboardEvent<HTMLElement>) {
-    const count = filteredModels.length;
-    if (count === 0) return;
-    if (!pickerOpen) {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        setPickerOpen(true);
-      }
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setPickerCursor((c) => (c + 1) % count);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setPickerCursor((c) => (c - 1 + count) % count);
-    } else if (e.key === "Enter" || (e.key === " " && e.currentTarget.tagName !== "INPUT")) {
-      e.preventDefault();
-      const picked = filteredModels[pickerCursor];
-      if (picked) setModel(picked.id);
-      setPickerOpen(false);
-    }
-  }
-
-  const selected = models.models.find((m) => m.id === model);
-  const modelLabel = selected ? shortModelName(selected.displayName) : model || "Default model";
-  const modelGroups = groupModelsByProvider(filteredModels);
 
   const clearHistoryCursor = useCallback(() => history?.stopCycling(), [history]);
 
@@ -419,87 +351,12 @@ export function Composer({
               }}
             />
 
-            <div className="model-picker" ref={pickerWrapRef}>
-              <button
-                type="button"
-                className="model-picker-trigger"
-                aria-haspopup="listbox"
-                aria-expanded={pickerOpen}
-                disabled={models.models.length === 0}
-                onClick={() => setPickerOpen((v) => !v)}
-                onKeyDown={onPickerKeyDown}
-                onBlur={(e) => {
-                  if (!pickerWrapRef.current?.contains(e.relatedTarget as Node)) setPickerOpen(false);
-                }}
-              >
-                <Cloud size={15} />
-                <span className="model-picker-label">
-                  <span className="model-picker-model">{modelLabel}</span>
-                </span>
-                <ChevronDown size={14} className="model-picker-chevron" />
-              </button>
-              {pickerOpen && models.models.length > 0 && (
-                <div className="model-picker-menu">
-                  {models.models.length > 8 && (
-                    <div className="model-picker-search">
-                      <Search size={14} />
-                      <input
-                        ref={pickerSearchRef}
-                        value={modelQuery}
-                        placeholder="Search models..."
-                        aria-label="Search models"
-                        onChange={(event) => {
-                          setModelQuery(event.target.value);
-                          setPickerCursor(0);
-                        }}
-                        onKeyDown={onPickerKeyDown}
-                      />
-                      {modelQuery && (
-                        <button
-                          type="button"
-                          aria-label="Clear model search"
-                          onClick={() => setModelQuery("")}
-                        >
-                          <X size={13} />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  <ul className="model-picker-results" role="listbox">
-                    {modelGroups.map((group) => (
-                      <li className="model-picker-group" role="presentation" key={group.provider}>
-                        <div className="model-picker-group-label">{providerLabel(group.provider)}</div>
-                        <ul
-                          className="model-picker-group-items"
-                          role="group"
-                          aria-label={providerLabel(group.provider)}
-                        >
-                          {group.models.map(({ model: option, index }) => (
-                            <li key={option.id}>
-                              <button
-                                type="button"
-                                role="option"
-                                aria-selected={option.id === model}
-                                className={`model-picker-item${option.id === model ? " active" : ""}${
-                                  index === pickerCursor ? " cursor" : ""
-                                }`}
-                                onClick={() => {
-                                  setModel(option.id);
-                                  setPickerOpen(false);
-                                }}
-                              >
-                                <Cloud size={14} />
-                                {shortModelName(option.displayName)}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
+            <ModelCombobox
+              models={models.models}
+              value={model}
+              onChange={setModel}
+              formatModelLabel={(option) => shortModelName(option.displayName)}
+            />
 
           </div>
 
@@ -537,13 +394,13 @@ export function Composer({
   );
 }
 
-function sameAttachments(left: AttachmentMeta[], right: AttachmentMeta[]): boolean {
-  return left.length === right.length && left.every((item, index) => item.id === right[index]?.id);
-}
-
 function shortModelName(displayName: string): string {
   const paren = displayName.indexOf(" (");
   return paren === -1 ? displayName : displayName.slice(0, paren);
+}
+
+function sameAttachments(left: AttachmentMeta[], right: AttachmentMeta[]): boolean {
+  return left.length === right.length && left.every((item, index) => item.id === right[index]?.id);
 }
 
 function AttachmentChip({
