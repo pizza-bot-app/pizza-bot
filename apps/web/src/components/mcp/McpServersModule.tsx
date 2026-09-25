@@ -1,4 +1,4 @@
-import type { McpServerRow, McpServerDoc, McpServerEntryWire } from "@/api-client";
+import type { McpServerRow, McpServerDoc, McpServerEntryWire, McpToolInfo } from "@/api-client";
 import { Cable } from "lucide-react";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
 import { McpServerCard } from "./McpServerCard.js";
@@ -24,6 +24,7 @@ export interface McpServersModuleProps {
   onReconnect: (id: string) => Promise<McpServerRow>;
   onDelete: (id: string) => Promise<boolean>;
   onGetDoc: (id: string) => Promise<McpServerDoc | undefined>;
+  onGetTools: (id: string) => Promise<McpToolInfo[]>;
 }
 
 function transportSummary(entry: McpServerRow["entry"]): string {
@@ -50,6 +51,7 @@ export function McpServersModule({
   onReconnect,
   onDelete,
   onGetDoc,
+  onGetTools,
 }: McpServersModuleProps) {
   return (
     <ResourceModule
@@ -108,6 +110,7 @@ export function McpServersModule({
           onReconnect={onReconnect}
           onDelete={onDelete}
           onGetDoc={onGetDoc}
+          onGetTools={onGetTools}
         />
       )}
     />
@@ -126,13 +129,14 @@ function McpServerDetail({
   onReconnect,
   onDelete,
   onGetDoc,
+  onGetTools,
 }: {
   selection: import("../ResourceModule.js").ResourceSelection;
   selected: McpServerRow | null;
   setSelection: (next: import("../ResourceModule.js").ResourceSelection) => void;
   backToList?: () => void;
   confirmAction: import("../ResourceModule.js").ResourceDetailArgs<McpServerRow>["confirmAction"];
-} & Pick<McpServersModuleProps, "onCreate" | "onUpdate" | "onSetEnabled" | "onReconnect" | "onDelete" | "onGetDoc">) {
+} & Pick<McpServersModuleProps, "onCreate" | "onUpdate" | "onSetEnabled" | "onReconnect" | "onDelete" | "onGetDoc" | "onGetTools">) {
   const isUser = selected?.source === "user";
   const doc = useKeyedDoc(
     selection?.mode === "view" && isUser && selected ? selected.id : null,
@@ -209,6 +213,7 @@ function McpServerDetail({
     return (
       <McpServerCard
         server={selected}
+        onGetTools={onGetTools}
         enablement={enablement}
         reconnectControl={reconnectControl}
         dependents={dependents}

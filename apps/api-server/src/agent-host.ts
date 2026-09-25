@@ -167,6 +167,11 @@ export interface McpServerListEntry {
   dependentSkills: CapabilitySkillDependency[];
 }
 
+export interface McpServerToolInfo {
+  name: string;
+  description?: string;
+}
+
 export interface CapabilitySkillDependency {
   id: string;
   name: string;
@@ -1130,6 +1135,19 @@ export class AgentHost {
     if (!this.mcpConfigPath) return undefined;
     const entries = await loadUserMcpServers(this.mcpConfigPath);
     return entries[id];
+  }
+
+  /** The server's catalogued tools, empty unless it is connected; `undefined` when the server is unknown. */
+  async mcpServerTools(id: string): Promise<McpServerToolInfo[] | undefined> {
+    await this.warmup;
+    const known = (await this.listMcpServers()).some((server) => server.id === id);
+    if (!known) return undefined;
+    return (this.mcpCatalog[id] ?? [])
+      .map((name) => {
+        const description = toolDescription(this.mcpTools[`mcp:${id}:${name}`], "");
+        return description ? { name, description } : { name };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async setMcpServerEnabled(

@@ -1,13 +1,15 @@
-import type { McpServerRow } from "@/api-client";
+import type { McpServerRow, McpToolInfo } from "@/api-client";
 import { ChevronLeft, Cable, Puzzle, Globe, TerminalSquare } from "lucide-react";
 import { Badge } from "../ui/badge.js";
 import { L } from "../../lexicon.js";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { CapabilityStatusDot, type CapabilityVisualState } from "../CapabilityControls.js";
+import { McpToolsDialog } from "./McpToolsDialog.js";
 
 export interface McpServerCardProps {
   server: McpServerRow;
   onBack?: () => void;
+  onGetTools?: (id: string) => Promise<McpToolInfo[]>;
   enablement?: ReactNode;
   reconnectControl?: ReactNode;
   dependents?: ReactNode;
@@ -19,14 +21,18 @@ export function McpServerCard({
   reconnectControl,
   dependents,
   onBack,
+  onGetTools,
 }: McpServerCardProps) {
+  const [toolsOpen, setToolsOpen] = useState(false);
   const isStdio = "command" in server.entry;
+  const toolsLabel = `${server.toolCount} tool${server.toolCount === 1 ? "" : "s"}`;
   const statusLabel =
     server.status === "connected"
-      ? `Connected · ${server.toolCount} tool(s)`
+      ? `Connected · ${toolsLabel}`
       : server.status === "disabled"
         ? "Disabled"
         : "Not connected";
+  const canListTools = server.status === "connected" && onGetTools !== undefined;
   const visualState: CapabilityVisualState =
     !server.enabled || server.status === "disabled"
       ? "disabled"
@@ -55,7 +61,23 @@ export function McpServerCard({
             <Badge variant="secondary">{L.pluginBadge}</Badge>
           </div>
           <p className="resource-card-desc">
-            <CapabilityStatusDot state={visualState} label={statusLabel} /> {statusLabel}
+            <CapabilityStatusDot state={visualState} label={statusLabel} />{" "}
+            {canListTools ? (
+              <>
+                Connected ·{" "}
+                <button
+                  type="button"
+                  className="resource-card-link mcp-tools-link"
+                  onClick={() => setToolsOpen(true)}
+                  aria-haspopup="dialog"
+                  title="Show the tools this server provides"
+                >
+                  {toolsLabel}
+                </button>
+              </>
+            ) : (
+              statusLabel
+            )}
           </p>
           {server.pluginName && (
             <p className="skill-card-provenance">
@@ -89,6 +111,14 @@ export function McpServerCard({
         )}
       </section>
       {dependents}
+      {toolsOpen && onGetTools && (
+        <McpToolsDialog
+          serverId={server.id}
+          toolCount={server.toolCount}
+          onGetTools={onGetTools}
+          onClose={() => setToolsOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -294,6 +294,15 @@ export class ApiClient {
     return this.optional("get mcp server", `/mcp-servers/${encodeURIComponent(id)}`);
   }
 
+  async listMcpServerTools(id: string): Promise<McpToolInfo[]> {
+    return (
+      await this.json<{ tools: McpToolInfo[] }>(
+        "list mcp server tools",
+        `/mcp-servers/${encodeURIComponent(id)}/tools`,
+      )
+    ).tools;
+  }
+
   /** Returns after reconnection completes. */
   async createMcpServer(id: string, entry: McpServerEntryWire): Promise<McpServerRow> {
     return this.json("create mcp server", "/mcp-servers", { method: "POST", body: { id, ...entry } });
@@ -937,6 +946,11 @@ export interface McpServerDoc {
   entry: McpServerEntryWire;
 }
 
+export interface McpToolInfo {
+  name: string;
+  description?: string;
+}
+
 export interface MemoryInfo {
   id: string;
   preview: string;
@@ -959,6 +973,8 @@ export interface ModelsInfo {
   }>;
   providers?: ModelCatalogStatus[];
   default: string;
+  /** The model Automatic resolves to, independent of any saved default. */
+  automatic: string | null;
 }
 
 /**

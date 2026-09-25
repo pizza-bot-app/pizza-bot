@@ -59,12 +59,12 @@ function withSkillAvailability(
     const state = skill.status === "loading" ? "still loading" : "unavailable";
     return `- ${skill.name}: ${state}${skill.detail ? ` (${skill.detail})` : ""}`;
   });
-  return [
-    systemPrompt,
+  const notice = [
     "These specialists are not currently callable:",
     ...statuses,
     "Do not delegate to them. If a request depends on one, state its current availability instead of pretending the task can be completed.",
   ].join("\n");
+  return `${systemPrompt}\n\n${notice}`;
 }
 
 /** Owns the model-specific compiled Pizza Bot graphs and capability reloads. */
@@ -314,7 +314,10 @@ export class GraphManager {
     const settings = this.readRuntimeSettings(dependencies);
     return withPersona(
       withSkillAvailability(
-        pizzaBotSystemPrompt(settings.memoriesEnabled),
+        pizzaBotSystemPrompt({
+          memories: settings.memoriesEnabled,
+          subagents: (dependencies.skills?.size ?? 0) > 0,
+        }),
         dependencies.skillAvailability,
       ),
       settings.addendum,

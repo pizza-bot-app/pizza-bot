@@ -287,7 +287,8 @@ in `core/src/protocol-types.ts`:
   the same filesystem tools and `eval` directly, so the only loss is an isolated
   context to do noisy filesystem work in. With no ready skills there is nothing
   to route to, so the `task` tool
-  and the QuickJS `task()` bridge are both absent; readiness is dynamic, so an
+  and the QuickJS `task()` bridge are both absent, and the orchestrator prompt
+  omits its delegation guidance; readiness is dynamic, so an
   installed-but-unavailable skill also withholds them. With skills, the root
   QuickJS interpreter exposes `task()` for programmatic fan-out.
   Each skill catalog entry compiles directly into one subagent invoked through the
