@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "Built-in model providers and api-server registration for Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter, and Ollama.",
+  "description": "Built-in model providers and api-server registration for Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter, Requesty, and Ollama.",
   "exports": {
     ".": "./src/index.ts"
   },

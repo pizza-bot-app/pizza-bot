@@ -41,7 +41,8 @@ discarded; run `npm install` afterward.
 
 A running api-server needs access to at least one model provider; the CLI and a
 desktop app connected to a remote backend do not. Amazon Bedrock, Anthropic,
-Google Gemini, OpenAI, OpenRouter, and Ollama are supported as peer adapters.
+Google Gemini, OpenAI, OpenRouter, Requesty, and Ollama are supported as peer
+adapters.
 See [`.env.example`](.env.example). Without credentials for a selected provider,
 the code builds and tests pass, but live runs fail at the first model call.
 

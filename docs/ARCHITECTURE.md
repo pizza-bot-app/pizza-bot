@@ -667,7 +667,8 @@ The model seam (`core/model-provider.ts`) is provider-agnostic: `ModelProvider`
 the `provider:model` prefix. The composition root registers
 providers (`agent-host.ts` registers them through `registerBuiltinProviders`) and
 each turn carries its model as `configurable.model`. Amazon Bedrock, Anthropic,
-Google Gemini, OpenAI, OpenRouter, and Ollama are peer `ModelProvider` adapters;
+Google Gemini, OpenAI, OpenRouter, Requesty, and Ollama are peer
+`ModelProvider` adapters;
 another provider can follow the same pattern without changing the runtime,
 transport, or frontend. Each adapter is a peer submodule under
 `packages/inference-providers/src/providers/<id>` (Bedrock keeps its own

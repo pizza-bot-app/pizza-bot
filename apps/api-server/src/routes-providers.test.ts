@@ -60,15 +60,16 @@ describe("provider routes", () => {
       body: JSON.stringify(body),
     });
 
-  it("lists all six built-in providers with their authSchema", async () => {
+  it("lists all seven built-in providers with their authSchema", async () => {
     const providers = await list();
     const ids = providers.map((p) => p.id).sort();
-    expect(ids).toEqual(["anthropic", "bedrock", "google", "ollama", "openai", "openrouter"]);
+    expect(ids).toEqual(["anthropic", "bedrock", "google", "ollama", "openai", "openrouter", "requesty"]);
     const anthropic = providers.find((p) => p.id === "anthropic")!;
     expect(anthropic.configurable).toBe(true);
     expect(anthropic.availableWithoutConfig).toBe(false);
     expect(providers.find((p) => p.id === "openai")!.availableWithoutConfig).toBe(false);
     expect(providers.find((p) => p.id === "openrouter")!.availableWithoutConfig).toBe(false);
+    expect(providers.find((p) => p.id === "requesty")!.availableWithoutConfig).toBe(false);
     expect(providers.find((p) => p.id === "google")!.availableWithoutConfig).toBe(false);
     expect(providers.find((p) => p.id === "ollama")!.availableWithoutConfig).toBe(true);
     const bedrock = providers.find((p) => p.id === "bedrock")!;

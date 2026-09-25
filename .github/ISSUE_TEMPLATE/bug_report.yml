@@ -50,6 +50,7 @@ body:
         - Google Gemini
         - OpenAI
         - OpenRouter
+        - Requesty
         - Ollama
         - Not reached / not applicable
     validations:
