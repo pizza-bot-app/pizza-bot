@@ -15,7 +15,8 @@ import type {
 } from "@pizza-bot/core";
 import { isEnvReference } from "@pizza-bot/core";
 import { L } from "../../lexicon.js";
-import { groupModelsByProvider, providerLabel } from "../../model-options.js";
+import { providerLabel } from "../../model-options.js";
+import { ModelCombobox } from "../ModelCombobox.js";
 import { useAppToast } from "../AppToast.js";
 
 // Secret inputs never receive stored values. Desktop stores raw keys in the OS
@@ -166,8 +167,7 @@ function DefaultModelRow({
 }) {
   const notify = useAppToast();
   const [busy, setBusy] = useState(false);
-  const modelGroups = groupModelsByProvider(models.models);
-  const automaticModel = models.models.find((model) => model.id === models.default);
+  const automaticModel = models.models.find((model) => model.id === models.automatic);
   const savedModelUnavailable =
     defaultModel !== null && !models.models.some((model) => model.id === defaultModel);
   const change = async (value: string) => {
@@ -191,31 +191,21 @@ function DefaultModelRow({
         <div className="settings-row-label">{L.defaultModelLabel}</div>
         <div className="settings-row-hint">{L.defaultModelHint}</div>
       </div>
-      <select
-        className="field-input settings-provider-default"
+      <ModelCombobox
+        className="settings-provider-default"
+        models={models.models}
         value={defaultModel ?? ""}
+        emptyOption={{
+          label: `${L.defaultModelServerFallback}${automaticModel ? ` - ${automaticModel.displayName}` : ""}`,
+        }}
+        unavailableOption={
+          savedModelUnavailable
+            ? { value: defaultModel, label: `${defaultModel} (currently unavailable)` }
+            : undefined
+        }
         disabled={busy}
-        onChange={(e) => void change(e.target.value)}
-      >
-        <option value="">
-          {L.defaultModelServerFallback}
-          {automaticModel ? ` - ${automaticModel.displayName}` : ""}
-        </option>
-        {savedModelUnavailable && (
-          <option value={defaultModel} disabled>
-            {defaultModel} (currently unavailable)
-          </option>
-        )}
-        {modelGroups.map((group) => (
-          <optgroup key={group.provider} label={providerLabel(group.provider)}>
-            {group.models.map(({ model }) => (
-              <option key={model.id} value={model.id}>
-                {model.displayName}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
+        onChange={(value) => void change(value)}
+      />
     </div>
   );
 }

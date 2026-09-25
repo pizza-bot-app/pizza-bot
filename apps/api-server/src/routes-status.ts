@@ -89,6 +89,7 @@ export function statusRoutes(host: AgentHost): Hono {
       models: catalog.models,
       providers: catalog.providers,
       default: host.modelId,
+      automatic: host.providerConfigs.getAutomaticModel() ?? null,
     });
   });
 
