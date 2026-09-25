@@ -1137,7 +1137,7 @@ export class AgentHost {
     return entries[id];
   }
 
-  /** Tools the connected server currently exposes; `undefined` when the server is unknown. */
+  /** The server's catalogued tools, empty unless it is connected; `undefined` when the server is unknown. */
   async mcpServerTools(id: string): Promise<McpServerToolInfo[] | undefined> {
     await this.warmup;
     const known = (await this.listMcpServers()).some((server) => server.id === id);
