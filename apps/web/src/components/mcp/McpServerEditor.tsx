@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { McpServerDoc, McpServerEntryWire } from "@/api-client";
-import { ChevronLeft, Plus, Trash2 } from "lucide-react";
+import { ChevronLeft, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { L } from "../../lexicon.js";
 import { slugify } from "../../lib/utils.js";
 import { useAppToast } from "../AppToast.js";
@@ -8,11 +8,11 @@ import { useAppToast } from "../AppToast.js";
 export interface McpServerEditorProps {
   server: McpServerDoc | null;
   onSave: (id: string, entry: McpServerEntryWire) => Promise<void>;
-  onDelete?: () => Promise<void>;
   enablement?: ReactNode;
   reconnectControl?: ReactNode;
   dependents?: ReactNode;
-  onCancel: () => void;
+  /** Receives whether the draft differs from what was loaded, so the caller can guard discards. */
+  onCancel: (dirty: boolean) => void;
 }
 
 interface KV {
@@ -35,10 +35,53 @@ function fromRows(rows: KV[]): Record<string, string> | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+interface Draft {
+  transport: Transport;
+  command: string;
+  args: string[];
+  env: KV[];
+  cwd: string;
+  urlType: "http" | "sse";
+  url: string;
+  headers: KV[];
+}
+
+function seedDraft(entry: McpServerEntryWire | undefined): Draft {
+  const stdio = entry && "command" in entry ? entry : undefined;
+  const remote = entry && "url" in entry ? entry : undefined;
+  return {
+    transport: remote ? "url" : "stdio",
+    command: stdio?.command ?? "",
+    args: stdio?.args ?? [],
+    env: toRows(stdio?.env),
+    cwd: stdio?.cwd ?? "",
+    urlType: remote?.type ?? "http",
+    url: remote?.url ?? "",
+    headers: toRows(remote?.headers),
+  };
+}
+
+function buildEntry(draft: Draft): McpServerEntryWire {
+  if (draft.transport === "stdio") {
+    const env = fromRows(draft.env);
+    return {
+      command: draft.command.trim(),
+      args: draft.args.map((a) => a.trim()).filter((a) => a !== ""),
+      ...(env ? { env } : {}),
+      ...(draft.cwd.trim() ? { cwd: draft.cwd.trim() } : {}),
+    };
+  }
+  const headers = fromRows(draft.headers);
+  return {
+    type: draft.urlType,
+    url: draft.url.trim(),
+    ...(headers ? { headers } : {}),
+  };
+}
+
 export function McpServerEditor({
   server,
   onSave,
-  onDelete,
   enablement,
   reconnectControl,
   dependents,
@@ -46,47 +89,37 @@ export function McpServerEditor({
 }: McpServerEditorProps) {
   const notify = useAppToast();
   const isNew = server === null;
-  const entry = server?.entry;
-  const initialTransport: Transport = entry && "url" in entry ? "url" : "stdio";
+  const seed = seedDraft(server?.entry);
 
   // Seed once; the stable editor key preserves drafts across status polls.
   const [name, setName] = useState(server?.id ?? "");
-  const [transport, setTransport] = useState<Transport>(initialTransport);
-  const [command, setCommand] = useState(entry && "command" in entry ? entry.command : "");
-  const [args, setArgs] = useState<string[]>(entry && "command" in entry ? entry.args ?? [] : []);
-  const [cwd, setCwd] = useState(entry && "command" in entry ? entry.cwd ?? "" : "");
-  const [env, setEnv] = useState<KV[]>(entry && "command" in entry ? toRows(entry.env) : []);
+  const [transport, setTransport] = useState<Transport>(seed.transport);
+  const [command, setCommand] = useState(seed.command);
+  const [args, setArgs] = useState<string[]>(seed.args);
+  const [cwd, setCwd] = useState(seed.cwd);
+  const [env, setEnv] = useState<KV[]>(seed.env);
 
-  const [urlType, setUrlType] = useState<"http" | "sse">(
-    entry && "url" in entry ? entry.type ?? "http" : "http",
-  );
-  const [url, setUrl] = useState(entry && "url" in entry ? entry.url : "");
-  const [headers, setHeaders] = useState<KV[]>(entry && "url" in entry ? toRows(entry.headers) : []);
+  const [urlType, setUrlType] = useState<"http" | "sse">(seed.urlType);
+  const [url, setUrl] = useState(seed.url);
+  const [headers, setHeaders] = useState<KV[]>(seed.headers);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSave =
-    name.trim() !== "" && (transport === "stdio" ? command.trim() !== "" : url.trim() !== "") && !saving;
+  const draft: Draft = { transport, command, args, env, cwd, urlType, url, headers };
+  const built = buildEntry(draft);
+  const dirty =
+    (isNew && name.trim() !== "") ||
+    JSON.stringify(built) !== JSON.stringify(buildEntry(seed));
+  const complete =
+    name.trim() !== "" && (transport === "stdio" ? command.trim() !== "" : url.trim() !== "");
+  const canSave = complete && dirty && !saving;
 
   const handleSave = async () => {
     if (!canSave) return;
     setSaving(true);
     setError(null);
     const id = server?.id ?? slugify(name, "server");
-    const built: McpServerEntryWire =
-      transport === "stdio"
-        ? {
-            command: command.trim(),
-            args: args.map((a) => a.trim()).filter((a) => a !== ""),
-            ...(fromRows(env) ? { env: fromRows(env) } : {}),
-            ...(cwd.trim() ? { cwd: cwd.trim() } : {}),
-          }
-        : {
-            type: urlType,
-            url: url.trim(),
-            ...(fromRows(headers) ? { headers: fromRows(headers) } : {}),
-          };
     try {
       await onSave(id, built);
       notify({ title: isNew ? "MCP server created" : "MCP server saved", tone: "success" });
@@ -102,9 +135,11 @@ export function McpServerEditor({
     }
   };
 
+  const cancel = () => onCancel(dirty);
+
   return (
     <div className="resource-editor">
-      <button className="module-detail-back" onClick={onCancel}>
+      <button className="module-detail-back" onClick={cancel}>
         <ChevronLeft size={18} /> {L.mcpSection}
       </button>
       <header className="resource-editor-head">
@@ -129,6 +164,11 @@ export function McpServerEditor({
           {isNew && name.trim() !== "" && (
             <span className="field-hint">
               Saved as <code>{slugify(name, "server")}</code> in <code>.mcp.json</code>
+            </span>
+          )}
+          {!isNew && (
+            <span className="field-hint">
+              The ID is fixed once created — delete and re-create the server to rename it.
             </span>
           )}
         </label>
@@ -247,21 +287,17 @@ export function McpServerEditor({
       </div>
 
       <footer className="resource-editor-actions">
-        {!isNew && onDelete && (
-          <button
-            type="button"
-            className="btn-secondary resource-editor-delete"
-            onClick={() => void onDelete()}
-            disabled={saving}
-          >
-            <Trash2 size={14} /> Delete
-          </button>
-        )}
         <span className="resource-editor-actions-spacer" />
-        <button type="button" className="btn-secondary" onClick={onCancel} disabled={saving}>
+        <button type="button" className="btn-secondary" onClick={cancel} disabled={saving}>
           Cancel
         </button>
-        <button type="button" className="btn-primary" onClick={() => void handleSave()} disabled={!canSave}>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => void handleSave()}
+          disabled={!canSave}
+          aria-busy={saving}
+        >
           {saving ? "Saving…" : isNew ? "Create" : "Save"}
         </button>
       </footer>
@@ -282,36 +318,65 @@ function KvEditor({
   keyPlaceholder: string;
   valuePlaceholder: string;
 }) {
+  const [revealed, setRevealed] = useState<ReadonlySet<number>>(new Set());
+  const toggleRevealed = (i: number) =>
+    setRevealed((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  const removeRow = (i: number) => {
+    setRows((prev) => prev.filter((_, j) => j !== i));
+    setRevealed((prev) => new Set([...prev].filter((j) => j !== i).map((j) => (j > i ? j - 1 : j))));
+  };
+
   return (
     <div className="field">
       <span className="field-label">
         {label} <span className="field-optional">(optional)</span>
       </span>
       <ul className="mcp-kv-rows">
-        {rows.map((r, i) => (
-          <li className="mcp-kv-row" key={i}>
-            <input
-              className="field-input mcp-mono"
-              value={r.key}
-              onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))}
-              placeholder={keyPlaceholder}
-            />
-            <input
-              className="field-input mcp-mono"
-              value={r.value}
-              onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
-              placeholder={valuePlaceholder}
-            />
-            <button
-              type="button"
-              className="thread-action danger"
-              aria-label={`Remove ${label} row`}
-              onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
-            >
-              <Trash2 size={14} />
-            </button>
-          </li>
-        ))}
+        {rows.map((r, i) => {
+          const shown = revealed.has(i);
+          return (
+            <li className="mcp-kv-row" key={i}>
+              <input
+                className="field-input mcp-mono"
+                value={r.key}
+                onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))}
+                placeholder={keyPlaceholder}
+              />
+              <span className="mcp-secret-field">
+                <input
+                  className="field-input mcp-mono"
+                  type={shown ? "text" : "password"}
+                  autoComplete="off"
+                  value={r.value}
+                  onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+                  placeholder={valuePlaceholder}
+                />
+                <button
+                  type="button"
+                  className="thread-action mcp-secret-toggle"
+                  aria-label={shown ? `Hide ${r.key || label} value` : `Show ${r.key || label} value`}
+                  aria-pressed={shown}
+                  onClick={() => toggleRevealed(i)}
+                >
+                  {shown ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </span>
+              <button
+                type="button"
+                className="thread-action danger"
+                aria-label={`Remove ${label} row`}
+                onClick={() => removeRow(i)}
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <button type="button" className="btn-secondary" onClick={() => setRows((prev) => [...prev, { key: "", value: "" }])}>
         <Plus size={14} /> Add {label.toLowerCase()}

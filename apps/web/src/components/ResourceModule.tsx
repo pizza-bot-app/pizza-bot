@@ -5,7 +5,20 @@ import { useIsMobile } from "../use-is-mobile.js";
 import { ConfirmationDialog } from "./ConfirmationDialog.js";
 import { useAppToast } from "./AppToast.js";
 
-export type ResourceSelection = { mode: "view"; id: string } | { mode: "new" } | null;
+export type ResourceSelection =
+  | { mode: "view"; id: string }
+  | { mode: "edit"; id: string }
+  | { mode: "new" }
+  | null;
+
+export interface ConfirmActionOptions {
+  title: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  preserveSelection?: boolean;
+  /** Toast shown on success; `null` suppresses it. Defaults to `"<confirmLabel> complete"`. */
+  successMessage?: string | null;
+}
 
 export interface ResourceDetailArgs<T> {
   selection: ResourceSelection;
@@ -15,12 +28,7 @@ export interface ResourceDetailArgs<T> {
   confirmAction: (
     message: string,
     action: () => Promise<unknown>,
-    options: {
-      title: string;
-      confirmLabel: string;
-      destructive?: boolean;
-      preserveSelection?: boolean;
-    },
+    options: ConfirmActionOptions,
   ) => Promise<void>;
 }
 
@@ -30,6 +38,7 @@ interface PendingConfirmation {
   confirmLabel: string;
   destructive: boolean;
   preserveSelection: boolean;
+  successMessage: string | null;
   action: () => Promise<unknown>;
   resolve: () => void;
 }
@@ -87,18 +96,14 @@ export function ResourceModule<T>({
     if (initial !== selection) setSelection(initial);
   }, [items, selection, getId, isMobile]);
 
-  const selectedId = selection?.mode === "view" ? selection.id : null;
+  const selectedId =
+    selection?.mode === "view" || selection?.mode === "edit" ? selection.id : null;
   const selected = items.find((item) => getId(item) === selectedId) ?? null;
 
   const confirmAction = (
     message: string,
     action: () => Promise<unknown>,
-    options: {
-      title: string;
-      confirmLabel: string;
-      destructive?: boolean;
-      preserveSelection?: boolean;
-    },
+    options: ConfirmActionOptions,
   ): Promise<void> => {
     setConfirmationError(null);
     return new Promise((resolve) => {
@@ -108,6 +113,10 @@ export function ResourceModule<T>({
         confirmLabel: options.confirmLabel,
         destructive: options.destructive ?? false,
         preserveSelection: options.preserveSelection ?? false,
+        successMessage:
+          options.successMessage === undefined
+            ? `${options.confirmLabel} complete`
+            : options.successMessage,
         action,
         resolve,
       });
@@ -134,7 +143,9 @@ export function ResourceModule<T>({
       await confirmation.action();
       if (!confirmation.preserveSelection) setSelection(null);
       confirmation.resolve();
-      notify({ title: `${confirmation.confirmLabel} complete`, tone: "success" });
+      if (confirmation.successMessage !== null) {
+        notify({ title: confirmation.successMessage, tone: "success" });
+      }
       setConfirmation(null);
     } catch (cause) {
       setConfirmationError(
