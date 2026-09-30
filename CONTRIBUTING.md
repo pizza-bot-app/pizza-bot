@@ -510,4 +510,10 @@ dependencies before typechecking it.
 ## License
 
 By contributing, you agree that your contributions are licensed under the
-project's [Apache-2.0](LICENSE) license.
+project's [Apache-2.0](LICENSE) license. The pull request template asks you to
+confirm this on each contribution.
+
+You keep the copyright in what you write — that statement licenses it, it does
+not transfer ownership. If you want a copyright notice on your work, put a
+`Portions Copyright <year> <you>` line in [NOTICE](NOTICE) so downstream
+redistributors have one place to look.
