@@ -148,6 +148,7 @@ describe("worker-hosted code interpreter", () => {
       const body = Array.from({ length: LINES }, (_, i) => `line ${i + 1} ${"x".repeat(40)}`);
       writeFileSync(join(root, "big.log"), body.join("\n"));
       writeFileSync(join(root, "wide.log"), ["one", "two", "x".repeat(10_000), "four", "five"].join("\n"));
+      writeFileSync(join(root, "bracketed.log"), ["[2026-01-01] ok", "[2026-01-02] ok"].join("\n"));
     });
     afterAll(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
@@ -176,6 +177,18 @@ describe("worker-hosted code interpreter", () => {
       );
 
       expect(output).toContain(`["line 10 ${"x".repeat(40)}","line 11 ${"x".repeat(40)}"]`);
+    }, WORKER_TEST_TIMEOUT_MS);
+
+    it("does not mistake bracketed file content for a truncation notice", async () => {
+      const { tools } = await readingSandbox();
+      const output = await tools[0]!.invoke(
+        {
+          code: `JSON.stringify((await tools.readFile({ file_path: "/bracketed.log" })).split(/\\r?\\n/))`,
+        },
+        config,
+      );
+
+      expect(output).toContain(`["[2026-01-01] ok","[2026-01-02] ok"]`);
     }, WORKER_TEST_TIMEOUT_MS);
 
     it("fails a cut page with the offset to resume from, so paging loses no line", async () => {

@@ -400,11 +400,12 @@ function assertReadNotTruncated(value: unknown): void {
             )
             .join("\n")
         : "";
-  for (const line of text.split("\n")) {
+  // The header sits within the first few lines, under any bracketed notices;
+  // bounding the scan avoids splitting a full page on every bridged read.
+  for (const line of text.split("\n", 8)) {
     const match = READ_HEADER_RE.exec(line);
-    // Upstream puts bracketed notices above the header; anything else is file content.
     if (!match) {
-      if (line.startsWith("[")) continue;
+      if (/^\[.*\]$/.test(line)) continue;
       return;
     }
     const [, start, end, total, fields = ""] = match;
