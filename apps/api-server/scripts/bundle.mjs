@@ -66,7 +66,7 @@ await build({
   bundle: true,
   platform: "node",
   format: "esm",
-  // Electron 43's sidecar shares this bundle and embeds Node 24.
+  // The desktop sidecar runs this bundle on Electron's embedded Node.
   target: "node24",
   conditions: ["source"],
   // Native modules must remain external so Node can load the target-platform binary.

@@ -12,7 +12,7 @@ await build({
   bundle: true,
   platform: "node",
   format: "esm",
-  // Electron 43 embeds Node 24.
+  // Electron's embedded Node.
   target: "node24",
   conditions: ["source"],
   // Electron is runtime-provided and native modules cannot be bundled.
