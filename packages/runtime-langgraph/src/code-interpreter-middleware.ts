@@ -48,6 +48,19 @@ const WORKER_ENTRY = new URL(
 );
 const WORKER_EXEC_ARGV = FROM_SOURCE ? ["--import", "tsx"] : [];
 
+/**
+ * LangChain derives the structured-output tool's description from a plain JSON
+ * Schema's own `description`, defaulting to "", which Bedrock rejects.
+ */
+const RESPONSE_SCHEMA_DESCRIPTION = "Return the final result in this shape.";
+
+export function withToolDescription(schema: Record<string, unknown>): Record<string, unknown> {
+  const { description } = schema;
+  return typeof description === "string" && description.trim()
+    ? schema
+    : { ...schema, description: RESPONSE_SCHEMA_DESCRIPTION };
+}
+
 interface ToolLike {
   name: string;
   invoke: (args: Record<string, unknown>, config?: RunnableConfig) => Promise<unknown>;
@@ -206,7 +219,7 @@ export async function createWorkerCodeInterpreterMiddleware(
               ...session.config,
               configurable: {
                 ...session.config.configurable,
-                [SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY]: responseSchema,
+                [SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY]: withToolDescription(responseSchema),
               },
             };
       const content = unwrapToolEnvelope(

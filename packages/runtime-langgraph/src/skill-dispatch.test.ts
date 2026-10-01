@@ -5,6 +5,7 @@ import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { MemorySaver } from "@langchain/langgraph";
 import type { SkillCatalog } from "@pizza-bot/core";
 import { createPizzaBotAgent } from "./index.js";
+import { SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY } from "deepagents";
 import { TASK_USAGE_NOTES } from "./task-dispatch-middleware.js";
 
 const skills: SkillCatalog = new Map([[
@@ -121,5 +122,72 @@ describe("subagent dispatch", () => {
     expect(taskDescription).toContain(TASK_USAGE_NOTES);
     expect(taskDescription).not.toContain("Put full detail in the prompt");
     expect(taskDescription).not.toContain("relay a summary yourself");
+  });
+});
+
+/** Dispatches once, answers the worker's turn through the schema tool, and records bindings. */
+class SchemaDispatchingModel extends BaseChatModel<Record<string, never>> {
+  readonly bindings: string[][] = [];
+  private call = 0;
+
+  _llmType(): string {
+    return "schema-dispatching";
+  }
+
+  override bindTools(tools: Array<{ name?: unknown; function?: { name?: unknown } }>): this {
+    this.bindings.push(tools.map((tool) => String(tool.name ?? tool.function?.name)));
+    return this;
+  }
+
+  async _generate(): Promise<{ generations: Array<{ message: AIMessage; text: string }> }> {
+    const message = this.call++ === 0
+      ? new AIMessage({
+          content: "",
+          tool_calls: [{
+            id: "task-1",
+            name: "task",
+            args: { description: "Check it.", subagent_type: "worker" },
+            type: "tool_call",
+          }],
+        })
+      : this.call === 2
+        ? new AIMessage({
+            content: "",
+            tool_calls: [{ id: "verdict-1", name: "verdict", args: { ok: true }, type: "tool_call" }],
+          })
+        : new AIMessage({ content: "done" });
+    return { generations: [{ message, text: message.text }] };
+  }
+}
+
+describe("subagent dispatch with a response schema", () => {
+  // eval's task() carries its responseSchema under this configurable key.
+  it("rebuilds the skill worker with the requested response format and returns its answer", async () => {
+    const model = new SchemaDispatchingModel({});
+    const agent = await createPizzaBotAgent("Help the user.", {
+      model,
+      skills,
+      checkpointer: new MemorySaver(),
+    });
+    const threadId = `schema_${Math.random().toString(36).slice(2)}`;
+    const stream = agent.streamProtocol(
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Check it." }] }] },
+      {
+        threadId,
+        configurable: {
+          [SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY]: {
+            title: "verdict",
+            type: "object",
+            properties: { ok: { type: "boolean" } },
+            required: ["ok"],
+          },
+        },
+      },
+    );
+    for await (const _frame of stream) void _frame;
+    const workerTools = model.bindings.find((names) => !names.includes("task"));
+    expect(workerTools).toContain("verdict");
+    const state = await agent.getState(threadId);
+    expect(JSON.stringify(state.values)).toContain('{\\"ok\\":true}');
   });
 });

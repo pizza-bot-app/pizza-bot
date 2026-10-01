@@ -49,7 +49,10 @@ export function outputTruncationMiddleware() {
   return createMiddleware({
     name: "outputTruncation",
     wrapModelCall: async (request, handler) => {
-      const response = await handler(request);
+      const response: unknown = await handler(request);
+      // Under a response format the handler can also return a parsed
+      // `{ structuredResponse, messages }` update, which has nothing to truncate.
+      if (!AIMessage.isInstance(response)) return response as AIMessage;
       if (!reachedOutputLimit(response) || response.tool_calls?.length) {
         return response;
       }

@@ -1,6 +1,6 @@
 /** Owns the `task` tool: its roster is the subagents and its notes route, not brief. */
 import { createMiddleware } from "langchain";
-import { createSubAgentMiddleware, type CompiledSubAgent, type SubAgent } from "deepagents";
+import { createSubAgentMiddleware, type SubAgent } from "deepagents";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
 /**
@@ -58,14 +58,14 @@ export function taskToolDescription(subagents: readonly RosterEntry[]): string {
  */
 export function taskDispatchMiddleware(options: {
   model?: BaseChatModel;
-  subagents: readonly (SubAgent | CompiledSubAgent)[];
+  subagents: readonly SubAgent[];
 }): unknown {
   if (!options.model || options.subagents.length === 0) {
     return createMiddleware({ name: SUBAGENT_MIDDLEWARE_NAME });
   }
   return createSubAgentMiddleware({
     defaultModel: options.model,
-    subagents: options.subagents as (SubAgent | CompiledSubAgent)[],
+    subagents: options.subagents as SubAgent[],
     generalPurposeAgent: false,
     taskDescription: taskToolDescription(options.subagents as readonly RosterEntry[]),
   });
