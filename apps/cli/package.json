@@ -28,6 +28,6 @@
     "@pizza-bot/logging": "*"
   },
   "devDependencies": {
-    "tsx": "^4.23.11"
+    "tsx": "^4.23.15"
   }
 }
