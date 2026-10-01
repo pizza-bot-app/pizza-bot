@@ -20,6 +20,6 @@
     "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
   },
   "devDependencies": {
-    "@types/node": "^26.4.1"
+    "@types/node": "^26.6.3"
   }
 }
