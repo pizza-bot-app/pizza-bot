@@ -24,6 +24,12 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Shipped-plugin dependencies are exact pins that must also land in
+      # plugins/package-lock.json, which this entry can't update; bump them by
+      # hand per plugins/README.md.
+      - dependency-name: "@playwright/mcp"
+      - dependency-name: "playwright"
+      - dependency-name: "playwright-core"
     groups:
       # Electron and Forge move together; a partial bump usually fails to package.
       electron:
@@ -38,12 +44,3 @@ updates:
       production:
         dependency-type: production
         exclude-patterns: ["electron", "@electron/*", "@electron-forge/*", "@langchain/*", "deepagents", "langchain"]
-
-  - package-ecosystem: npm
-    directory: /plugins
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 3
-    groups:
-      plugins:
-        patterns: ["*"]
