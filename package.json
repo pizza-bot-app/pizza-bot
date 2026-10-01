@@ -17,7 +17,8 @@
     "better-sqlite3": false
   },
   "overrides": {
-    "better-sqlite3": "^13.0.0"
+    "better-sqlite3": "^13.0.0",
+    "@langchain/core": "$@langchain/core"
   },
   "workspaces": [
     "packages/*",
@@ -45,6 +46,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@langchain/core": "^1.2.11",
     "cross-env": "^10.1.0",
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",

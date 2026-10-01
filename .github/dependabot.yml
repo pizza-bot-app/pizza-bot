@@ -20,16 +20,24 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    # Majors are migrations, done deliberately rather than as a monthly bump.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       # Electron and Forge move together; a partial bump usually fails to package.
       electron:
         patterns: ["electron", "@electron/*", "@electron-forge/*"]
+      # The LangChain family shares one @langchain/core; splitting it across
+      # PRs installs a second copy whose types don't unify.
       langchain:
         patterns: ["@langchain/*", "deepagents", "langchain"]
       dev-dependencies:
         dependency-type: development
+        exclude-patterns: ["electron", "@electron/*", "@electron-forge/*", "@langchain/*", "deepagents", "langchain"]
       production:
         dependency-type: production
+        exclude-patterns: ["electron", "@electron/*", "@electron-forge/*", "@langchain/*", "deepagents", "langchain"]
 
   - package-ecosystem: npm
     directory: /plugins

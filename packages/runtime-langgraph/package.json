@@ -20,6 +20,9 @@
     "deepagents": "^1.14.1",
     "langchain": "^1.5.10"
   },
+  "devDependencies": {
+    "tsx": "^4.23.13"
+  },
   "optionalDependencies": {
     "@langchain/quickjs": "0.6.4"
   }
