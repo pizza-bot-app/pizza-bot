@@ -18,6 +18,8 @@ import {
 } from "./subagent-finalization-middleware.js";
 import {
   RESPONSE_TOOL_INSTRUCTION,
+  RESPONSE_TOOL_NAME,
+  asResponseFormat,
   structuredResponseMiddleware,
 } from "./structured-response-middleware.js";
 
@@ -189,6 +191,66 @@ describe("subagentFinalizationMiddleware", () => {
     expect(sent.systemMessage.text).toContain(SUBAGENT_STRUCTURED_FINALIZATION_INSTRUCTION);
     expect(sent.systemMessage.text).toContain(RESPONSE_TOOL_INSTRUCTION);
     expect(sent.systemMessage.text).not.toContain(SUBAGENT_FINALIZATION_INSTRUCTION);
+  });
+
+  it("still binds the response tool on the final call of a structured task", async () => {
+    const bindings: string[][] = [];
+    class StructuredWorkerModel extends BaseChatModel<Record<string, never>> {
+      private bound: string[] = [];
+      _llmType(): string {
+        return "structured-worker";
+      }
+      override bindTools(tools: Array<{ name?: unknown; function?: { name?: unknown } }>): this {
+        const next = new StructuredWorkerModel({});
+        next.bound = tools.map((tool) => String(tool.name ?? tool.function?.name));
+        bindings.push(next.bound);
+        return next as this;
+      }
+      async _generate(): Promise<{ generations: Array<{ message: AIMessage; text: string }> }> {
+        const [id, name, args] = this.bound.includes("lookup")
+          ? ["lookup-1", "lookup", {}]
+          : ["final-1", RESPONSE_TOOL_NAME, { ok: true }];
+        const message = new AIMessage({
+          content: "",
+          tool_calls: [{ id, name, args, type: "tool_call" }],
+        });
+        return { generations: [{ message, text: "" }] };
+      }
+    }
+    const lookup = tool(() => "verified finding", {
+      name: "lookup",
+      description: "Find a fact.",
+      schema: { type: "object", properties: {}, additionalProperties: false },
+    });
+    const worker = createSubAgent(
+      {
+        name: "researcher",
+        description: "Researches facts.",
+        systemPrompt: "Use lookup before answering.",
+        model: new StructuredWorkerModel({}),
+        tools: [lookup],
+        middleware: [
+          (modelCallLimitMiddleware as unknown as (options: {
+            runLimit: number;
+            exitBehavior: "end";
+          }) => AnyAgentMiddleware)({ runLimit: 2, exitBehavior: "end" }),
+          subagentFinalizationMiddleware(2),
+          structuredResponseMiddleware(),
+        ],
+      },
+      {
+        responseFormat: asResponseFormat({
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+          required: ["ok"],
+        }),
+      } as never,
+    );
+
+    const result = await worker.invoke({ messages: [new HumanMessage("Find the fact.")] });
+
+    expect(bindings).toEqual([["lookup", RESPONSE_TOOL_NAME], [RESPONSE_TOOL_NAME]]);
+    expect((result as { structuredResponse?: unknown }).structuredResponse).toEqual({ ok: true });
   });
 
   it("rejects invalid limits", () => {
