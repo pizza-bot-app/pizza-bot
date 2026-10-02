@@ -13,8 +13,13 @@ import { modelCallLimitMiddleware, type AnyAgentMiddleware } from "langchain";
 import {
   SUBAGENT_MODEL_CALL_COUNT,
   SUBAGENT_FINALIZATION_INSTRUCTION,
+  SUBAGENT_STRUCTURED_FINALIZATION_INSTRUCTION,
   subagentFinalizationMiddleware,
 } from "./subagent-finalization-middleware.js";
+import {
+  RESPONSE_TOOL_INSTRUCTION,
+  structuredResponseMiddleware,
+} from "./structured-response-middleware.js";
 
 function wrapModelCall(runLimit = 20) {
   const middleware = subagentFinalizationMiddleware(runLimit) as unknown as {
@@ -158,6 +163,32 @@ describe("subagentFinalizationMiddleware", () => {
       (message) => AIMessage.isInstance(message) && Boolean(message.tool_calls?.length),
     )).toBe(false);
     expect(finalRequest.messages.at(-1)?.text).toContain("verified finding");
+  });
+
+  it("lets the final call of a structured task still use the response tool", async () => {
+    type StructuredRequest = TestModelRequest & { responseFormat: unknown; toolChoice?: unknown };
+    type Wrap = (
+      request: StructuredRequest,
+      handler: (request: StructuredRequest) => Promise<unknown>,
+    ) => Promise<unknown>;
+    const finalization = (subagentFinalizationMiddleware(20) as unknown as { wrapModelCall: Wrap })
+      .wrapModelCall;
+    const structured = (structuredResponseMiddleware() as unknown as { wrapModelCall: Wrap })
+      .wrapModelCall;
+    const parsed = { structuredResponse: { ok: true }, messages: [] };
+    const model = vi.fn(async (_request: StructuredRequest) => parsed);
+
+    const result = await finalization(
+      { ...request(19), responseFormat: { type: "object" } },
+      (outer) => structured(outer, model),
+    );
+
+    expect(result).toBe(parsed);
+    const sent = model.mock.calls[0]![0];
+    expect(sent.toolChoice).toBe("auto");
+    expect(sent.systemMessage.text).toContain(SUBAGENT_STRUCTURED_FINALIZATION_INSTRUCTION);
+    expect(sent.systemMessage.text).toContain(RESPONSE_TOOL_INSTRUCTION);
+    expect(sent.systemMessage.text).not.toContain(SUBAGENT_FINALIZATION_INSTRUCTION);
   });
 
   it("rejects invalid limits", () => {

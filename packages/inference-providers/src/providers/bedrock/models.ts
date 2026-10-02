@@ -33,10 +33,11 @@ export type BedrockToolChoiceValue = "auto" | "any" | "tool";
 
 /**
  * @langchain/aws@1.4.2 recognizes only older Claude ids and rejects forced
- * `tool_choice` client-side. Bedrock accepts auto/any/tool for current Claude
- * families, so override those only. Remove when the SDK matcher covers these ids.
+ * `tool_choice` client-side. Claude 5.5 models accept only `auto`; earlier
+ * Claude families accept auto/any/tool. Remove when the SDK matcher covers these ids.
  */
 export function supportedToolChoiceValues(modelId: string): BedrockToolChoiceValue[] | undefined {
+  if (/claude-[a-z]+-5-5/.test(modelId)) return ["auto"];
   return modelId.includes("claude") ? ["auto", "any", "tool"] : undefined;
 }
 

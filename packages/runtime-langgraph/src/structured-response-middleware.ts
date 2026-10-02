@@ -31,7 +31,9 @@ export function structuredResponseMiddleware() {
   return createMiddleware({
     name: "structuredResponse",
     wrapModelCall: async (request, handler) => {
-      if (!request.responseFormat) return handler(request);
+      if (!request.responseFormat || usesNativeStructuredOutput(request.model)) {
+        return handler(request);
+      }
       const autoRequest = {
         ...request,
         toolChoice: "auto" as const,
@@ -39,7 +41,8 @@ export function structuredResponseMiddleware() {
       };
       const response: unknown = await handler(autoRequest);
       // A parsed response comes back as a state update, not an AIMessage; only
-      // a tool-free prose answer missed the response tool.
+      // a tool-free prose answer missed the response tool. It gets one reminder,
+      // which call limits don't count, and then LangChain's own handling.
       if (!AIMessage.isInstance(response) || response.tool_calls?.length) {
         return response as AIMessage;
       }
@@ -49,4 +52,11 @@ export function structuredResponseMiddleware() {
       });
     },
   });
+}
+
+/** Mirrors LangChain's unexported `hasSupportForJsonSchemaOutput`: these models get no response tool. */
+function usesNativeStructuredOutput(model: unknown): boolean {
+  if (typeof model !== "object" || model === null || !("profile" in model)) return false;
+  const { profile } = model as { profile?: { structuredOutput?: unknown } };
+  return profile?.structuredOutput === true;
 }

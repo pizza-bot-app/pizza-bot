@@ -13,6 +13,7 @@ interface TestModelRequest {
   systemMessage: SystemMessage;
   responseFormat?: unknown;
   toolChoice?: unknown;
+  model?: unknown;
 }
 
 type Handler = (request: TestModelRequest) => Promise<unknown>;
@@ -37,6 +38,13 @@ describe("structuredResponseMiddleware", () => {
   it("leaves a call without a response format untouched", async () => {
     const handler = vi.fn<Handler>(async () => new AIMessage("done"));
     const original = request();
+    await wrapModelCall(original, handler);
+    expect(handler).toHaveBeenCalledExactlyOnceWith(original);
+  });
+
+  it("leaves a model with native structured output untouched", async () => {
+    const handler = vi.fn<Handler>(async () => new AIMessage("{\"ok\":true}"));
+    const original = { ...request(schema), model: { profile: { structuredOutput: true } } };
     await wrapModelCall(original, handler);
     expect(handler).toHaveBeenCalledExactlyOnceWith(original);
   });

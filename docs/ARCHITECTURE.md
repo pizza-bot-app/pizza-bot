@@ -340,7 +340,8 @@ in the `middleware` array, which replaces DeepAgents' entry because
 `mergeMiddlewareStack` matches on the middleware name (`subAgentMiddleware`).
 Nothing is written to state, so the Activity drill-down still renders the plain
 dispatch a human could have written. That name match is the one fragile joint: if
-a DeepAgents release renames the entry, theirs survives alongside ours and the
+a DeepAgents release renames the entry, theirs survives alongside ours with no
+subagents, since the roster is given only to `taskDispatchMiddleware`, and the
 briefing notes come back, so `skill-dispatch.test.ts` asserts the upstream
 phrasing is absent.
 
