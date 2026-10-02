@@ -21,7 +21,7 @@
     "langchain": "^1.5.14"
   },
   "devDependencies": {
-    "tsx": "^4.23.13"
+    "tsx": "^4.23.15"
   },
   "optionalDependencies": {
     "@langchain/quickjs": "0.6.4"

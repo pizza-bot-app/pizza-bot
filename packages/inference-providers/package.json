@@ -14,8 +14,8 @@
     "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock": "^3.1106.0",
-    "@aws-sdk/credential-providers": "^3.1106.0",
+    "@aws-sdk/client-bedrock": "^3.1142.0",
+    "@aws-sdk/credential-providers": "^3.1142.0",
     "@langchain/anthropic": "^1.5.11",
     "@langchain/aws": "^1.4.6",
     "@langchain/core": "^1.2.13",
@@ -25,7 +25,7 @@
     "@langchain/openrouter": "^0.4.15",
     "@pizza-bot/core": "*",
     "@pizza-bot/plugin-sdk": "*",
-    "@smithy/core": "^3.31.1",
-    "@smithy/signature-v4": "^5.6.12"
+    "@smithy/core": "^3.35.0",
+    "@smithy/signature-v4": "^5.7.4"
   }
 }

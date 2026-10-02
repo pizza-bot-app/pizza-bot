@@ -26,7 +26,7 @@
     "@pizza-bot/logging": "*",
     "@pizza-bot/plugin-sdk": "*",
     "eventsource-parser": "^3.1.0",
-    "tsx": "^4.23.11"
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@electron-forge/cli": "^8.0.0-alpha.10",
