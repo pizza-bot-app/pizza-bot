@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@langchain/core": "^1.2.11",
+    "@langchain/core": "^1.2.13",
     "cross-env": "^10.1.0",
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",

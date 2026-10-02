@@ -14,11 +14,11 @@
     "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@langchain/core": "^1.2.9",
-    "@langchain/langgraph": "^1.4.10",
+    "@langchain/core": "^1.2.13",
+    "@langchain/langgraph": "^1.4.18",
     "@pizza-bot/core": "*",
     "deepagents": "^1.14.1",
-    "langchain": "^1.5.10"
+    "langchain": "^1.5.14"
   },
   "devDependencies": {
     "tsx": "^4.23.13"
