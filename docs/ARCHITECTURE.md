@@ -6,7 +6,7 @@
 This document describes the system as it is. It is the source of truth for
 package boundaries and interface contracts. When an external library's shape
 matters (DeepAgents or native LangGraph protocol events), a conformance test
-pins it (§12) — so an upstream change breaks a test, not production. The
+pins it (§13) — so an upstream change breaks a test, not production. The
 AI Elements-derived components are vendored UI code rather than a conformance
 target.
 
@@ -746,7 +746,105 @@ sidecar's environment over its private child-process IPC channel.
 
 ---
 
-## 12. Staying current — the conformance suite
+## 12. Grounded approval gates
+
+An approval gate that shows a tool name and its arguments asks the reviewer to
+certify content they cannot check: in a drafted email reading "your plan includes
+two free swaps and I've waived the $12 fee", nothing distinguishes the clause that
+came from a contract lookup from the one the model produced unprompted. Grounding
+makes the draft carry its sources and proves the ones it claims, so the tiers below
+are drawn over the arguments that are about to be dispatched.
+
+The pipeline has four stages, and none of them asks a model to judge another
+model's output:
+
+1. **Evidence ledger.** `runtime-langgraph/src/evidence-ledger-middleware.ts` is a
+   `wrapToolCall` middleware bound to any skill-subagent whose tools carry the
+   citation argument. Each successful non-gated MCP result records one entry and
+   comes back stamped with an `[evidence ev_…]` marker — the only way the model
+   learns an id it can cite. Gated tools are skipped, because the action under
+   review is not its own evidence, and a thrown error passes through to
+   `toolErrorRecovery` (which wraps this middleware from outside) so failures are
+   never recorded as sources. `instrumentMcpTool` is the right shape for this and
+   the wrong layer: it cannot see `thread_id` / `run_id`.
+2. **Storage.** `storage/src/evidence.ts` keeps metadata in SQLite and bodies at
+   `evidence/<id>`, reaching the runtime as an `EvidenceRecorder` on `RuntimeDeps`.
+   `api-server/src/routes-evidence.ts` exposes two read-only routes; there is
+   deliberately no write route, and deleting a thread drops its bodies with its rows.
+3. **Citation contract.** A skill declares which arguments of a gated tool carry
+   verifiable prose (`verifiedArgs: [body]` beside `allowedDecisions` in
+   `interruptOn`, parsed in `core/src/skill.ts`). For a declared tool,
+   `plugin-sdk/src/mcp-grounding.ts` injects one optional
+   `_grounding?: Array<{arg, text, evidenceId}>` into the *adapted* schema bound to
+   the model, and `instrumentMcpTool` strips it at `args[0].args` before dispatch,
+   so the MCP server never sees it. `runtime-langgraph/src/skill-grounding.ts`
+   appends the contract to the **tool's own description** — a directive injected
+   into a tool *result* reads as prompt injection.
+4. **Audit.** `core/src/grounding.ts` is pure and model-free: resolve each quoted
+   span to a unique position in the argument, then ask whether one window of the
+   cited body holds the span's figures, dates and names together with the same
+   polarity. It lives in core because both the reviewer's screen (`apps/web`,
+   live) and the durable record (`api-server/src/approval-audit.ts`, recomputed on
+   approval and never taken from the client) run it, and the two must not be able to
+   report different tiers for the same span.
+
+| Tier | Means | Reviewer reads it as |
+| :--- | :--- | :--- |
+| `verifiable` | One passage of the cited body holds the span's figures, dates and names together, with the same polarity | Checked. The citation resolves. |
+| `inconclusive` | The words are in the cited body but only scattered across it, or in a passage that disagrees about a negative, or the stored copy was clipped before them | The words are there; what they say may not be. Read the source. |
+| `asserted` | The span cites an entry that is missing, or a body that does not contain it | The draft claims a source that does not hold it. |
+| `uncited` | The span carries no citation | Unsourced. May be discourse, may be a claim. |
+| `unresolved` | The quote addresses no unique position in the text that was sent | Never checked; listed beside the record, not drawn on it. |
+
+No percentage is displayed, because none is measured. Five decisions carry the
+design:
+
+- **Only provable grounding is labelled grounded.** The one available ground truth
+  is "this span appears in that body". Entailment scores are model opinions rendered
+  as measurements, and a wrongly green badge is worse than no badge because it
+  manufactures trust. The corollary constrains the reds symmetrically: a gap that
+  rests on absence cannot be established from a body the ledger kept only part of,
+  so a truncated source yields `inconclusive` (`clipped`), not an accusation.
+- **The model quotes; the code computes the offsets.** Models cannot address their
+  own text numerically — Sonnet 5 produced an exactly correct offset pair in 0 of 32
+  measured spans and Sonnet 4.5 in 0 of 31, every one of them still *in bounds*,
+  which is the dangerous shape. Verbatim quotes resolved present-and-unique 115/115
+  over the same spans, so `indexOf` addresses them; a quote that is absent or
+  repeated degrades rather than guessing.
+- **Citations ride in the tool call's own arguments,** so they are checkpointed,
+  streamed, rendered and edited by machinery that already exists — no new wire type
+  and no new endpoint. Evidence *bodies* stay out of checkpoints, because raw MCP
+  payloads reach hundreds of KB and every checkpoint would rewrite the ledger.
+- **The body cap is applied to the tool output, not just to the stored copy.**
+  Clipping only the record would let the model quote text the reviewer's copy lacks;
+  clipping once, where the model reads it, keeps the two byte-identical, with the
+  pre-clip size and a `truncated` flag on the entry.
+- **Contradiction is found by cue, not by scope.** A source that denies what a span
+  asserts shares nearly all of its vocabulary, which is why containment alone
+  rendered the worst case green. Locality plus a negation-cue scan catches the
+  common shape and will miss others; it also fires on an incidental `not`, costing a
+  green badge that was owed. That is why the tier is `inconclusive` and not a
+  contradiction verdict: the mechanism finds a reason to distrust a match, never a
+  reason to disbelieve a claim.
+
+Two limits are structural. **Coverage is bounded by MCP** — `qualifyInterruptOn`
+accepts only `mcp:` refs, so built-ins (`write_file`, `task`, the eval sandbox)
+cannot be gated and therefore cannot be grounded; absence of warnings is not
+absence of risk. And **grounding only exists where a gate does**, which is inside
+skill-subagents (§4): Pizza Bot itself gets no `interruptOn`, and a subagent's pause
+bubbles up so the card renders in the main feed.
+
+The UI vocabulary for all of this is **grounding**; `ProvenanceBadge.tsx` already
+means a skill's origin (`user | plugin | builtin`).
+`ApprovalArguments.tsx` marks spans inside the existing `TextArgumentField`,
+`use-grounding-view.ts` supplies the ledger a card audits against, and
+`ActivityRail.tsx` renders the evidence cards (cited first, collapsed — a run with
+forty tool calls must not open forty cards) and replays each stored verdict over the
+arguments that were sent, through the same renderer as the live card.
+
+---
+
+## 13. Staying current — the conformance suite
 
 `tests/langgraph-compat` pins the **DeepAgents** exports and native LangGraph
 protocol-event shapes the product actually consumes. It does not compare routes

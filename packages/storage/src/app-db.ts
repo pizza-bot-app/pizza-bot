@@ -7,7 +7,8 @@ import { SearchStore } from "./search.js";
 import { SettingsStore } from "./settings.js";
 import { ProviderConfigStore } from "./provider-configs.js";
 import { AttachmentStore } from "./attachments.js";
-import { ThreadActivityStore } from "./thread-activity.js";
+import { EvidenceStore } from "./evidence.js";
+import { ApprovalVerdictStore, ThreadActivityStore } from "./thread-activity.js";
 import { CapabilityPreferencesStore } from "./capability-preferences.js";
 import { LocalFolderStore } from "./local-folders.js";
 import { ensurePrivateDirectory, ensurePrivateFile } from "./private-files.js";
@@ -23,10 +24,13 @@ export interface AppDatabase {
   settings: SettingsStore;
   providerConfigs: ProviderConfigStore;
   threadActivity: ThreadActivityStore;
+  approvalVerdicts: ApprovalVerdictStore;
   capabilityPreferences: CapabilityPreferencesStore;
   localFolders: LocalFolderStore;
   /** Attachment metadata is in SQLite; bytes remain in `attachmentsDir`. */
   attachments?: AttachmentStore;
+  /** Evidence metadata is in SQLite; bodies remain in `evidenceDir`. */
+  evidence?: EvidenceStore;
   close(): void;
 }
 
@@ -34,7 +38,11 @@ export interface AppDatabase {
  * All stores share this handle, including in `:memory:` mode. Each store applies
  * its own idempotent schema.
  */
-export function openAppDatabase(dbPath: string, attachmentsDir?: string): AppDatabase {
+export function openAppDatabase(
+  dbPath: string,
+  attachmentsDir?: string,
+  evidenceDir?: string,
+): AppDatabase {
   // better-sqlite3 does not create the parent directory.
   const isMemory = dbPath === ":memory:" || dbPath.startsWith("file::memory:");
   if (!isMemory) ensurePrivateDirectory(path.dirname(dbPath));
@@ -52,9 +60,11 @@ export function openAppDatabase(dbPath: string, attachmentsDir?: string): AppDat
     settings: new SettingsStore(db),
     providerConfigs: new ProviderConfigStore(db),
     threadActivity: new ThreadActivityStore(db),
+    approvalVerdicts: new ApprovalVerdictStore(db),
     capabilityPreferences: new CapabilityPreferencesStore(db),
     localFolders: new LocalFolderStore(db),
     ...(attachmentsDir ? { attachments: new AttachmentStore(db, attachmentsDir) } : {}),
+    ...(evidenceDir ? { evidence: new EvidenceStore(db, evidenceDir) } : {}),
     close() {
       db.close();
     },

@@ -40,6 +40,8 @@ import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
 import { localFolderContextMiddleware } from "./local-folder-context-middleware.js";
 import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 import { taskDispatchMiddleware } from "./task-dispatch-middleware.js";
+import { applySkillGrounding } from "./skill-grounding.js";
+import { evidenceLedgerMiddleware } from "./evidence-ledger-middleware.js";
 import { streamProtocolEvents, toLangGraphInput, type ProtocolCapableGraph } from "./stream-protocol.js";
 
 // The built-in Codex profile otherwise restores the opt-in planning middleware.
@@ -132,6 +134,15 @@ function qualifyInterruptOn<T>(
 function executableToolName(ref: string): string {
   const [, server, tool] = ref.split(":");
   return `${server}__${tool}`;
+}
+
+/** Inverts the executable name a model calls back to the ref that named the tool. */
+function executableRefIndex(
+  refs: readonly string[],
+  catalog: ToolCatalog | undefined,
+): Map<string, string> {
+  const { expanded } = resolveToolReferences([...refs], catalog ?? {});
+  return new Map(expanded.map((ref) => [executableToolName(ref), ref]));
 }
 
 function hasEvalTool(refs: readonly string[]): boolean {
@@ -237,17 +248,24 @@ export async function resolveSkillSubagents(
       if (hasEvalTool(entry.declaredTools)) {
         middleware.push(await codeInterpreterMiddleware(false));
       }
-      const tools = resolveToolRefs(
+      const resolvedTools = resolveToolRefs(
         mcpToolRefs(entry.declaredTools),
         deps,
         `skill "${entry.id}"`,
       );
-      const interruptOn = qualifyInterruptOn(
-        entry.interruptOn,
-        deps.catalog,
-        `skill "${entry.id}"`,
-        logger,
+      const { tools, interruptOn, groundedTools } = applySkillGrounding(
+        resolvedTools,
+        qualifyInterruptOn(entry.interruptOn, deps.catalog, `skill "${entry.id}"`, logger),
       );
+      // Only a skill that cites anything needs a ledger to cite from.
+      if (groundedTools.length > 0 && deps.evidenceRecorder) {
+        middleware.push(evidenceLedgerMiddleware({
+          recorder: deps.evidenceRecorder,
+          refsByToolName: executableRefIndex(mcpToolRefs(entry.declaredTools), deps.catalog),
+          gatedToolNames: new Set(Object.keys(interruptOn ?? {})),
+          ...(logger ? { logger } : {}),
+        }));
+      }
       return {
         name: entry.id,
         description: entry.description,

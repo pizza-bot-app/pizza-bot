@@ -1,5 +1,7 @@
 export * from "./protocol-types.js";
 export * from "./attachment.js";
+export * from "./evidence.js";
+export * from "./grounding.js";
 export * from "./agent.js";
 export * from "./wildcard.js";
 export * from "./skill.js";

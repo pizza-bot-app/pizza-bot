@@ -27,6 +27,7 @@ import {
   materializePlugin,
   type PluginMaterializationStatus,
 } from "./materializer.js";
+import { stripGroundingFromInvocation } from "./mcp-grounding.js";
 import { restoreFlattenedUnions } from "./mcp-schema.js";
 import {
   evaluatePluginCompatibility,
@@ -566,7 +567,12 @@ function instrumentMcpTool(
         return Reflect.get(target, property, receiver);
       }
       const original = Reflect.get(target, property, target) as (...args: unknown[]) => Promise<unknown>;
-      return async (...args: unknown[]) => {
+      return async (...rawArgs: unknown[]) => {
+        // `_grounding` is never a server argument, so strip unconditionally: the
+        // injecting layer is per-skill but this is the whole dispatch surface.
+        const args = rawArgs.length > 0
+          ? [stripGroundingFromInvocation(rawArgs[0]), ...rawArgs.slice(1)]
+          : rawArgs;
         const startedAt = performance.now();
         logger.info("MCP tool call started", {
           event: "mcp.tool.started",

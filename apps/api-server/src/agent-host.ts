@@ -37,6 +37,7 @@ import {
   SettingsStore,
   ProviderConfigStore,
   ThreadActivityStore,
+  ApprovalVerdictStore,
   CapabilityPreferencesStore,
   LocalFolderStore,
   RunMaintenance,
@@ -45,6 +46,7 @@ import {
   isDefaultTitle,
   type AppDatabase,
   type AttachmentStore,
+  type EvidenceStore,
   type IndexableMessage,
   type Persistence,
   type CapabilityPreferenceKey,
@@ -340,10 +342,12 @@ export class AgentHost {
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
   readonly threadActivity: ThreadActivityStore;
+  readonly approvalVerdicts: ApprovalVerdictStore;
   readonly capabilityPreferences: CapabilityPreferencesStore;
   readonly localFolders: LocalFolderStore;
   modelId: string;
   readonly attachments?: AttachmentStore;
+  readonly evidence?: EvidenceStore;
 
   private readonly appDb: AppDatabase;
   private readonly explicitModelId: string | null;
@@ -389,11 +393,12 @@ export class AgentHost {
     explicitModelId: string | undefined,
     appDbPath: string,
     attachmentsDir: string | false,
+    evidenceDir: string | false,
     warm: (host: AgentHost) => Promise<GraphManager>,
   ) {
     this.protocolRuns = new ProtocolRunManager((input, opts) => this.streamProtocolReady(input, opts));
     // All app stores share one SQLite handle and one close owner.
-    this.appDb = openAppDatabase(appDbPath, attachmentsDir || undefined);
+    this.appDb = openAppDatabase(appDbPath, attachmentsDir || undefined, evidenceDir || undefined);
     this.triggers = this.appDb.triggers;
     this.threadStore = this.appDb.threadStore;
     this.folderStore = this.appDb.folders;
@@ -401,11 +406,13 @@ export class AgentHost {
     this.settings = this.appDb.settings;
     this.providerConfigs = this.appDb.providerConfigs;
     this.threadActivity = this.appDb.threadActivity;
+    this.approvalVerdicts = this.appDb.approvalVerdicts;
     this.capabilityPreferences = this.appDb.capabilityPreferences;
     this.localFolders = this.appDb.localFolders;
     this.explicitModelId = explicitModelId ?? process.env.PIZZA_MODEL ?? null;
     this.modelId = this.selectDefaultModel();
     if (this.appDb.attachments) this.attachments = this.appDb.attachments;
+    if (this.appDb.evidence) this.evidence = this.appDb.evidence;
     this.triggerService = new TriggerService(protocolRunLauncher(this.protocolRuns), this.triggers, {
       isEnabled: () => this.settings.get().enableAutomations,
     });
@@ -517,7 +524,9 @@ export class AgentHost {
     try {
       await this.waitForThreadMaintenance(threadId);
       this.attachments?.deleteByThread(threadId);
+      this.evidence?.deleteByThread(threadId);
       this.threadActivity.deleteByThread(threadId);
+      this.approvalVerdicts.deleteByThread(threadId);
       const deleted = this.threadStore.delete(threadId);
       this.search.deleteThread(threadId);
       // SqliteSaver.deleteThread skips its lazy schema setup on an unopened database.
@@ -1825,6 +1834,7 @@ export class AgentHost {
           : {}),
         localFolders: () => host.localFolders.list(),
         ...(host.attachments ? { attachmentResolver: host.attachments.resolver } : {}),
+        ...(host.evidence ? { evidenceRecorder: host.evidence.recorder } : {}),
         ...(Object.keys(tools).length > 0 ? { tools } : {}),
         ...(Object.keys(catalog).length > 0 ? { catalog } : {}),
         ...(skillProjection.ready.size > 0 ? { skills: skillProjection.ready } : {}),
@@ -1857,6 +1867,7 @@ export class AgentHost {
     const isMemory = opts.dataRoot === ":memory:" || opts.dataRoot.startsWith("file::memory:");
     const appDbPath = isMemory ? ":memory:" : resolveLayout(opts.dataRoot).appDb;
     const attachmentsDir = isMemory ? false : resolveLayout(opts.dataRoot).attachmentsDir;
+    const evidenceDir = isMemory ? false : resolveLayout(opts.dataRoot).evidenceDir;
 
     return new AgentHost(
       lazyPersistence,
@@ -1864,6 +1875,7 @@ export class AgentHost {
       explicitModelId,
       appDbPath,
       attachmentsDir,
+      evidenceDir,
       warm,
     );
   }

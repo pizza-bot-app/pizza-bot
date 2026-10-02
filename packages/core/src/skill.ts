@@ -26,12 +26,22 @@ export const interruptConfigSchema = z.union([
     allowedDecisions: z.array(
       z.enum(["approve", "edit", "reject", "respond"]) satisfies z.ZodType<HitlDecision>,
     ).min(1),
+    verifiedArgs: z.array(z.string().min(1)).min(1).optional(),
   }),
 ]);
 
 export type SkillInterruptConfig =
   | boolean
-  | { allowedDecisions: HitlDecision[] };
+  | {
+      allowedDecisions: HitlDecision[];
+      /**
+       * Arguments whose prose the model must cite. Grounding is only meaningful
+       * behind an approval gate, so it rides on the same per-tool config.
+       * Explicitly `| undefined` so zod-parsed configs stay assignable under
+       * `exactOptionalPropertyTypes`.
+       */
+      verifiedArgs?: string[] | undefined;
+    };
 
 export type SkillInterruptOn = Record<string, SkillInterruptConfig>;
 
@@ -106,6 +116,12 @@ export function composeSkillMd(
           `  ${JSON.stringify(ref)}:`,
           "    allowedDecisions:",
           ...config.allowedDecisions.map((decision) => `      - ${decision}`),
+          ...(config.verifiedArgs?.length
+            ? [
+                "    verifiedArgs:",
+                ...config.verifiedArgs.map((arg) => `      - ${JSON.stringify(arg)}`),
+              ]
+            : []),
         ].join("\n");
       }).join("\n")}\n`
     : "";
@@ -237,9 +253,23 @@ export function parseSkillInterruptOn(frontmatter: Record<string, unknown>): Ski
       (decision): decision is HitlDecision =>
         typeof decision === "string" && HITL_DECISIONS.has(decision as HitlDecision),
     );
-    if (allowedDecisions.length > 0) parsed[ref] = { allowedDecisions };
+    if (allowedDecisions.length === 0) continue;
+    const verifiedArgs = parseVerifiedArgs((config as { verifiedArgs?: unknown }).verifiedArgs);
+    parsed[ref] = {
+      allowedDecisions,
+      ...(verifiedArgs.length > 0 ? { verifiedArgs } : {}),
+    };
   }
   return parsed;
+}
+
+function parseVerifiedArgs(raw: unknown): string[] {
+  const items = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[,\s]+/) : [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (typeof item === "string" && item.trim()) seen.add(item.trim());
+  }
+  return [...seen];
 }
 
 /**
