@@ -220,6 +220,7 @@ describe("BedrockLangChainModelProvider authentication", () => {
 
     expect(sdk.chatConfig).toMatchObject({
       region: "eu-west-1",
+      streamIdleTimeout: 180_000,
       credentials: {
         accessKeyId: "access-key",
         secretAccessKey: "secret-key",

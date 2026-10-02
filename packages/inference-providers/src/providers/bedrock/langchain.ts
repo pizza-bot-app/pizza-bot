@@ -48,6 +48,9 @@ type BedrockProtocol = "converse" | "responses" | "chat-completions" | "messages
  * one that can time out.
  */
 const CATALOG_TIMEOUT_MS = 15_000;
+// The upstream 60 s default also bounds time-to-first-byte (including SDK
+// retries), which large-context turns on big models routinely exceed.
+const STREAM_IDLE_TIMEOUT_MS = 180_000;
 
 type CatalogSource = "foundation models" | "inference profiles" | "Mantle";
 
@@ -440,6 +443,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
       ...auth,
       ...(reasoning ? { additionalModelRequestFields: REASONING_REQUEST_FIELDS } : {}),
       maxTokens: this.maxTokens,
+      streamIdleTimeout: STREAM_IDLE_TIMEOUT_MS,
       ...(() => {
         const v = supportedToolChoiceValues(modelId);
         return v ? { supportsToolChoiceValues: v } : {};
