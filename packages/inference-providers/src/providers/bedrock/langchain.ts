@@ -385,6 +385,17 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         return [rewritten, options];
       }
 
+      // @langchain/aws throws for any tool_choice a model doesn't list, even
+      // "auto", which is Converse's default when the field is absent.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      override invocationParams(options: any) {
+        if (options?.tool_choice !== "auto" || this.supportsToolChoiceValues?.includes("auto")) {
+          return super.invocationParams(options);
+        }
+        const { tool_choice: _auto, ...rest } = options;
+        return super.invocationParams(rest);
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       override async _generate(messages: BaseMessage[], ...rest: [options: any, runManager?: any]) {
         const [outMessages, outOptions] = this.outbound(messages, rest[0]);

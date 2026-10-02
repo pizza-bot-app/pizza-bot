@@ -24,8 +24,15 @@ vi.mock("@aws-sdk/credential-providers", () => ({
 
 vi.mock("@langchain/aws", () => ({
   ChatBedrockConverse: class {
+    supportsToolChoiceValues: unknown;
+
     constructor(config: Record<string, unknown>) {
       sdk.chatConfig = config;
+      this.supportsToolChoiceValues = config.supportsToolChoiceValues;
+    }
+
+    invocationParams(options: Record<string, unknown>) {
+      return options;
     }
 
     _generate(messages: unknown[], options: Record<string, unknown>) {
@@ -638,5 +645,28 @@ describe("Bedrock outbound attachment projection", () => {
     }
 
     expect(sdk.outboundOptions).toEqual({ cache_control: cacheControl });
+  });
+});
+
+describe("Bedrock tool choice", () => {
+  async function invocationOptions(id: string) {
+    const provider = new BedrockLangChainModelProvider({
+      models: [{ id, provider: "bedrock", displayName: id }],
+    });
+    const model = await provider.buildModel(id);
+    return (model as unknown as {
+      invocationParams(options: Record<string, unknown>): unknown;
+    }).invocationParams({ tool_choice: "auto", signal: "preserved" });
+  }
+
+  it("omits an auto tool choice for a model that lists no tool-choice support", async () => {
+    expect(await invocationOptions("global.openai.gpt-oss-120b")).toEqual({ signal: "preserved" });
+  });
+
+  it("keeps an auto tool choice for Claude", async () => {
+    expect(await invocationOptions("global.anthropic.claude-sonnet-5-5")).toEqual({
+      tool_choice: "auto",
+      signal: "preserved",
+    });
   });
 });
