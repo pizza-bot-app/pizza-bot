@@ -33,6 +33,7 @@ import { buildBackend } from "./backend.js";
 import { toolErrorRecoveryMiddleware } from "./tool-error-middleware.js";
 import { outputTruncationMiddleware, truncatedTurnMiddleware } from "./output-truncation-middleware.js";
 import { subagentFinalizationMiddleware } from "./subagent-finalization-middleware.js";
+import { structuredResponseMiddleware } from "./structured-response-middleware.js";
 import { attachmentInlineMiddleware } from "./attachment-inline-middleware.js";
 import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
 import { localFolderContextMiddleware } from "./local-folder-context-middleware.js";
@@ -225,6 +226,7 @@ export async function resolveSkillSubagents(
       const middleware: unknown[] = [
         ...runLimitMiddleware(limits),
         subagentFinalizationMiddleware(AGENT_RUN_LIMITS.subagent.modelCalls),
+        structuredResponseMiddleware(),
         toolErrorRecoveryMiddleware(),
         outputTruncationMiddleware(),
         currentDateTimeMiddleware(),

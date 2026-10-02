@@ -7,7 +7,7 @@ import { SystemMessage } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
 import { createFilesystemMiddleware, FilesystemBackend } from "deepagents";
 import { z } from "zod";
-import { createWorkerCodeInterpreterMiddleware, withToolDescription } from "./code-interpreter-middleware.js";
+import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 
 const GUEST_DEADLINE_MS = 1_500;
 
@@ -257,14 +257,5 @@ describe("worker-hosted code interpreter", () => {
         "Tool 'read_file' failed: line 3 of 5 alone exceeds the read size cap, so it cannot be read whole; continue from offset 3 to skip it",
       ]);
     }, WORKER_TEST_TIMEOUT_MS);
-  });
-});
-
-describe("withToolDescription", () => {
-  it("gives a schema without a description one, and keeps an authored one", () => {
-    const bare = { type: "object", properties: { ok: { type: "boolean" } } };
-    expect(withToolDescription(bare).description).toEqual(expect.stringMatching(/\S/));
-    expect(withToolDescription({ ...bare, description: " " }).description).not.toBe(" ");
-    expect(withToolDescription({ ...bare, description: "Verdict." }).description).toBe("Verdict.");
   });
 });

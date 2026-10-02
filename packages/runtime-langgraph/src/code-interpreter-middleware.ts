@@ -12,6 +12,7 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import { isCommand } from "@langchain/langgraph";
 import { SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY } from "deepagents";
 import type { EvalWorkerData, HostToWorker, WorkerToHost } from "./eval-worker-protocol.js";
+import { asResponseFormat } from "./structured-response-middleware.js";
 
 export interface SandboxOptions {
   ptc: string[];
@@ -47,19 +48,6 @@ const WORKER_ENTRY = new URL(
   import.meta.url,
 );
 const WORKER_EXEC_ARGV = FROM_SOURCE ? ["--import", "tsx"] : [];
-
-/**
- * LangChain derives the structured-output tool's description from a plain JSON
- * Schema's own `description`, defaulting to "", which Bedrock rejects.
- */
-const RESPONSE_SCHEMA_DESCRIPTION = "Return the final result in this shape.";
-
-export function withToolDescription(schema: Record<string, unknown>): Record<string, unknown> {
-  const { description } = schema;
-  return typeof description === "string" && description.trim()
-    ? schema
-    : { ...schema, description: RESPONSE_SCHEMA_DESCRIPTION };
-}
 
 interface ToolLike {
   name: string;
@@ -219,7 +207,7 @@ export async function createWorkerCodeInterpreterMiddleware(
               ...session.config,
               configurable: {
                 ...session.config.configurable,
-                [SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY]: withToolDescription(responseSchema),
+                [SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY]: asResponseFormat(responseSchema),
               },
             };
       const content = unwrapToolEnvelope(
