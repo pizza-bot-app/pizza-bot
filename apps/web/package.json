@@ -1,6 +1,6 @@
 {
   "name": "@pizza-bot/web",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Vite + React + AI Elements renderer for Electron and browsers, using ApiClient and the LangGraph SDK over HTTP/SSE.",

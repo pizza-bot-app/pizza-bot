@@ -1,6 +1,6 @@
 {
   "name": "pizza-bot-oss",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "An inbox for asynchronous AI work, built on DeepAgents and LangGraph",
   "license": "Apache-2.0",

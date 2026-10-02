@@ -1,6 +1,6 @@
 {
   "name": "@pizza-bot/langgraph-compat",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Conformance suite for native LangGraph protocol events and DeepAgents assumptions (§12).",

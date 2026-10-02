@@ -1,6 +1,6 @@
 {
   "name": "@pizza-bot/core",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Pizza Bot's thread, skill, model, and protocol domain types.",
