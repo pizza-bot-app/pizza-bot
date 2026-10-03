@@ -673,9 +673,20 @@ class WorkspaceRoute implements BackendProtocolV2 {
       : result;
   }
 
+  /** Sandbox glob results are relative to the search directory, unlike its other listings. */
   async glob(pattern: string, routePath = "/"): Promise<GlobResult> {
-    const result = await this.sandbox.glob(pattern, this.guest(routePath));
-    return result.files ? { ...result, files: result.files.map((file) => this.route(file)) } : result;
+    const base = this.guest(routePath);
+    const result = await this.sandbox.glob(pattern, base);
+    return result.files
+      ? {
+          ...result,
+          files: result.files.map((file) =>
+            this.route(
+              file.path.startsWith("/") ? file : { ...file, path: path.posix.join(base, file.path) },
+            ),
+          ),
+        }
+      : result;
   }
 
   write(routePath: string, content: string): Promise<WriteResult> {

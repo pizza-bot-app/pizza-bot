@@ -239,7 +239,9 @@ a [smolvm](https://github.com/smol-machines/smolvm) microVM, one per
 conversation, with files shared at `/workspace/`. The backend artifact does not
 bundle smolvm: install a release on the host and point `PIZZA_SMOLVM_DIR` at
 the unpacked directory, or `PIZZA_SMOLVM_BIN` at a `smolvm` on another path.
-Linux hosts need read/write access to `/dev/kvm`.
+Linux hosts need read/write access to `/dev/kvm`. smolvm keeps VM disks under
+the service user's `~/.cache/smolvm`; on tmpfs (a `HOME` under `/tmp`, for
+example) every VM start fails with `krun_start_enter returned: -22 (EINVAL)`.
 
 | Variable | Effect |
 | --- | --- |
