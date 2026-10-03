@@ -69,7 +69,7 @@ export async function fetchSmolvm({ platform, arch, output }) {
     return false;
   }
   const marker = path.join(output, ".pizza-smolvm");
-  const stamp = `${release.asset}\n`;
+  const stamp = `${release.asset}\nrootfs-tarball\n`;
   if (fs.existsSync(marker) && fs.readFileSync(marker, "utf8") === stamp) {
     console.log(`[smolvm] ${release.asset} already staged`);
     return true;
@@ -97,6 +97,16 @@ export async function fetchSmolvm({ platform, arch, output }) {
     const staged = path.join(unpacked, root);
     for (const entry of PRUNED) {
       fs.rmSync(path.join(staged, entry), { recursive: true, force: true });
+    }
+    // The rootfs holds symlinks to guest-only paths, which Forge's resource copy
+    // follows and fails on. smolvm unpacks a tarball beside its binary into the
+    // user cache instead, as the Windows release already ships it.
+    const rootfs = path.join(staged, "agent-rootfs");
+    if (fs.existsSync(rootfs)) {
+      execFileSync("tar", ["-czf", path.join(staged, "agent-rootfs.tar.gz"), "-C", rootfs, "."], {
+        stdio: "inherit",
+      });
+      fs.rmSync(rootfs, { recursive: true, force: true });
     }
     fs.writeFileSync(path.join(staged, ".pizza-smolvm"), stamp);
     fs.rmSync(output, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

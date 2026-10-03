@@ -43,7 +43,8 @@ export interface SmolvmLocation {
 /**
  * Invokes the release binary directly instead of its bash wrapper, which cannot
  * run on Windows and whose DYLD_LIBRARY_PATH a hardened-runtime macOS signature
- * strips. smolvm dlopens libkrun from SMOLVM_LIB_DIR, so no loader path is needed.
+ * strips. smolvm dlopens libkrun from SMOLVM_LIB_DIR, and finds its guest rootfs
+ * (a directory or `agent-rootfs.tar.gz`) beside its own executable.
  */
 export function resolveSmolvmCommand(
   location: SmolvmLocation,
@@ -56,10 +57,7 @@ export function resolveSmolvmCommand(
   }
   return {
     file: path.join(dir, "smolvm-bin"),
-    env: {
-      SMOLVM_LIB_DIR: path.join(dir, "lib"),
-      SMOLVM_AGENT_ROOTFS: path.join(dir, "agent-rootfs"),
-    },
+    env: { SMOLVM_LIB_DIR: path.join(dir, "lib") },
   };
 }
 
