@@ -29,7 +29,10 @@ interface Call {
 }
 
 function fakeRunner(
-  respond: (args: readonly string[], options?: CliRunOptions) => CliResult = () => ok(),
+  respond: (
+    args: readonly string[],
+    options?: CliRunOptions,
+  ) => CliResult | Promise<CliResult> = () => ok(),
 ): { run: SmolvmRunner; calls: Call[] } {
   const calls: Call[] = [];
   return {
@@ -129,6 +132,26 @@ describe("SmolvmSandbox", () => {
       truncated: false,
     });
     expect((await sandbox.execute("x")).output).toBe("ran");
+  });
+
+  it("reports smolvm's own timeout, which exits 124 silently", async () => {
+    const { run } = fakeRunner((args) =>
+      args.includes("/bin/sh")
+        ? new Promise<CliResult>((resolve) =>
+            setTimeout(() => resolve({ ...ok(), exitCode: 124 }), 1100),
+          )
+        : ok(),
+    );
+    const result = await new SmolvmSandbox(run, "vm", { timeoutSeconds: 1 }).execute("sleep 9");
+    expect(result.output).toBe("\nCommand timed out after 1s.");
+    expect(result.exitCode).toBe(124);
+  });
+
+  it("leaves a command's own exit 124 alone", async () => {
+    const { run } = fakeRunner((args) =>
+      args.includes("/bin/sh") ? { ...ok("own"), exitCode: 124 } : ok(),
+    );
+    expect((await new SmolvmSandbox(run, "vm").execute("exit 124")).output).toBe("own");
   });
 
   it("restarts a machine that was stopped and retries the command", async () => {

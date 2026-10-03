@@ -146,6 +146,7 @@ export interface SmolvmMachineOptions {
 }
 
 const DEFAULT_TIMEOUT_SECONDS = 300;
+const TIMEOUT_EXIT_CODE = 124;
 /** Host-side backstop past the guest timeout, which covers VM boot and teardown. */
 const HOST_TIMEOUT_GRACE_MS = 60_000;
 /** Creating or starting a machine may first pull its image. */
@@ -274,9 +275,12 @@ export class SmolvmSandbox extends BaseSandbox {
   execute(command: string): Promise<ExecuteResponse> {
     return this.track(async () => {
       let result: CliResult;
+      let elapsedMs: number;
       try {
         await this.ensureReady();
+        const startedAt = Date.now();
         result = await this.exec(["/bin/sh", "-c", command], SANDBOX_WORKSPACE);
+        elapsedMs = Date.now() - startedAt;
       } catch (error) {
         return {
           output: `Sandbox unavailable: ${error instanceof Error ? error.message : String(error)}`,
@@ -285,8 +289,13 @@ export class SmolvmSandbox extends BaseSandbox {
         };
       }
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      // smolvm's own --timeout kills the guest command with exit 124 and no
+      // message; the elapsed check keeps a command's own 124 from reading as one.
+      const timedOut =
+        result.timedOut ||
+        (result.exitCode === TIMEOUT_EXIT_CODE && elapsedMs >= this.timeoutSeconds * 1000);
       return {
-        output: result.timedOut
+        output: timedOut
           ? `${output}\nCommand timed out after ${this.timeoutSeconds}s.`
           : output,
         exitCode: result.exitCode,
