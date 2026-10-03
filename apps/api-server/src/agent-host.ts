@@ -34,6 +34,7 @@ import {
   compileGraphSpec,
   type LangGraphAgent,
   type LangGraphThreadGraph,
+  type SmolvmSandboxPool,
 } from "@pizza-bot/runtime-langgraph";
 import type { ProtocolEvent } from "@langchain/langgraph";
 import type { StructuredToolInterface } from "@langchain/core/tools";
@@ -105,6 +106,7 @@ import { TriggerService } from "./trigger-service.js";
 import { SystemMessage, HumanMessage, type AIMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { GraphManager } from "./graph-manager.js";
+import { resolveSandboxPool } from "./sandbox.js";
 import {
   buildAgentGeneratorPrompt,
   buildSkillGeneratorPrompt,
@@ -171,6 +173,8 @@ export interface AgentHostOptions {
   dataRoot: string;
   modelId?: string;
   pluginsDir?: string | false;
+  /** Shell sandbox for `execute`; defaults to the one `PIZZA_SANDBOX` configures. */
+  sandbox?: SmolvmSandboxPool | false;
 }
 
 export interface McpServerListEntry {
@@ -392,6 +396,7 @@ export class AgentHost {
 
   private skillsDir?: string | false;
   private memoriesDir?: string | false;
+  private sandbox?: SmolvmSandboxPool;
   private builtinSkills?: SkillCatalog;
   private pluginSkills?: SkillCatalog;
   private skillInventory: SkillCatalog = new Map();
@@ -569,6 +574,9 @@ export class AgentHost {
         configurable: { thread_id: threadId, checkpoint_ns: "" },
       });
       await this.persistence.checkpointer.deleteThread(threadId);
+      await this.sandbox?.deleteThread(threadId).catch((error: unknown) => {
+        console.warn(`[sandbox] could not delete the VM for thread ${threadId}:`, error);
+      });
       completed = true;
       return deleted;
     } finally {
@@ -2073,6 +2081,7 @@ export class AgentHost {
           : {}),
         localFolders: () => host.localFolders.list(),
         ...(host.attachments ? { attachmentResolver: host.attachments.resolver } : {}),
+        ...(host.sandbox ? { sandbox: host.sandbox.backend } : {}),
         ...(Object.keys(tools).length > 0 ? { tools } : {}),
         ...(Object.keys(catalog).length > 0 ? { catalog } : {}),
         ...(projection.skills.size > 0 ? { skills: projection.skills } : {}),
@@ -2108,7 +2117,7 @@ export class AgentHost {
     const appDbPath = isMemory ? ":memory:" : resolveLayout(opts.dataRoot).appDb;
     const attachmentsDir = isMemory ? false : resolveLayout(opts.dataRoot).attachmentsDir;
 
-    return new AgentHost(
+    const host = new AgentHost(
       lazyPersistence,
       opts.dataRoot,
       explicitModelId,
@@ -2116,6 +2125,9 @@ export class AgentHost {
       attachmentsDir,
       warm,
     );
+    const sandbox = opts.sandbox === false ? undefined : opts.sandbox ?? resolveSandboxPool();
+    if (sandbox) host.sandbox = sandbox;
+    return host;
   }
 
   async close(): Promise<void> {
@@ -2137,6 +2149,7 @@ export class AgentHost {
     // Disarm before closing transports because their onclose hooks also fire here.
     this.mcpHealth.disarm();
     await this.pluginsImpl?.client?.close().catch(() => {});
+    await this.sandbox?.close();
     this.persistence.close();
     // The app SQLite handle closes last so no drained write lands on a closed DB.
     this.appDb.close();

@@ -215,7 +215,8 @@ in `core/src/protocol-types.ts`:
   inherit the thread's `/` state files and their writes merge back, and the
   memory setting and folder grants apply to the whole thread rather than to one
   agent. Enabled skills are served read-only from the catalog under `/skills/`,
-  so their files never enter a checkpoint:
+  so their files never enter a checkpoint. Only the orchestrator's backend can
+  `execute`; no agent definition can grant it:
 
   ```mermaid
   flowchart LR
@@ -229,7 +230,22 @@ in `core/src/protocol-types.ts`:
     CB -->|"/skills/"| SK["Skill catalog<br/>read-only · not checkpointed"]
     CB -->|"/memories/"| MEM["Memories dir on disk<br/>only while Memory is on in Settings"]
     CB -->|"/local/&lt;id&gt;/"| LF["Granted folders on disk<br/>read-only unless the grant allows writes"]
+    CB -->|"/workspace/"| VM["Thread's smolvm VM<br/>only when PIZZA_SANDBOX=smolvm"]
   ```
+- **Shell sandbox** (opt-in, `PIZZA_SANDBOX=smolvm`) gives the orchestrator
+  DeepAgents' `execute` tool, backed by one persistent [smolvm](https://github.com/smol-machines/smolvm)
+  microVM per thread (`runtime-langgraph/src/smolvm-sandbox.ts`). DeepAgents
+  executes only through a composite's default backend, and ours is checkpoint
+  state, so `buildBackend` forwards `execute` to the sandbox and mounts the
+  guest's own `/workspace` at `/workspace/`, rebasing paths so the file tools and
+  shell commands name the same files. The backend resolves the thread from the
+  run config on each call, so one compiled graph serves every thread. smolvm is
+  driven through its CLI because its npm SDK has no Windows build; the desktop
+  app ships the pinned release in `resources/smolvm` (`scripts/fetch-smolvm.mjs`)
+  for every target except Intel macOS, which smolvm does not build. The VM has no
+  network unless `PIZZA_SANDBOX_NETWORK=1`, stops after 10 idle minutes with its
+  disk kept, and is deleted with its thread. The host still needs a hypervisor:
+  `/dev/kvm` access on Linux, the Windows Hypervisor Platform feature on Windows.
 - **Sandboxed evaluation** is `@langchain/quickjs`'s code interpreter, hosted on a
   worker thread: `runtime-langgraph`'s `code-interpreter-middleware.ts` wraps
   upstream's middleware and keeps only the thread boundary, with `eval-worker.ts`

@@ -24,4 +24,5 @@ plugins-private/
 .claude/worktrees/
 dist-server/
 dist-plugins/
+dist-smolvm/
 apps/web/dist/
