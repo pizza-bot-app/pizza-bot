@@ -2,7 +2,9 @@
 import {
   createDeepAgent,
   createFilesystemMiddleware,
+  isSandboxBackend,
   registerHarnessProfile,
+  type SandboxBackendProtocolV2,
   type SubAgent,
 } from "deepagents";
 import {
@@ -311,13 +313,32 @@ interface AssembledAgent {
   skillSeed?: Record<string, StateFile>;
 }
 
+const SANDBOX_PROMPT = `## Sandbox
+
+The \`execute\` tool runs shell commands in an isolated Linux virtual machine
+dedicated to this conversation, starting in /workspace. Only files under
+/workspace/ are shared between the file tools and \`execute\`; commands cannot
+see any other path the file tools show. Network access may be disabled.`;
+
+function resolveSandbox(sandbox: unknown): SandboxBackendProtocolV2 | undefined {
+  if (sandbox === undefined) return undefined;
+  if (!isSandboxBackend(sandbox)) {
+    throw new Error("RuntimeDeps.sandbox must implement the DeepAgents sandbox protocol.");
+  }
+  return sandbox;
+}
+
 async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promise<AssembledAgent> {
-  // DeepAgents builds one backend shared by the orchestrator and subagents.
-  const backend = buildBackend({
+  const sandbox = resolveSandbox(deps.sandbox);
+  const backendOptions = {
     ...(deps.memoriesDir ? { memoriesDir: deps.memoriesDir } : {}),
     ...(deps.memoryEnabled ? { memoryEnabled: deps.memoryEnabled } : {}),
     ...(deps.localFolders ? { localFolders: deps.localFolders } : {}),
-  });
+    ...(sandbox ? { sandbox } : {}),
+  };
+  const backend = buildBackend({ ...backendOptions, sandboxExecute: true });
+  // Subagents share /workspace/ but not `execute`, which no skill's tool scope can name.
+  const subagentBackend = sandbox ? buildBackend(backendOptions) : backend;
 
   const middleware: unknown[] = [
     ...runLimitMiddleware({
@@ -351,7 +372,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
       model,
       tools: subagent.tools ?? [],
       middleware: [
-        createFilesystemMiddleware({ backend }),
+        createFilesystemMiddleware({ backend: subagentBackend }),
         ...(subagent.middleware ?? []),
       ],
     };
@@ -368,7 +389,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   middleware.push(await codeInterpreterMiddleware(Boolean(subagents?.length)));
 
   const params: Record<string, unknown> = {
-    systemPrompt,
+    systemPrompt: sandbox ? `${systemPrompt}\n\n${SANDBOX_PROMPT}` : systemPrompt,
     backend,
     middleware,
   };
@@ -566,6 +587,16 @@ export async function createPizzaBotAgent(
 export type { LangGraphAgent };
 
 export { buildBackend } from "./backend.js";
+export {
+  SmolvmSandbox,
+  SmolvmSandboxPool,
+  createSmolvmRunner,
+  machineNameForThread,
+  resolveSmolvmCommand,
+  type SmolvmLocation,
+  type SmolvmMachineOptions,
+  type SmolvmRunner,
+} from "./smolvm-sandbox.js";
 
 // Export the production stream path for protocol conformance tests.
 export { streamProtocolEvents, type ProtocolCapableGraph } from "./stream-protocol.js";
