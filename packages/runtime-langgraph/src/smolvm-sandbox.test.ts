@@ -50,10 +50,7 @@ describe("resolveSmolvmCommand", () => {
   it("runs the release binary with its bundled libraries outside Windows", () => {
     const command = resolveSmolvmCommand({ dir: "/opt/smolvm" }, "darwin");
     expect(command.file).toBe(path.join("/opt/smolvm", "smolvm-bin"));
-    expect(command.env).toEqual({
-      SMOLVM_LIB_DIR: path.join("/opt/smolvm", "lib"),
-      SMOLVM_AGENT_ROOTFS: path.join("/opt/smolvm", "agent-rootfs"),
-    });
+    expect(command.env).toEqual({ SMOLVM_LIB_DIR: path.join("/opt/smolvm", "lib") });
   });
 
   it("runs smolvm.exe on Windows, which finds its DLLs beside itself", () => {
