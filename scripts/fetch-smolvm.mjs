@@ -44,6 +44,8 @@ export const SMOLVM_RELEASES = {
 /** Release entries the desktop app never runs: Kubernetes integration and the shell wrapper. */
 const PRUNED = ["kubernetes", "containerd-shim-smolvm-v2", "smolvm"];
 
+const NOTICES_SOURCE = path.join(repoRoot, "apps", "desktop-shell", "smolvm-notices.txt");
+
 export const DEFAULT_OUTPUT = path.join(repoRoot, "apps", "desktop-shell", "dist-smolvm", "smolvm");
 
 export function releaseFor(platform, arch) {
@@ -76,7 +78,9 @@ export async function fetchSmolvm({ platform, arch, output }) {
     return false;
   }
   const marker = path.join(output, ".pizza-smolvm");
-  const stamp = `${release.asset}\nrootfs-tarball\n`;
+  const notices = fs.readFileSync(NOTICES_SOURCE);
+  const noticesDigest = createHash("sha256").update(notices).digest("hex").slice(0, 12);
+  const stamp = `${release.asset}\nrootfs-tarball\nnotices-${noticesDigest}\n`;
   if (fs.existsSync(marker) && fs.readFileSync(marker, "utf8") === stamp) {
     console.log(`[smolvm] ${release.asset} already staged`);
     return true;
@@ -118,6 +122,7 @@ export async function fetchSmolvm({ platform, arch, output }) {
       });
       fs.rmSync(rootfs, { recursive: true, force: true });
     }
+    fs.writeFileSync(path.join(staged, "THIRD_PARTY_NOTICES.txt"), notices);
     fs.writeFileSync(path.join(staged, ".pizza-smolvm"), stamp);
     fs.rmSync(output, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     fs.mkdirSync(path.dirname(output), { recursive: true });

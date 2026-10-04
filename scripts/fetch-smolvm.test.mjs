@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { SMOLVM_RELEASES, SMOLVM_VERSION, fetchSmolvm, releaseFor } from "./fetch-smolvm.mjs";
 
@@ -31,5 +32,16 @@ test("clears a stale stage for a target without a smolvm build", async () => {
     assert.equal(existsSync(output), false);
   } finally {
     rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+test("ships notices for the pinned release and its GPL and LGPL components", () => {
+  const notices = readFileSync(
+    fileURLToPath(new URL("../apps/desktop-shell/smolvm-notices.txt", import.meta.url)),
+    "utf8",
+  );
+  assert.ok(notices.includes(`smolvm ${SMOLVM_VERSION}`));
+  for (const required of ["libkrun", "libkrunfw", "BusyBox", "GNU GENERAL PUBLIC LICENSE", "GNU LESSER GENERAL PUBLIC LICENSE"]) {
+    assert.ok(notices.includes(required), `missing ${required}`);
   }
 });
