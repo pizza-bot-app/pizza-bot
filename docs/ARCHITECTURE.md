@@ -752,11 +752,11 @@ An approval gate that shows a tool name and its arguments asks the reviewer to
 certify content they cannot check: in a drafted email reading "your plan includes
 two free swaps and I've waived the $12 fee", nothing distinguishes the clause that
 came from a contract lookup from the one the model produced unprompted. Grounding
-makes the draft carry its sources and proves the ones it claims, so the tiers below
+makes the draft carry its sources and checks the ones it claims, so the tiers below
 are drawn over the arguments that are about to be dispatched.
 
-The pipeline has four stages, and none of them asks a model to judge another
-model's output:
+The pipeline has five stages. Only the last uses a model, and its answer is
+checked against the source before it is believed:
 
 1. **Evidence ledger.** `runtime-langgraph/src/evidence-ledger-middleware.ts` is a
    `wrapToolCall` middleware bound to any skill-subagent whose tools carry the
@@ -769,7 +769,7 @@ model's output:
    the wrong layer: it cannot see `thread_id` / `run_id`.
 2. **Storage.** `storage/src/evidence.ts` keeps metadata in SQLite and bodies at
    `evidence/<id>`, reaching the runtime as an `EvidenceRecorder` on `RuntimeDeps`.
-   `api-server/src/routes-evidence.ts` exposes two read-only routes; there is
+   `api-server/src/routes-evidence.ts` exposes read-only routes; there is
    deliberately no write route, and deleting a thread drops its bodies with its rows.
 3. **Citation contract.** A skill declares which arguments of a gated tool carry
    verifiable prose (`verifiedArgs: [body]` beside `allowedDecisions` in
@@ -780,52 +780,71 @@ model's output:
    so the MCP server never sees it. `runtime-langgraph/src/skill-grounding.ts`
    appends the contract to the **tool's own description** — a directive injected
    into a tool *result* reads as prompt injection.
-4. **Audit.** `core/src/grounding.ts` is pure and model-free: resolve each quoted
-   span to a unique position in the argument, then ask whether one window of the
-   cited body holds the span's figures, dates and names together with the same
-   polarity. It lives in core because both the reviewer's screen (`apps/web`,
-   live) and the durable record (`api-server/src/approval-audit.ts`, recomputed on
-   approval and never taken from the client) run it, and the two must not be able to
-   report different tiers for the same span.
+4. **Deterministic checks** (`core/src/grounding.ts`, pure). Resolve each quoted span
+   to a unique position in the argument; a cited entry that is missing is `asserted`
+   (`no-entry`), and so is an exact figure — an amount, rate, year or identifier —
+   the cited body never states (`figures`). These checks only ever find reasons to
+   doubt a claim; none of them can mark one green.
+5. **Judge** (`api-server/src/grounding-judge.ts`, contract in
+   `core/src/grounding-judge.ts`). The claims left open go to the model chosen in
+   Settings → Claim checking (`groundingJudge`: `off` by default, `auto`, or a
+   qualified model id). The judge reads each claim beside the passage of its cited
+   body that mentions it, and answers through structured output with a verdict and,
+   for `supported`, quotes copied from the source. A `supported` verdict counts only
+   if every quote is found in the cited body and the quotes hold the claim's
+   figures; otherwise the span is `inconclusive` (`unverified-quote`). Grading starts
+   when a run pauses on an interrupt, the card reads it from
+   `GET /threads/:id/interrupts/:interrupt_id/grounding`, and the approval record
+   (`approval-audit.ts`) reuses the same cached judgement for the text that ships.
 
 | Tier | Means | Reviewer reads it as |
 | :--- | :--- | :--- |
-| `verifiable` | One passage of the cited body holds the span's figures, dates and names together, with the same polarity | Checked. The citation resolves. |
-| `inconclusive` | The words are in the cited body but only scattered across it, or in a passage that disagrees about a negative, or the stored copy was clipped before them | The words are there; what they say may not be. Read the source. |
-| `asserted` | The span cites an entry that is missing, or a body that does not contain it | The draft claims a source that does not hold it. |
+| `verifiable` | The judge found support and every passage it quoted is in the cited body | Checked. Hover to read the passage it rests on. |
+| `inconclusive` | Not settled: checking is off, the judge failed, abstained or quoted something the source does not hold, or the stored copy was clipped | Unchecked. Read the source. |
+| `asserted` | The cited entry is missing, an exact figure is not in it, or the judge found the source does not support the claim | The draft claims a source that does not hold it. |
 | `uncited` | The span carries no citation | Unsourced. May be discourse, may be a claim. |
 | `unresolved` | The quote addresses no unique position in the text that was sent | Never checked; listed beside the record, not drawn on it. |
 
-No percentage is displayed, because none is measured. Five decisions carry the
-design:
+No percentage is displayed, because none is calibrated. The decisions behind it:
 
-- **Only provable grounding is labelled grounded.** The one available ground truth
-  is "this span appears in that body". Entailment scores are model opinions rendered
-  as measurements, and a wrongly green badge is worse than no badge because it
-  manufactures trust. The corollary constrains the reds symmetrically: a gap that
-  rests on absence cannot be established from a body the ledger kept only part of,
-  so a truncated source yields `inconclusive` (`clipped`), not an accusation.
+- **A judge, because matching is not checking.** Requiring a claim's words to
+  co-occur in the source passes the cases that matter most: a JSON `"waived": false`
+  beside "the fee has been waived", a price bound to the wrong plan, "delivered"
+  for a record that says shipped. Measured on pizza-bot-shaped cases, word matching
+  marked 12 of 30 unsupported claims green; a small judge model marked none. The
+  judge is still an opinion, so it must show its work: a verdict is believed only
+  through quotes the server can find in the body, and the reviewer sees them.
+- **A small model, off by default.** The judge reads one passage and answers per
+  claim, which a small model does about as well as the orchestrating one. `auto`
+  picks the newest small tier from the default model's provider
+  (`pickJudgeModel`), skipping nano-class and sub-4B local models, which grade
+  false claims with near-certain confidence. Nothing is graded green until a user
+  turns checking on, since it sends cited sources to the judge's provider.
+- **Every failure is unsettled, never green.** No judge configured, a timeout, a
+  malformed or missing answer, or a model that cannot be built all yield
+  `inconclusive`; a failed judgement is not cached, so the next read asks again.
 - **The model quotes; the code computes the offsets.** Models cannot address their
   own text numerically — Sonnet 5 produced an exactly correct offset pair in 0 of 32
   measured spans and Sonnet 4.5 in 0 of 31, every one of them still *in bounds*,
   which is the dangerous shape. Verbatim quotes resolved present-and-unique 115/115
-  over the same spans, so `indexOf` addresses them; a quote that is absent or
-  repeated degrades rather than guessing.
+  over the same spans, so `indexOf` addresses both the draft's spans and the
+  judge's support quotes; a quote that is absent or repeated degrades rather than
+  guessing.
 - **Citations ride in the tool call's own arguments,** so they are checkpointed,
-  streamed, rendered and edited by machinery that already exists — no new wire type
-  and no new endpoint. Evidence *bodies* stay out of checkpoints, because raw MCP
-  payloads reach hundreds of KB and every checkpoint would rewrite the ledger.
+  streamed, rendered and edited by machinery that already exists. Evidence *bodies*
+  stay out of checkpoints, because raw MCP payloads reach hundreds of KB and every
+  checkpoint would rewrite the ledger. A long body is cut to the passages that
+  mention the claim before the judge reads it, since a judge given 256 KB to find
+  one sentence misses it.
 - **The body cap is applied to the tool output, not just to the stored copy.**
   Clipping only the record would let the model quote text the reviewer's copy lacks;
   clipping once, where the model reads it, keeps the two byte-identical, with the
-  pre-clip size and a `truncated` flag on the entry.
-- **Contradiction is found by cue, not by scope.** A source that denies what a span
-  asserts shares nearly all of its vocabulary, which is why containment alone
-  rendered the worst case green. Locality plus a negation-cue scan catches the
-  common shape and will miss others; it also fires on an incidental `not`, costing a
-  green badge that was owed. That is why the tier is `inconclusive` and not a
-  contradiction verdict: the mechanism finds a reason to distrust a match, never a
-  reason to disbelieve a claim.
+  pre-clip size and a `truncated` flag on the entry. A gap that rests on absence —
+  a missing figure, or a judge finding no support — cannot be established from a
+  clipped body, so it yields `inconclusive` (`clipped`), not an accusation.
+- **One computation, on the server.** The card and the record both read the
+  server's judgement, so they cannot report different tiers for the same span,
+  and the browser never grades a claim.
 
 Two limits are structural. **Coverage is bounded by MCP** — `qualifyInterruptOn`
 accepts only `mcp:` refs, so built-ins (`write_file`, `task`, the eval sandbox)
@@ -837,7 +856,7 @@ bubbles up so the card renders in the main feed.
 The UI vocabulary for all of this is **grounding**; `ProvenanceBadge.tsx` already
 means a skill's origin (`user | plugin | builtin`).
 `ApprovalArguments.tsx` marks spans inside the existing `TextArgumentField`,
-`use-grounding-view.ts` supplies the ledger a card audits against, and
+`use-grounding-view.ts` fetches the server's grading for a card, and
 `ActivityRail.tsx` renders the evidence cards (cited first, collapsed — a run with
 forty tool calls must not open forty cards) and replays each stored verdict over the
 arguments that were sent, through the same renderer as the live card.

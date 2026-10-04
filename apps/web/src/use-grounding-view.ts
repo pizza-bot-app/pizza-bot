@@ -1,41 +1,65 @@
 /**
- * Subscribes the evidence ledger to whatever ids a set of tool arguments cite, so a
- * pending approval and the settled call it becomes read citations the same way.
+ * The server's grading of a pending approval's citations, one view per action. The browser
+ * never grades a claim itself: the tiers come from the same judgement the record will keep.
  */
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { citedEvidenceIds } from "@/projection";
+import type { InterruptGrounding } from "./api-client.js";
 import type { GroundingView } from "./components/ApprovalArguments.js";
 import { useEvidence } from "./use-evidence.js";
 
-export function useGroundingView(args: readonly unknown[]): GroundingView | undefined {
+type Grading =
+  | { status: "checking" }
+  | { status: "ready"; grounding: InterruptGrounding }
+  | { status: "unavailable" };
+
+export function useGroundingViews(
+  interruptId: string,
+  calls: readonly unknown[],
+): Array<GroundingView | undefined> {
   const ledger = useEvidence();
   // Memoized on a primitive so a caller need not stabilize the array it passes.
-  const key = [...new Set(args.flatMap(citedEvidenceIds))].sort().join(" ");
+  const key = [...new Set(calls.flatMap(citedEvidenceIds))].sort().join(" ");
   const citedIds = useMemo(() => (key === "" ? [] : key.split(" ")), [key]);
+  const cites = citedIds.length > 0;
 
-  const { cite } = ledger;
+  const { cite, client, threadId } = ledger;
   useEffect(() => {
-    if (citedIds.length > 0) cite(citedIds);
-  }, [citedIds, cite]);
+    if (cites) cite(citedIds);
+  }, [cites, citedIds, cite]);
 
-  return useMemo<GroundingView | undefined>(() => {
-    if (citedIds.length === 0) return undefined;
-    // A body still in flight must not be reported as a missing source; one the server
-    // would not hand over is only unreadable while its entry is still in the ledger,
-    // since an id that is not there at all is the audit's own missing-source case.
-    const listed = (id: string) =>
-      !ledger.loaded || ledger.entries.some((entry) => entry.id === id);
-    const pending = new Set(
-      citedIds.filter((id) => !ledger.bodies.has(id) && !ledger.unavailable.has(id) && listed(id)),
+  const [grading, setGrading] = useState<Grading>({ status: "checking" });
+  useEffect(() => {
+    if (!cites || !client || !threadId) return;
+    let live = true;
+    setGrading({ status: "checking" });
+    client.getInterruptGrounding(threadId, interruptId).then(
+      (grounding) => {
+        if (live) setGrading(grounding ? { status: "ready", grounding } : { status: "unavailable" });
+      },
+      () => {
+        if (live) setGrading({ status: "unavailable" });
+      },
     );
-    const unavailable = new Set(citedIds.filter((id) => ledger.unavailable.has(id) && listed(id)));
-    return {
-      bodies: ledger.bodies,
-      pending,
-      unavailable,
-      hoveredId: ledger.hoveredId,
-      onHover: ledger.hover,
-      onSelect: ledger.select,
+    return () => {
+      live = false;
     };
-  }, [citedIds, ledger]);
+  }, [cites, client, threadId, interruptId]);
+
+  const count = calls.length;
+  return useMemo(
+    () =>
+      Array.from({ length: count }, (_, index) =>
+        cites
+          ? {
+              status: grading.status,
+              spans: grading.status === "ready" ? grading.grounding.actions[index]?.spans ?? [] : [],
+              hoveredId: ledger.hoveredId,
+              onHover: ledger.hover,
+              onSelect: ledger.select,
+            }
+          : undefined,
+      ),
+    [count, cites, grading, ledger.hoveredId, ledger.hover, ledger.select],
+  );
 }

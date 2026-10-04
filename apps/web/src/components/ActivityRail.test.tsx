@@ -88,6 +88,7 @@ function ledger(
   unavailable: string[] = [],
 ): EvidenceLedger {
   return {
+    threadId: "t1",
     entries,
     loaded: true,
     bodies: new Map(),
@@ -178,7 +179,7 @@ describe("ActivityRail approved actions", () => {
             text: "Annual cost: $1,200.00",
             evidenceId: "ev_1",
             tier: "asserted",
-            gap: { reason: "tokens", tokens: ["Annual", "cost"] },
+            gap: { reason: "figures", tokens: ["$1,200.00"] },
           },
           { arg: "body", text: "Plan: Trattoria Pro", evidenceId: "ev_1", tier: "unresolved" },
         ],
@@ -188,7 +189,7 @@ describe("ActivityRail approved actions", () => {
     expect(html).toContain("grounding-verifiable");
     expect(html).toContain("grounding-asserted");
     expect(html).toContain("grounding-unresolved");
-    expect(html).toContain("Not in the cited source: Annual, cost");
+    expect(html).toContain("Not in the cited source: $1,200.00");
     expect(html).toContain("sent with edits");
   });
 

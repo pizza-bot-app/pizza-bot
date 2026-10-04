@@ -10,6 +10,7 @@ import {
   SlidersHorizontal,
   Sun,
 } from "lucide-react";
+import type { GroundingJudgeSetting } from "@pizza-bot/core";
 import type { ProviderView, ModelsInfo, StatusInfo } from "@/api-client";
 import { ModuleHeader } from "../ModuleHeader.js";
 import { getProviderStatus, ProvidersSettings } from "./ProvidersSettings.js";
@@ -50,6 +51,8 @@ export interface SettingsModuleProps {
   maxToolCalls: number;
   maxSubagentToolCalls: number;
   onToolCallLimitChange: (key: ToolCallLimitKey, value: number) => void;
+  groundingJudge: GroundingJudgeSetting;
+  onGroundingJudgeChange: (value: GroundingJudgeSetting) => void;
   notificationsAvailable: boolean;
   notifyOnRunCompletion: boolean;
   notifyOnActionRequired: boolean;
@@ -166,6 +169,8 @@ export function SettingsModule({
   maxToolCalls,
   maxSubagentToolCalls,
   onToolCallLimitChange,
+  groundingJudge,
+  onGroundingJudgeChange,
   notificationsAvailable,
   notifyOnRunCompletion,
   notifyOnActionRequired,
@@ -345,6 +350,33 @@ export function SettingsModule({
                   value={maxSubagentToolCalls}
                   onChange={(value) => onToolCallLimitChange("maxSubagentToolCalls", value)}
                 />
+                <div className="settings-row">
+                  <div className="settings-row-text">
+                    <label className="settings-row-label" htmlFor="grounding-judge">
+                      {L.groundingJudgeLabel}
+                    </label>
+                    <div className="settings-row-hint">{L.groundingJudgeHint}</div>
+                  </div>
+                  <select
+                    id="grounding-judge"
+                    className="field-input"
+                    value={groundingJudge}
+                    onChange={(e) => onGroundingJudgeChange(e.target.value)}
+                  >
+                    <option value="off">{L.groundingJudgeOff}</option>
+                    <option value="auto">{L.groundingJudgeAuto}</option>
+                    {models.models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.displayName}
+                      </option>
+                    ))}
+                    {groundingJudge !== "off" &&
+                      groundingJudge !== "auto" &&
+                      !models.models.some((model) => model.id === groundingJudge) && (
+                        <option value={groundingJudge}>{groundingJudge}</option>
+                      )}
+                  </select>
+                </div>
               </section>
 
               {notificationsAvailable && (

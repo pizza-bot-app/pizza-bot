@@ -16,10 +16,13 @@ import type { CitedSource, EvidenceEntry } from "@pizza-bot/core";
 import type { ApiClient } from "@/api-client";
 
 export interface EvidenceLedger {
+  threadId: string | null;
+  /** Absent outside a provider, where nothing can be fetched. */
+  client?: ApiClient;
   entries: EvidenceEntry[];
   /** Until the list has arrived, a cited id that is absent is unknown, not missing. */
   loaded: boolean;
-  /** Only for ids a surface asked about; a citation audit resolves quotes against these. */
+  /** Only for ids a surface asked to read. */
   bodies: ReadonlyMap<string, CitedSource>;
   /** Asked-for ids the server would not hand over, so nothing about them was checked. */
   unavailable: ReadonlySet<string>;
@@ -27,7 +30,7 @@ export interface EvidenceLedger {
   citedIds: ReadonlySet<string>;
   hoveredId: string | null;
   selectedId: string | null;
-  /** Declares ids as cited and fetches their bodies for the audit. */
+  /** Declares ids as cited, so the rail lists them first. */
   cite: (ids: readonly string[]) => void;
   loadBodies: (ids: readonly string[]) => void;
   hover: (id: string | null) => void;
@@ -35,6 +38,7 @@ export interface EvidenceLedger {
 }
 
 const NO_LEDGER: EvidenceLedger = {
+  threadId: null,
   entries: [],
   loaded: false,
   bodies: new Map(),
@@ -143,9 +147,8 @@ export function EvidenceProvider({
         for (const id of ids) next.add(id);
         return next;
       });
-      loadBodies(ids);
     },
-    [loadBodies],
+    [],
   );
 
   const select = useCallback(
@@ -158,6 +161,8 @@ export function EvidenceProvider({
 
   const value = useMemo<EvidenceLedger>(
     () => ({
+      threadId,
+      client,
       entries,
       loaded,
       bodies,
@@ -171,6 +176,8 @@ export function EvidenceProvider({
       select,
     }),
     [
+      threadId,
+      client,
       entries,
       loaded,
       bodies,

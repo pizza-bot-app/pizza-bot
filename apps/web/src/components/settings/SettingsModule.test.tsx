@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { SettingsModule } from "./SettingsModule.js";
 
-function renderSettings(maxToolCalls: number, maxSubagentToolCalls: number): string {
+function renderSettings(
+  maxToolCalls: number,
+  maxSubagentToolCalls: number,
+  groundingJudge = "off",
+  models: Array<{ id: string; displayName: string; provider: string }> = [],
+): string {
   return renderToStaticMarkup(
     <SettingsModule
       client={{} as never}
@@ -13,7 +18,7 @@ function renderSettings(maxToolCalls: number, maxSubagentToolCalls: number): str
       onPersonaChange={vi.fn()}
       onPersonaSave={vi.fn()}
       providers={[]}
-      models={{ models: [] } as never}
+      models={{ models } as never}
       allModels={{ models: [] } as never}
       defaultModel={null}
       onProviderSave={async () => undefined}
@@ -26,6 +31,8 @@ function renderSettings(maxToolCalls: number, maxSubagentToolCalls: number): str
       maxToolCalls={maxToolCalls}
       maxSubagentToolCalls={maxSubagentToolCalls}
       onToolCallLimitChange={vi.fn()}
+      groundingJudge={groundingJudge}
+      onGroundingJudgeChange={vi.fn()}
       notificationsAvailable={false}
       notifyOnRunCompletion={false}
       notifyOnActionRequired={false}
@@ -72,5 +79,23 @@ describe("SettingsModule tool-call limit", () => {
 
     expect(html).not.toContain("aria-invalid=\"true\"");
     expect(html).not.toContain("Enter a whole number");
+  });
+});
+
+describe("SettingsModule claim checking", () => {
+  it("ships off, and offers an automatic small model beside every selectable model", () => {
+    const html = renderSettings(40, 80, "off", [
+      { id: "anthropic:claude-haiku-4-5", displayName: "Claude Haiku 4.5", provider: "anthropic" },
+    ]);
+
+    expect(html).toContain('<option value="off" selected="">Off</option>');
+    expect(html).toContain('<option value="auto">Automatic (small model)</option>');
+    expect(html).toContain('<option value="anthropic:claude-haiku-4-5">Claude Haiku 4.5</option>');
+  });
+
+  it("keeps a saved judge selectable when its provider no longer lists it", () => {
+    const html = renderSettings(40, 80, "ollama:qwen3.5:4b");
+
+    expect(html).toContain('<option value="ollama:qwen3.5:4b" selected="">ollama:qwen3.5:4b</option>');
   });
 });

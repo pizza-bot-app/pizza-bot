@@ -2,6 +2,7 @@
 import { createParser } from "eventsource-parser";
 import type {
   ApprovalVerdict,
+  ApprovalVerdictSpan,
   ThreadState,
   Checkpoint,
   TriggerDef,
@@ -487,6 +488,17 @@ export class ApiClient {
 
   async getEvidence(id: string): Promise<EvidenceDoc | undefined> {
     return this.optional("get evidence", `/evidence/${encodeURIComponent(id)}`);
+  }
+
+  /** The server's grading of a pending approval's citations, one entry per action. */
+  async getInterruptGrounding(
+    threadId: string,
+    interruptId: string,
+  ): Promise<InterruptGrounding | undefined> {
+    return this.optional(
+      "get interrupt grounding",
+      `/threads/${encodeURIComponent(threadId)}/interrupts/${encodeURIComponent(interruptId)}/grounding`,
+    );
   }
 
   /** Oldest first; each verdict carries the tiers the audit reached at dispatch. */
@@ -977,6 +989,12 @@ export interface McpToolInfo {
 
 export interface EvidenceDoc extends EvidenceEntry {
   body: string;
+}
+
+export interface InterruptGrounding {
+  /** The judge that graded these spans, or `null` when claim checking is off. */
+  judge: string | null;
+  actions: Array<{ spans: ApprovalVerdictSpan[] }>;
 }
 
 export interface MemoryInfo {

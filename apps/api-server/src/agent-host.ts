@@ -22,6 +22,7 @@ import {
   type SkillAvailability,
   type SkillInfo,
   type ThreadActivityOutcome,
+  pickJudgeModel,
 } from "@pizza-bot/core";
 import { registerBuiltinProviders, UnavailableChatModel } from "@pizza-bot/inference-providers";
 import type { LangGraphAgent } from "@pizza-bot/runtime-langgraph";
@@ -91,6 +92,7 @@ import { TriggerService } from "./trigger-service.js";
 import { SystemMessage, HumanMessage, type AIMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { GraphManager } from "./graph-manager.js";
+import { GroundingJudge, type JudgeModel } from "./grounding-judge.js";
 import {
   buildSkillGeneratorPrompt,
   normalizeSkillDraft,
@@ -343,6 +345,7 @@ export class AgentHost {
   readonly providerConfigs: ProviderConfigStore;
   readonly threadActivity: ThreadActivityStore;
   readonly approvalVerdicts: ApprovalVerdictStore;
+  readonly groundingJudge: GroundingJudge;
   readonly capabilityPreferences: CapabilityPreferencesStore;
   readonly localFolders: LocalFolderStore;
   modelId: string;
@@ -413,6 +416,10 @@ export class AgentHost {
     this.modelId = this.selectDefaultModel();
     if (this.appDb.attachments) this.attachments = this.appDb.attachments;
     if (this.appDb.evidence) this.evidence = this.appDb.evidence;
+    this.groundingJudge = new GroundingJudge({
+      evidence: this.evidence,
+      resolveJudge: () => this.resolveJudgeModel(),
+    });
     this.triggerService = new TriggerService(protocolRunLauncher(this.protocolRuns), this.triggers, {
       isEnabled: () => this.settings.get().enableAutomations,
     });
@@ -446,6 +453,7 @@ export class AgentHost {
           // persists sidebar metadata, making the paused thread discoverable again.
           if (status === "interrupted") {
             interruptIds = await this.readThreadInterruptIds(threadId);
+            void this.prewarmGrounding(threadId);
             this.threadStore.ensure({ threadId });
             this.threadStore.update(threadId, { unread: true, awaitingAction: true });
             await this.runMaintenance.reindexThread(threadId);
@@ -598,6 +606,28 @@ export class AgentHost {
     } catch {
       return resumeFallback || (this.threadStore.get(threadId)?.awaitingAction ?? false);
     }
+  }
+
+  /** A paused action is graded while it waits, so the reviewer's card opens already judged. */
+  private async prewarmGrounding(threadId: string): Promise<void> {
+    try {
+      this.groundingJudge.prewarm(threadId, await this.agent.getState(threadId));
+    } catch (err) {
+      console.error("[grounding] could not read the paused thread to grade it:", err);
+    }
+  }
+
+  private async resolveJudgeModel(): Promise<JudgeModel | undefined> {
+    await this.warmup;
+    const graphs = this.graphs;
+    if (!graphs) return undefined;
+    const setting = this.settings.get().groundingJudge;
+    if (setting === "off") return undefined;
+    const available = setting === "auto" ? (await graphs.listModels()).map((m) => m.id) : [];
+    const id = pickJudgeModel(setting, graphs.defaultModelId(), available);
+    if (!id) return undefined;
+    // Built per read so a reconfigured provider's credentials take effect at once.
+    return { id, model: await graphs.buildModel(id) };
   }
 
   private async readThreadInterruptIds(threadId: string): Promise<string[]> {

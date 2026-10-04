@@ -50,7 +50,7 @@ import {
   formatArgumentLabel,
   parseArgumentDraft,
 } from "./ApprovalArguments.js";
-import { useGroundingView } from "../use-grounding-view.js";
+import { useGroundingViews } from "../use-grounding-view.js";
 import { approvalEditState } from "./approval-edit.js";
 import { useAttachmentSrc } from "../attachment-src.js";
 
@@ -368,7 +368,10 @@ export function InterruptConfirmation({
     if (!editing) setDraft(originalDraft);
   }, [editing, originalDraft]);
 
-  const grounding = useGroundingView([part.input, ...(batch ?? []).map((call) => call.args)]);
+  const grounding = useGroundingViews(
+    part.toolCallId,
+    isBatch ? batch!.map((call) => call.args) : [part.input],
+  );
 
   const submitEdit = () => {
     if (!parsedDraft.ok) return;
@@ -421,13 +424,13 @@ export function InterruptConfirmation({
                       <code className="hitl-tool-id">{call.toolName}</code>
                     )}
                   </div>
-                  <ApprovalArguments value={call.args} grounding={grounding} />
+                  <ApprovalArguments value={call.args} grounding={grounding[i]} />
                 </li>
               );
             })}
           </ul>
         )}
-        {!isBatch && !editing && <ApprovalArguments value={part.input} grounding={grounding} />}
+        {!isBatch && !editing && <ApprovalArguments value={part.input} grounding={grounding[0]} />}
         {editing && (
           <div className="hitl-editor-wrap">
             <ApprovalArgumentEditor

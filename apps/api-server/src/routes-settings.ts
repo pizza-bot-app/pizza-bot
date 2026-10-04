@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import {
+  isGroundingJudgeSetting,
   isMaxToolCalls,
   isPromptAddendum,
   isThemePreference,
@@ -21,6 +22,7 @@ export function settingsRoutes(host: AgentHost): Hono {
     if (typeof raw.enableAutomations === "boolean") patch.enableAutomations = raw.enableAutomations;
     if (isMaxToolCalls(raw.maxToolCalls)) patch.maxToolCalls = raw.maxToolCalls;
     if (isMaxToolCalls(raw.maxSubagentToolCalls)) patch.maxSubagentToolCalls = raw.maxSubagentToolCalls;
+    if (isGroundingJudgeSetting(raw.groundingJudge)) patch.groundingJudge = raw.groundingJudge;
 
     const before = host.settings.get();
     const settings = host.settings.patch(patch);

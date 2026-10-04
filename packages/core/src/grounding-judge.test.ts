@@ -1,0 +1,140 @@
+import { describe, expect, it } from "vitest";
+import {
+  JUDGE_PASSAGE_CHARS,
+  judgeItems,
+  judgePrompt,
+  parseJudgeResponse,
+  pickJudgeModel,
+} from "./grounding-judge.js";
+import type { PendingJudgement } from "./grounding.js";
+import { isGroundingJudgeSetting } from "./settings.js";
+
+const pending = (claim: string, text: string, evidenceId = "ev_1"): PendingJudgement => ({
+  key: `${evidenceId}:${claim}`,
+  claim,
+  evidenceId,
+  source: { text },
+});
+
+describe("judgeItems", () => {
+  it("addresses each claim by a short id and passes a short source whole", () => {
+    const items = judgeItems([pending("Renews 2027", "renewal: 2027"), pending("Fee $12", "fee 12")]);
+    expect(items).toEqual([
+      { id: "c1", claim: "Renews 2027", source: "renewal: 2027" },
+      { id: "c2", claim: "Fee $12", source: "fee 12" },
+    ]);
+    expect(judgePrompt(items)).toContain('<item id="c2">\n<claim>Fee $12</claim>');
+  });
+
+  it("shows the judge the part of a long source that talks about the claim", () => {
+    const noise = "heartbeat ok, queue depth 3. ".repeat(2_000);
+    const needle = "ALERT: the processor returned 503 for 37 minutes; 212 charges were retried.";
+    const body = noise + needle + noise;
+    const [item] = judgeItems([pending("212 charges were retried after the outage", body)]);
+    expect(item!.source.length).toBeLessThanOrEqual(JUDGE_PASSAGE_CHARS + 20);
+    expect(item!.source).toContain("212 charges were retried");
+  });
+});
+
+describe("parseJudgeResponse", () => {
+  const batch = [pending("a", "x"), pending("b", "y"), pending("c", "z")];
+  const items = judgeItems(batch);
+
+  it("maps verdicts back onto the claims they answer", () => {
+    const outcomes = parseJudgeResponse(
+      {
+        verdicts: [
+          { id: "c2", verdict: "unsupported", quotes: [] },
+          { id: "c1", verdict: "supported", quotes: ["x"] },
+          { id: "c3", verdict: "unclear", quotes: [] },
+        ],
+      },
+      items,
+      batch,
+    );
+    expect(outcomes.get(batch[0]!.key)).toEqual({ verdict: "supported", quotes: ["x"] });
+    expect(outcomes.get(batch[1]!.key)).toEqual({ verdict: "unsupported", quotes: [] });
+    expect(outcomes.get(batch[2]!.key)).toEqual({ verdict: "unclear", quotes: [] });
+  });
+
+  it("fails any claim the answer omits, repeats or misshapes, never reading it as support", () => {
+    const outcomes = parseJudgeResponse(
+      {
+        verdicts: [
+          { id: "c1", verdict: "supported", quotes: ["x"] },
+          { id: "c1", verdict: "supported", quotes: ["x"] },
+          { id: "c2", verdict: "probably", quotes: [] },
+        ],
+      },
+      items,
+      batch,
+    );
+    expect([...outcomes.values()]).toEqual([{ failed: true }, { failed: true }, { failed: true }]);
+  });
+
+  it("fails a support claim with more quotes than the contract allows", () => {
+    const outcomes = parseJudgeResponse(
+      { verdicts: [{ id: "c1", verdict: "supported", quotes: ["1", "2", "3", "4"] }] },
+      items,
+      batch,
+    );
+    expect(outcomes.get(batch[0]!.key)).toEqual({ failed: true });
+  });
+
+  it("fails everything when the answer is not the requested shape", () => {
+    for (const raw of [undefined, "supported", { verdicts: "all good" }]) {
+      expect([...parseJudgeResponse(raw, items, batch).values()].every((o) => "failed" in o)).toBe(true);
+    }
+  });
+});
+
+describe("pickJudgeModel", () => {
+  it("judges nothing when claim checking is off, and honours an explicit choice", () => {
+    expect(pickJudgeModel("off", "anthropic:claude-opus-5-5", [])).toBeUndefined();
+    expect(pickJudgeModel("ollama:qwen3.5:4b", "anthropic:claude-opus-5-5", [])).toBe("ollama:qwen3.5:4b");
+  });
+
+  it("picks the newest small model from the default model's provider", () => {
+    const available = [
+      "anthropic:claude-opus-5-5",
+      "anthropic:claude-sonnet-5-5",
+      "anthropic:claude-3-5-haiku-20241022",
+      "anthropic:claude-haiku-4-5-20251001",
+      "openai:gpt-5-mini",
+    ];
+    expect(pickJudgeModel("auto", "anthropic:claude-opus-5-5", available)).toBe(
+      "anthropic:claude-haiku-4-5-20251001",
+    );
+  });
+
+  it("passes over models too small to judge reliably", () => {
+    expect(
+      pickJudgeModel("auto", "openai:gpt-5", ["openai:gpt-5", "openai:gpt-5-nano", "openai:gpt-5-mini"]),
+    ).toBe("openai:gpt-5-mini");
+    expect(
+      pickJudgeModel("auto", "ollama:qwen3.5:27b", [
+        "ollama:qwen3.5:27b",
+        "ollama:qwen3.5:2b",
+        "ollama:qwen3.5:0.8b",
+        "ollama:qwen3.5:4b",
+      ]),
+    ).toBe("ollama:qwen3.5:4b");
+  });
+
+  it("falls back to the default model when its provider offers no small tier", () => {
+    expect(pickJudgeModel("auto", "ollama:llama3.3:70b", ["ollama:llama3.3:70b", "ollama:qwen3.5:2b"])).toBe(
+      "ollama:llama3.3:70b",
+    );
+  });
+});
+
+describe("isGroundingJudgeSetting", () => {
+  it("accepts off, auto and qualified model ids only", () => {
+    expect(isGroundingJudgeSetting("off")).toBe(true);
+    expect(isGroundingJudgeSetting("auto")).toBe(true);
+    expect(isGroundingJudgeSetting("bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0")).toBe(true);
+    expect(isGroundingJudgeSetting("haiku")).toBe(false);
+    expect(isGroundingJudgeSetting("")).toBe(false);
+    expect(isGroundingJudgeSetting(7)).toBe(false);
+  });
+});

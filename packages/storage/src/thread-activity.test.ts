@@ -115,15 +115,24 @@ describe("ApprovalVerdictStore", () => {
     app.close();
   });
 
-  it("keeps the reason an inconclusive span could not be trusted", () => {
+  it("keeps the judge that graded each span, its reasons and its verified support", () => {
     const app = openAppDatabase(":memory:");
     const spans = [
       {
         arg: "body",
         text: "I've waived the $12 fee",
         evidenceId: "ev_1",
-        tier: "inconclusive" as const,
-        gap: { reason: "polarity" as const },
+        tier: "asserted" as const,
+        gap: { reason: "refuted" as const },
+        judge: "anthropic:claude-haiku-4-5",
+      },
+      {
+        arg: "body",
+        text: "renews on March 4, 2027",
+        evidenceId: "ev_1",
+        tier: "verifiable" as const,
+        judge: "anthropic:claude-haiku-4-5",
+        support: ['"renewal_date": "2027-03-04"'],
       },
     ];
     const { verdict: stored } = app.approvalVerdicts.append({

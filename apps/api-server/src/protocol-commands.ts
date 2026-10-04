@@ -63,7 +63,7 @@ export async function dispatchProtocolCommand(opts: {
         runOptsFromCommand(command.params),
       );
       if (audit && paused) {
-        audit.record({
+        void audit.record({
           threadId,
           runId: handle.runId,
           state: paused,

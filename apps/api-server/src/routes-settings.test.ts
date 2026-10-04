@@ -103,6 +103,16 @@ describe("settings routes: GET/PUT /settings", () => {
       .toMatchObject({ maxToolCalls: -1, maxSubagentToolCalls: -1 });
   });
 
+  it("persists the claim judge without rebuilding the warm graph", async () => {
+    const firstAgent = host.agent;
+    const res = await put({ groundingJudge: "auto" });
+    expect(((await res.json()) as { groundingJudge: string }).groundingJudge).toBe("auto");
+    expect(host.agent).toBe(firstAgent);
+
+    const invalid = await put({ groundingJudge: "haiku" });
+    expect(((await invalid.json()) as { groundingJudge: string }).groundingJudge).toBe("auto");
+  });
+
   it("refreshes scheduler state when the automations setting changes", async () => {
     const reload = vi.spyOn(host.triggerService, "reload");
 

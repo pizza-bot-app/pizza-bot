@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { CitedSource, GroundingSpan } from "@pizza-bot/core";
+import type { AuditedSpan } from "@pizza-bot/core";
 import {
   groundingSpans,
-  segmentGroundedText,
+  segmentAuditedText,
   withoutGroundingArgument,
   type GroundingGap,
   type GroundingSegment,
@@ -12,23 +12,21 @@ import {
 type JsonPath = Array<string | number>;
 
 /**
- * What a rendered citation needs beyond its tier: the link back to its evidence card. The
- * stored record renders through this too, with both display sets empty — a verdict already
- * reached must not be redrawn by what this browser can or cannot load now.
+ * What a rendered citation needs beyond its tier: whether the server has graded it yet, and
+ * the link back to its evidence card. The stored record renders through this too, always
+ * `ready` — a verdict already reached must not be redrawn by what this browser can load now.
  */
 export interface GroundingLinks {
-  /** Ids whose body has not arrived; their spans claim nothing yet. */
-  pending: ReadonlySet<string>;
-  /** Ids whose body could not be read, so their spans were never checked either way. */
-  unavailable: ReadonlySet<string>;
+  /** `checking` until the server's grading arrives; `unavailable` if it never will. */
+  status: "checking" | "ready" | "unavailable";
   hoveredId: string | null;
   onHover: (id: string | null) => void;
   onSelect: (id: string) => void;
 }
 
-/** What the reviewer needs to read a live citation: the links, plus the bodies to audit. */
+/** A live citation: the links, plus the tiers the server graded for this call's spans. */
 export interface GroundingView extends GroundingLinks {
-  bodies: ReadonlyMap<string, CitedSource>;
+  spans: readonly AuditedSpan[];
 }
 
 interface ApprovalArgumentsProps {
@@ -219,31 +217,45 @@ export type SpanTier = GroundingTier | "pending" | "unchecked";
 export const UNBACKED_TITLE = "No citation covers this figure, so no source was checked for it.";
 
 /** One wording per tier, so the reviewer's card and the durable record read alike. */
-export function groundingTitle(tier: SpanTier, gap?: GroundingGap): string {
+export function groundingTitle(
+  tier: SpanTier,
+  gap?: GroundingGap,
+  support?: readonly string[],
+): string {
+  if (tier === "verifiable" && support && support.length > 0) {
+    const quoted = support.map((quote) => `“${quote}”`).join("\n");
+    return `${groundingTitle(tier, gap)}\n\nThe source says:\n${quoted}`;
+  }
   if (tier === "pending") return "Checking the cited source…";
   if (tier === "unchecked") {
-    return "The cited source could not be loaded, so nothing here was checked.";
+    return "The check could not be loaded, so nothing here was checked.";
   }
   if (tier === "unresolved") {
     return "This quote is not in the text that was sent, so it was never checked against the source.";
   }
   if (tier === "verifiable") {
-    return "Every figure, date and name here appears together in the cited source. Click to read it.";
+    return "The claim checker found this in the cited source, and the passage it quoted is there. Click to read it.";
   }
-  if (gap?.reason === "polarity") {
-    return "The cited source may contradict this: the passage holding these words disagrees about a negative. Click to read it.";
+  switch (gap?.reason) {
+    case "refuted":
+      return "The claim checker found that the cited source does not support this. Click to read it.";
+    case "figures":
+      return `Not in the cited source: ${gap.tokens.join(", ")}. Click to read it.`;
+    case "clipped":
+      return "The cited source was too large to keep in full, and this is not in the part that was kept — so it could not be checked either way. Click to read what was kept.";
+    case "no-entry":
+      return "The cited source is not in this thread's ledger.";
+    case "unjudged":
+      return "Claim checking is off, so this citation was not checked. Turn it on in Settings.";
+    case "judge-error":
+      return "The claim checker could not be reached, so this was not checked. Click to read the source.";
+    case "unclear":
+      return "The claim checker could not tell whether the cited source supports this. Click to read it.";
+    case "unverified-quote":
+      return "The claim checker called this supported, but the passage it quoted is not in the cited source, so the verdict was not trusted. Click to read it.";
+    default:
+      return "Nothing in this phrase could be checked against the cited source.";
   }
-  if (gap?.reason === "scattered") {
-    return "These words are in the cited source but not together, so no passage in it states this. Click to read it.";
-  }
-  if (gap?.reason === "clipped") {
-    return "The cited source was too large to keep in full, and this is not in the part that was kept — so it could not be checked either way. Click to read what was kept.";
-  }
-  if (gap?.reason === "no-entry") return "The cited source is not in this thread's ledger.";
-  if (gap?.reason === "tokens" && gap.tokens.length > 0) {
-    return `Not in the cited source: ${gap.tokens.join(", ")}. Click to read it.`;
-  }
-  return "Nothing in this phrase could be checked against the cited source.";
 }
 
 function GroundedSpan({
@@ -254,11 +266,8 @@ function GroundedSpan({
   links: GroundingLinks;
 }) {
   const id = segment.evidenceId!;
-  const tier: SpanTier = links.unavailable.has(id)
-    ? "unchecked"
-    : links.pending.has(id)
-      ? "pending"
-      : segment.tier;
+  const tier: SpanTier =
+    links.status === "unavailable" ? "unchecked" : links.status === "checking" ? "pending" : segment.tier;
   // A button is an atomic inline box in Chromium, so a multi-word citation would
   // refuse to wrap mid-span; only a real inline element flows with the sentence.
   return (
@@ -266,7 +275,7 @@ function GroundedSpan({
       role="button"
       tabIndex={0}
       className={`grounding-span grounding-${tier}${links.hoveredId === id ? " hovered" : ""}`}
-      title={groundingTitle(tier, segment.gap)}
+      title={groundingTitle(tier, segment.gap, segment.support)}
       onMouseEnter={() => links.onHover(id)}
       onMouseLeave={() => links.onHover(null)}
       onFocus={() => links.onHover(id)}
@@ -315,13 +324,10 @@ function GroundedText({
   grounding,
 }: {
   text: string;
-  spans: readonly GroundingSpan[];
+  spans: readonly AuditedSpan[];
   grounding: GroundingView;
 }) {
-  const segments = useMemo(
-    () => segmentGroundedText(text, spans, grounding.bodies),
-    [text, spans, grounding.bodies],
-  );
+  const segments = useMemo(() => segmentAuditedText(text, spans), [text, spans]);
   return (
     <span className="approval-argument-scalar">
       <span className="approval-argument-value">
@@ -332,7 +338,12 @@ function GroundedText({
 }
 
 export function ApprovalArguments({ value, grounding }: ApprovalArgumentsProps) {
-  const spans = groundingSpans(value);
+  // Until the server's grading arrives, the declared spans still mark where citations sit.
+  const declared = groundingSpans(value);
+  const spans: readonly AuditedSpan[] =
+    grounding?.status === "ready"
+      ? grounding.spans
+      : declared.map((span) => ({ ...span, tier: "inconclusive" as const }));
   // Citations are provenance, not content: they annotate the arguments, never join them.
   const shown = withoutGroundingArgument(value);
 

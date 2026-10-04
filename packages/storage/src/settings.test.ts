@@ -81,6 +81,18 @@ describe("SettingsStore", () => {
     app.close();
   });
 
+  it("persists the claim judge and ignores a stored value that names no model", () => {
+    const app = openAppDatabase(":memory:");
+    expect(app.settings.get().groundingJudge).toBe("off");
+    app.settings.patch({ groundingJudge: "ollama:qwen3.5:4b" });
+    expect(app.settings.get().groundingJudge).toBe("ollama:qwen3.5:4b");
+    app.db
+      .prepare("UPDATE app_settings SET value = '\"haiku\"' WHERE key = 'groundingJudge'")
+      .run();
+    expect(app.settings.get().groundingJudge).toBe(DEFAULT_SETTINGS.groundingJudge);
+    app.close();
+  });
+
   it("falls back to the default persona for an over-long stored value", () => {
     const app = openAppDatabase(":memory:");
     const tooLong = "x".repeat(8001);

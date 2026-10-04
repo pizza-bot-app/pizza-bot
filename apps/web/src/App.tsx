@@ -487,6 +487,8 @@ export function App() {
                 maxToolCalls={agentSettings.maxToolCalls}
                 maxSubagentToolCalls={agentSettings.maxSubagentToolCalls}
                 onToolCallLimitChange={agentSettings.setToolCallLimit}
+                groundingJudge={agentSettings.groundingJudge}
+                onGroundingJudgeChange={agentSettings.setGroundingJudge}
                 notificationsAvailable={desktopNotifications !== undefined}
                 notifyOnRunCompletion={
                   desktopNotifications?.notifyOnRunCompletion ?? true
