@@ -10,6 +10,7 @@ import {
   dialog,
 } from "electron";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
@@ -395,6 +396,9 @@ async function bootSidecar(dataRoot: string, apiToken: string): Promise<Sidecar>
           nativeModulesPath: path.join(process.resourcesPath, "app.asar.unpacked", "node_modules"),
           pluginsDir: path.join(process.resourcesPath, "plugins"),
           builtinSkillsDir: path.join(process.resourcesPath, "skills"),
+          ...(existsSync(path.join(process.resourcesPath, "smolvm"))
+            ? { smolvmDir: path.join(process.resourcesPath, "smolvm") }
+            : {}),
         }
       : {}),
     onFatal: (err) => {

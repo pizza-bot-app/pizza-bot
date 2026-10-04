@@ -51,6 +51,12 @@ export interface RuntimeDeps {
    * state never contains file bytes. Absence disables inlining.
    */
   attachmentResolver?: AttachmentResolver;
+  /**
+   * A DeepAgents `SandboxBackendProtocolV2` with guest-absolute paths, mounted at
+   * `/workspace/` and given to the orchestrator's `execute` tool. Absence leaves
+   * the agent without shell execution.
+   */
+  sandbox?: unknown;
   /** Per-run root-agent tool-call limit; -1 disables the limiter. */
   maxToolCalls?: number;
   /** Per-run subagent tool-call limit; -1 disables the limiter. */

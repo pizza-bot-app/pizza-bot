@@ -1,4 +1,4 @@
-/** Routes durable memories and approved local folders outside checkpoint state. */
+/** Routes durable memories, approved local folders and the sandbox workspace outside checkpoint state. */
 import { lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   type BackendProtocolV2,
   type DeleteResult,
   type EditResult,
+  type ExecuteResponse,
   type FileDownloadResponse,
   type FileInfo,
   type FileUploadResponse,
@@ -17,6 +18,7 @@ import {
   type LsResult,
   type ReadRawResult,
   type ReadResult,
+  type SandboxBackendProtocolV2,
   type WriteResult,
 } from "deepagents";
 import {
@@ -31,7 +33,14 @@ export interface BuildBackendOptions {
   memoryEnabled?: () => boolean;
   /** Live grants mounted beneath `/local/<id>/`. */
   localFolders?: () => readonly LocalFolder[];
+  /** Shell sandbox whose guest-absolute `/workspace` is mounted at `/workspace/`. */
+  sandbox?: SandboxBackendProtocolV2;
+  /** Exposes the sandbox's `execute`; off, `/workspace/` is file access only. */
+  sandboxExecute?: boolean;
 }
+
+const WORKSPACE_ROUTE = "/workspace/";
+const WORKSPACE_ROOT = "/workspace";
 
 const MEMORY_DISABLED_ERROR = "Durable memory is disabled in Settings.";
 const LOCAL_FOLDER_READ_ONLY_ERROR = "Local folders are read-only.";
@@ -619,6 +628,128 @@ class LocalFoldersBackend implements BackendProtocolV2 {
   }
 }
 
+/**
+ * Mounts the sandbox's own `/workspace` at the `/workspace/` route. The composite
+ * strips the route prefix on the way in and re-adds it on the way out, while
+ * shell commands see guest paths, so paths are rebased in both directions to
+ * keep `/workspace/x` naming the same file for the file tools and `execute`.
+ */
+class WorkspaceRoute implements BackendProtocolV2 {
+  constructor(private readonly sandbox: SandboxBackendProtocolV2) {}
+
+  private guest(routePath: string): string {
+    return routePath === "/" ? WORKSPACE_ROOT : `${WORKSPACE_ROOT}${routePath}`;
+  }
+
+  private route<T extends { path: string }>(value: T): T {
+    if (value.path === WORKSPACE_ROOT) return { ...value, path: "/" };
+    return value.path.startsWith(`${WORKSPACE_ROOT}/`)
+      ? { ...value, path: value.path.slice(WORKSPACE_ROOT.length) }
+      : value;
+  }
+
+  async ls(routePath: string): Promise<LsResult> {
+    const result = await this.sandbox.ls(this.guest(routePath));
+    return result.files ? { ...result, files: result.files.map((file) => this.route(file)) } : result;
+  }
+
+  read(routePath: string, offset?: number, limit?: number): Promise<ReadResult> {
+    return Promise.resolve(this.sandbox.read(this.guest(routePath), offset, limit));
+  }
+
+  readRaw(routePath: string): Promise<ReadRawResult> {
+    return Promise.resolve(this.sandbox.readRaw(this.guest(routePath)));
+  }
+
+  async grep(
+    pattern: string,
+    routePath = "/",
+    glob?: string | null,
+    maxCount?: number | null,
+  ): Promise<GrepResult> {
+    const result = await this.sandbox.grep(pattern, this.guest(routePath), glob, maxCount);
+    return result.matches
+      ? { ...result, matches: result.matches.map((match) => this.route(match)) }
+      : result;
+  }
+
+  /** Sandbox glob results are relative to the search directory, unlike its other listings. */
+  async glob(pattern: string, routePath = "/"): Promise<GlobResult> {
+    const base = this.guest(routePath);
+    const result = await this.sandbox.glob(pattern, base);
+    return result.files
+      ? {
+          ...result,
+          files: result.files.map((file) =>
+            this.route(
+              file.path.startsWith("/") ? file : { ...file, path: path.posix.join(base, file.path) },
+            ),
+          ),
+        }
+      : result;
+  }
+
+  write(routePath: string, content: string): Promise<WriteResult> {
+    return Promise.resolve(this.sandbox.write(this.guest(routePath), content));
+  }
+
+  edit(
+    routePath: string,
+    oldString: string,
+    newString: string,
+    replaceAll?: boolean,
+  ): Promise<EditResult> {
+    return Promise.resolve(
+      this.sandbox.edit(this.guest(routePath), oldString, newString, replaceAll),
+    );
+  }
+
+  async delete(routePath: string): Promise<DeleteResult> {
+    const result = await this.sandbox.delete?.(this.guest(routePath));
+    return result ?? { error: "Delete is not supported by the sandbox." };
+  }
+
+  async uploadFiles(files: Array<[string, Uint8Array]>): Promise<FileUploadResponse[]> {
+    const responses = await this.sandbox.uploadFiles?.(
+      files.map(([routePath, content]) => [this.guest(routePath), content]),
+    );
+    return responses
+      ? responses.map((response) => this.route(response))
+      : files.map(([routePath]) => ({ path: routePath, error: "permission_denied" }));
+  }
+
+  async downloadFiles(paths: string[]): Promise<FileDownloadResponse[]> {
+    const responses = await this.sandbox.downloadFiles?.(
+      paths.map((routePath) => this.guest(routePath)),
+    );
+    return responses
+      ? responses.map((response) => this.route(response))
+      : paths.map((routePath) => ({ path: routePath, content: null, error: "permission_denied" }));
+  }
+}
+
+/**
+ * DeepAgents only executes through a composite's default backend, which here is
+ * checkpointed state, so execution is forwarded to the sandbox explicitly.
+ */
+class ExecutingCompositeBackend extends CompositeBackend {
+  constructor(
+    base: AnyBackendProtocol,
+    routes: Record<string, AnyBackendProtocol>,
+    private readonly sandbox: SandboxBackendProtocolV2,
+  ) {
+    super(base, routes);
+  }
+
+  override get id(): string {
+    return this.sandbox.id;
+  }
+
+  override execute(command: string): Promise<ExecuteResponse> {
+    return Promise.resolve(this.sandbox.execute(command));
+  }
+}
+
 export function buildBackend(opts: BuildBackendOptions): AnyBackendProtocol {
   const base = new StateBackend();
   const routes: Record<string, AnyBackendProtocol> = {};
@@ -634,6 +765,12 @@ export function buildBackend(opts: BuildBackendOptions): AnyBackendProtocol {
   }
   if (opts.localFolders) {
     routes["/local/"] = new LocalFoldersBackend(opts.localFolders);
+  }
+  if (opts.sandbox) {
+    routes[WORKSPACE_ROUTE] = new WorkspaceRoute(opts.sandbox);
+    if (opts.sandboxExecute) {
+      return new ExecutingCompositeBackend(base, routes, opts.sandbox);
+    }
   }
   return Object.keys(routes).length > 0
     ? new CompositeBackend(base, routes)

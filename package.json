@@ -32,6 +32,7 @@
     "backend:smoke": "node scripts/smoke-remote-backend.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
     "browser:install": "node plugins/playwright-mcp/install-browser.mjs",
+    "smolvm:fetch": "node scripts/fetch-smolvm.mjs",
     "predev": "npm run browser:install",
     "dev": "node scripts/dev.mjs",
     "shell": "npm start -w @pizza-bot/cli --",
