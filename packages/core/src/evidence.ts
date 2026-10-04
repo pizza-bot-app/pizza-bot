@@ -10,11 +10,16 @@ export const MAX_EVIDENCE_BODY_BYTES = 256 * 1024;
 /** The citation argument a grounded tool's schema carries, stripped before dispatch. */
 export const GROUNDING_ARGUMENT = "_grounding";
 
-/** One cited span, addressed by quoting `text` verbatim out of `arg`. */
+/**
+ * One cited span, addressed by quoting `text` verbatim out of `arg`, and resting on the
+ * numbered `lines` of one evidence entry. Model-written, so `lines` may be missing or wrong;
+ * the audit reports that rather than trusting it.
+ */
 export interface GroundingSpan {
   arg: string;
   text: string;
   evidenceId: string;
+  lines?: number[];
 }
 
 export const MAX_EVIDENCE_EXCERPT_CHARS = 280;
@@ -87,7 +92,8 @@ export function evidenceExcerpt(
   body: string,
   maxChars = MAX_EVIDENCE_EXCERPT_CHARS,
 ): string {
-  const collapsed = body.replace(/\s+/g, " ").trim();
+  // Line numbers are addressing, not content.
+  const collapsed = body.replace(/^\[\d+\] /gm, "").replace(/\s+/g, " ").trim();
   return collapsed.length > maxChars
     ? `${collapsed.slice(0, maxChars - 1)}…`
     : collapsed;

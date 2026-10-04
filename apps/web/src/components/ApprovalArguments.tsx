@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { AuditedSpan } from "@pizza-bot/core";
+import type { AuditedSpan, SupportLine } from "@pizza-bot/core";
 import {
   groundingSpans,
   segmentAuditedText,
@@ -21,7 +21,8 @@ export interface GroundingLinks {
   status: "checking" | "ready" | "unavailable";
   hoveredId: string | null;
   onHover: (id: string | null) => void;
-  onSelect: (id: string) => void;
+  /** Opens the evidence card, with the span's cited lines picked out. */
+  onSelect: (id: string, lines?: readonly number[]) => void;
 }
 
 /** A live citation: the links, plus the tiers the server graded for this call's spans. */
@@ -220,11 +221,11 @@ export const UNBACKED_TITLE = "No citation covers this figure, so no source was 
 export function groundingTitle(
   tier: SpanTier,
   gap?: GroundingGap,
-  support?: readonly string[],
+  support?: readonly SupportLine[],
 ): string {
   if (tier === "verifiable" && support && support.length > 0) {
-    const quoted = support.map((quote) => `“${quote}”`).join("\n");
-    return `${groundingTitle(tier, gap)}\n\nThe source says:\n${quoted}`;
+    const lines = support.map((line) => `[${line.line}] ${line.text}`).join("\n");
+    return `${groundingTitle(tier, gap)}\n\nThe source says:\n${lines}`;
   }
   if (tier === "pending") return "Checking the cited source…";
   if (tier === "unchecked") {
@@ -234,15 +235,17 @@ export function groundingTitle(
     return "This quote is not in the text that was sent, so it was never checked against the source.";
   }
   if (tier === "verifiable") {
-    return "The claim checker found this in the cited source, and the passage it quoted is there. Click to read it.";
+    return "The claim checker found this in the cited lines of the source. Click to read them.";
   }
   switch (gap?.reason) {
     case "refuted":
-      return "The claim checker found that the cited source does not support this. Click to read it.";
+      return "The claim checker found that the cited lines do not support this. Click to read them.";
     case "figures":
-      return `Not in the cited source: ${gap.tokens.join(", ")}. Click to read it.`;
-    case "clipped":
-      return "The cited source was too large to keep in full, and this is not in the part that was kept — so it could not be checked either way. Click to read what was kept.";
+      return `Not in the cited lines: ${gap.tokens.join(", ")}. Click to read them.`;
+    case "bad-lines":
+      return "This citation names lines the cited source does not have, so it points at nothing.";
+    case "broad-citation":
+      return "This cites too much of the source to check, so it was not checked. Click to read it.";
     case "no-entry":
       return "The cited source is not in this thread's ledger.";
     case "unjudged":
@@ -251,8 +254,8 @@ export function groundingTitle(
       return "The claim checker could not be reached, so this was not checked. Click to read the source.";
     case "unclear":
       return "The claim checker could not tell whether the cited source supports this. Click to read it.";
-    case "unverified-quote":
-      return "The claim checker called this supported, but the passage it quoted is not in the cited source, so the verdict was not trusted. Click to read it.";
+    case "unverified-support":
+      return "The claim checker called this supported, but the lines it relied on do not state what the claim does, so the verdict was not trusted. Click to read them.";
     default:
       return "Nothing in this phrase could be checked against the cited source.";
   }
@@ -280,11 +283,11 @@ function GroundedSpan({
       onMouseLeave={() => links.onHover(null)}
       onFocus={() => links.onHover(id)}
       onBlur={() => links.onHover(null)}
-      onClick={() => links.onSelect(id)}
+      onClick={() => links.onSelect(id, segment.lines)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          links.onSelect(id);
+          links.onSelect(id, segment.lines);
         }
       }}
     >

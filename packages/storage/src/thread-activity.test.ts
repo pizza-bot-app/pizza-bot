@@ -132,7 +132,8 @@ describe("ApprovalVerdictStore", () => {
         evidenceId: "ev_1",
         tier: "verifiable" as const,
         judge: "anthropic:claude-haiku-4-5",
-        support: ['"renewal_date": "2027-03-04"'],
+        lines: [5],
+        support: [{ line: 5, text: 'renewal_date: "2027-03-04"' }],
       },
     ];
     const { verdict: stored } = app.approvalVerdicts.append({

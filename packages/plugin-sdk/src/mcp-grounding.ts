@@ -13,9 +13,9 @@ function isJsonSchema(value: unknown): value is JsonSchema {
 }
 
 /**
- * A span addresses its text by quoting it, not by offset: models reliably quote
- * themselves verbatim and reliably miscount characters, and an in-bounds but
- * misplaced offset renders as provenance that looks checked and is not.
+ * A span addresses its own text by quoting it, not by offset: models reliably quote
+ * themselves verbatim and reliably miscount characters. It addresses its evidence by the
+ * line numbers the evidence was handed to it with, which it copies rather than counts.
  */
 function groundingSchema(verifiedArgs: readonly string[]): JsonSchema {
   const argList = verifiedArgs.map((arg) => `\`${arg}\``).join(", ");
@@ -42,8 +42,15 @@ function groundingSchema(verifiedArgs: readonly string[]): JsonSchema {
           type: "string",
           description: "Id of the evidence entry supporting the span. Never invent an id.",
         },
+        lines: {
+          type: "array",
+          items: { type: "integer" },
+          description:
+            "The [n] numbers of the lines in that evidence entry the span is based on: every " +
+            "line a reviewer must read to check it, and no others.",
+        },
       },
-      required: ["arg", "text", "evidenceId"],
+      required: ["arg", "text", "evidenceId", "lines"],
       additionalProperties: false,
     },
   };
@@ -60,6 +67,8 @@ export function groundingContract(verifiedArgs: readonly string[]): string {
     "    and long enough to be unique in it. An exact search of the argument must find it, so",
     "    quote the sentence you wrote, never the evidence's wording.",
     "  - `evidenceId`: the id of the evidence entry it came from. Never invent an id.",
+    "  - `lines`: the [n] numbers of the lines in that entry the span rests on — every line a",
+    "    reviewer must read to check it, and no others.",
     "Cite only spans an evidence entry actually supports; leave your own connective prose uncited.",
   ].join("\n");
 }

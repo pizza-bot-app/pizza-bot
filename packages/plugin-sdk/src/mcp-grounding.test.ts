@@ -31,7 +31,7 @@ describe("injectGroundingArgument", () => {
     expect(grounding.type).toBe("array");
     const item = grounding.items as { properties: Record<string, { enum?: string[] }>; required: string[] };
     expect(item.properties.arg?.enum).toEqual(["body", "subject"]);
-    expect(item.required).toEqual(["arg", "text", "evidenceId"]);
+    expect(item.required).toEqual(["arg", "text", "evidenceId", "lines"]);
     // Citing is optional; a required argument would make an uncited draft impossible.
     expect((injected as { required: string[] }).required).toEqual(["to", "body"]);
   });
@@ -40,7 +40,7 @@ describe("injectGroundingArgument", () => {
     const item = groundingOf(injectGroundingArgument(sendMail, ["body"])).items as {
       properties: Record<string, unknown>;
     };
-    expect(Object.keys(item.properties)).toEqual(["arg", "text", "evidenceId"]);
+    expect(Object.keys(item.properties)).toEqual(["arg", "text", "evidenceId", "lines"]);
   });
 
   it("leaves the schema alone when there is nothing to cite", () => {

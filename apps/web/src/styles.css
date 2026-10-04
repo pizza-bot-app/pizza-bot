@@ -611,6 +611,10 @@ button.sidebar-folder-row:hover,
   background: var(--code-bg); border-radius: 6px; max-height: 320px; overflow: auto;
   white-space: pre-wrap; word-break: break-word; color: var(--text);
 }
+.evidence-line.cited {
+  background: color-mix(in oklch, var(--brand) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--brand);
+}
 .evidence-note { font-size: 10.5px; color: var(--warning); padding: 0 0 4px; }
 
 .verdict-cards { list-style: none; margin: 0; padding: 0; }

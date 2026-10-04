@@ -8,7 +8,7 @@ import {
   withoutGroundingArgument,
 } from "./grounding.js";
 
-const span = (text: string, evidenceId = "ev_1", arg = "body") => ({ arg, text, evidenceId });
+const span = (text: string, evidenceId = "ev_1", arg = "body") => ({ arg, text, evidenceId, lines: [1] });
 
 const audited = (text: string, tier: AuditedSpan["tier"], evidenceId = "ev_1"): AuditedSpan => ({
   ...span(text, evidenceId),
@@ -63,11 +63,17 @@ describe("withoutGroundingArgument", () => {
 describe("segmentAuditedText", () => {
   it("replays the stored tier and its verified support rather than grading the text again", () => {
     const segments = segmentAuditedText("We renew in 2027.", [
-      { ...audited("renew in 2027", "verifiable"), judge: "test:judge", support: ["renewal: 2027"] },
+      { ...audited("renew in 2027", "verifiable"), judge: "test:judge", lines: [3], support: [{ line: 3, text: "renewal: 2027" }] },
     ]);
     expect(segments).toEqual([
       { text: "We ", tier: "uncited" },
-      { text: "renew in 2027", tier: "verifiable", evidenceId: "ev_1", support: ["renewal: 2027"] },
+      {
+        text: "renew in 2027",
+        tier: "verifiable",
+        evidenceId: "ev_1",
+        lines: [3],
+        support: [{ line: 3, text: "renewal: 2027" }],
+      },
       { text: ".", tier: "uncited" },
     ]);
   });

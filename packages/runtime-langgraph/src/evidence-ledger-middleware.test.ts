@@ -42,7 +42,7 @@ const result = (content: string, name = "mail__search") =>
   new ToolMessage({ content, tool_call_id: "call_1", name });
 
 describe("evidenceLedgerMiddleware", () => {
-  it("records a tool result and stamps it with the id the model must cite", async () => {
+  it("hands the model numbered lines under the id to cite, and records exactly that text", async () => {
     const { wrap, recorded } = ledger();
     const out = (await wrap(request("mail__search", { query: "renewal" }), async () =>
       result("The renewal date is March 4th."))) as ToolMessage;
@@ -53,12 +53,12 @@ describe("evidenceLedgerMiddleware", () => {
         runId: "r1",
         toolRef: "mcp:mail:search",
         breadcrumb: "mcp:mail:search (query: renewal)",
-        body: "The renewal date is March 4th.",
+        body: "[1] The renewal date is March 4th.",
         bytes: 30,
         truncated: false,
       },
     ]);
-    expect(out.content).toBe("[evidence ev_1]\nThe renewal date is March 4th.");
+    expect(out.content).toBe("[evidence ev_1]\n[1] The renewal date is March 4th.");
     expect(out.tool_call_id).toBe("call_1");
     expect(out.name).toBe("mail__search");
     expect(ToolMessage.isInstance(out)).toBe(true);
@@ -133,24 +133,29 @@ describe("evidenceLedgerMiddleware", () => {
     const out = (await wrap(request("mail__search"), async () =>
       result("0123456789"))) as ToolMessage;
 
-    expect(recorded[0]?.body).toBe("01234567");
+    expect(recorded[0]?.body).toBe("[1] 01234567");
     expect(recorded[0]?.bytes).toBe(10);
     expect(recorded[0]?.truncated).toBe(true);
-    expect(out.content).toBe("[evidence ev_1 — clipped to 262144 of 10 bytes]\n01234567");
+    expect(out.content).toBe("[evidence ev_1 — clipped to 262144 of 10 bytes]\n[1] 01234567");
   });
 
-  it("prefixes a marker block when the result is structured content", async () => {
+  it("numbers a JSON payload by field, keeping each nested row on one line", async () => {
+    const { wrap, recorded } = ledger();
+    const payload = JSON.stringify({ plan: "Standard", invoices: [{ id: "INV-1", status: "failed" }] });
+    await wrap(request("mail__search"), async () => result(payload));
+    expect(recorded[0]?.body).toBe('[1] plan: "Standard"\n[2] invoices[0]: {id="INV-1", status="failed"}');
+  });
+
+  it("numbers the text of structured content and keeps any part that is not text", async () => {
     const { wrap } = ledger();
+    const image = { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } };
     const structured = new ToolMessage({
-      content: [{ type: "text", text: "a finding" }],
+      content: [{ type: "text", text: "a finding" }, image] as never,
       tool_call_id: "call_1",
       name: "mail__search",
     });
     const out = (await wrap(request("mail__search"), async () => structured)) as ToolMessage;
-    expect(out.content).toEqual([
-      { type: "text", text: "[evidence ev_1]" },
-      { type: "text", text: "a finding" },
-    ]);
+    expect(out.content).toEqual([{ type: "text", text: "[evidence ev_1]\n[1] a finding" }, image]);
   });
 });
 

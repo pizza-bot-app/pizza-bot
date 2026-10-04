@@ -1,9 +1,10 @@
 /**
  * Citation audit: resolve each cited span to a unique position in the argument it quotes,
- * settle what is decidable without a model, and grade the rest from a judge's verdict whose
- * supporting quotes are checked against the cited body before they are believed.
+ * settle what is decidable from the evidence lines it cites, and grade the rest from a
+ * judge's verdict, believed only through cited lines that state the claim's numbers.
  */
 import { GROUNDING_ARGUMENT, type GroundingSpan } from "./evidence.js";
+import { parseEvidenceLines } from "./evidence-lines.js";
 import { canonicalize, figuresOf, holdsFigure, isFigure, numbersOf, trimTrailing } from "./grounding-text.js";
 
 /**
@@ -18,20 +19,29 @@ export type GroundingTier =
   | "unresolved";
 
 /**
- * Why a span is not `verifiable`. `no-entry`, `figures` and `refuted` accuse the draft, so
- * they read `asserted`; the rest only say the claim was not settled.
+ * Why a span is not `verifiable`. `no-entry`, `bad-lines`, `figures` and `refuted` accuse the
+ * citation, so they read `asserted`; the rest only say the claim was not settled.
  */
 export type GroundingGap =
   | { reason: "no-entry" }
+  | { reason: "bad-lines" }
   | { reason: "figures"; tokens: string[] }
   | { reason: "refuted" }
-  | { reason: "clipped" }
+  | { reason: "broad-citation" }
   | { reason: "unjudged" }
   | { reason: "judge-error" }
   | { reason: "unclear" }
-  | { reason: "unverified-quote" };
+  | { reason: "unverified-support" };
 
-const ACCUSING: ReadonlySet<GroundingGap["reason"]> = new Set(["no-entry", "figures", "refuted"]);
+const ACCUSING: ReadonlySet<GroundingGap["reason"]> = new Set([
+  "no-entry",
+  "bad-lines",
+  "figures",
+  "refuted",
+]);
+
+/** A claim resting on more lines than this is a pointer at a document, not a citation. */
+export const MAX_CITED_LINES = 12;
 
 function tierOfGap(gap: GroundingGap | undefined): GroundingTier {
   if (!gap) return "verifiable";
@@ -39,8 +49,8 @@ function tierOfGap(gap: GroundingGap | undefined): GroundingTier {
 }
 
 /**
- * A cited source as the ledger kept it. `truncated` is load-bearing: what a clipped copy
- * does not contain is unknown, not missing, so the audit must not read it as invention.
+ * A cited source as the ledger kept it: the numbered text the model read. A clipped entry
+ * holds only the lines that were kept, so a citation can only ever name lines that exist.
  */
 export interface CitedSource {
   text: string;
@@ -49,9 +59,9 @@ export interface CitedSource {
 
 export type JudgeVerdict = "supported" | "unsupported" | "unclear";
 
-/** A judge's answer for one claim; `quotes` are its claimed support, not yet checked. */
+/** A judge's answer for one claim; `lines` are the cited lines it says support it, not yet checked. */
 export type JudgeOutcome =
-  | { verdict: JudgeVerdict; quotes: string[] }
+  | { verdict: JudgeVerdict; lines: number[] }
   | { failed: true };
 
 /** One judging pass, keyed by {@link judgeKey}. */
@@ -61,9 +71,9 @@ export interface JudgeResults {
   outcomes: ReadonlyMap<string, JudgeOutcome>;
 }
 
-/** A judgement depends only on the claim and its cited entry, so edits elsewhere reuse it. */
-export function judgeKey(span: Pick<GroundingSpan, "evidenceId" | "text">): string {
-  return `${span.evidenceId}\u0000${span.text}`;
+/** A judgement depends only on the claim and the lines it cites, so edits elsewhere reuse it. */
+export function judgeKey(span: Pick<GroundingSpan, "evidenceId" | "text" | "lines">): string {
+  return `${span.evidenceId}\u0000${span.text}\u0000${citedLineNumbers(span).join(",")}`;
 }
 
 export interface GroundingSegment {
@@ -74,8 +84,15 @@ export interface GroundingSegment {
   gap?: GroundingGap;
   /** A figure inside uncited text: the one thing a reviewer must not read as backed. */
   unbacked?: boolean;
-  /** The verified passages a `verifiable` span rests on, shown so the reviewer can judge them. */
-  support?: string[];
+  /** The evidence lines the span cites, so a reviewer can be taken straight to them. */
+  lines?: number[];
+  /** The cited lines a `verifiable` span rests on, shown so the reviewer can judge them. */
+  support?: SupportLine[];
+}
+
+export interface SupportLine {
+  line: number;
+  text: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -93,11 +110,28 @@ function isSpan(value: unknown): value is GroundingSpan {
   );
 }
 
-/** Citations are model-written, so anything malformed is dropped rather than trusted. */
+/**
+ * The line numbers a span cites, ascending and once each. Anything that is not a positive
+ * integer empties the list, which the audit reports as a citation naming no real line.
+ */
+export function citedLineNumbers(span: Pick<GroundingSpan, "lines">): number[] {
+  const lines = span.lines;
+  if (!Array.isArray(lines) || !lines.every((n) => Number.isSafeInteger(n) && n > 0)) return [];
+  return [...new Set(lines)].sort((a, b) => a - b);
+}
+
+/**
+ * Citations are model-written: a span with no usable quote or entry is dropped, and one with
+ * no usable line numbers is kept so the reviewer sees the citation failed.
+ */
 export function groundingSpans(args: unknown): GroundingSpan[] {
   if (!isRecord(args)) return [];
   const raw = args[GROUNDING_ARGUMENT];
-  return Array.isArray(raw) ? raw.filter(isSpan) : [];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isSpan).map((span) => {
+    const { arg, text, evidenceId } = span;
+    return { arg, text, evidenceId, lines: citedLineNumbers(span) };
+  });
 }
 
 export function citedEvidenceIds(args: unknown): string[] {
@@ -138,70 +172,74 @@ function resolveSpans<T extends GroundingSpan>(
   return kept;
 }
 
+interface CitedLines {
+  lines: SupportLine[];
+  canonical: string;
+}
+
 /**
- * What can be decided without a model. An exact figure the cited body never states is an
- * accusation that needs no opinion; the same absence from a clipped body proves nothing.
+ * What can be decided without a model. A citation naming lines the entry does not have, or
+ * an exact figure none of its cited lines states, is an accusation that needs no opinion.
  * `undefined` means the claim is left to the judge.
  */
-function settle(text: string, source: CitedSource | undefined, canonical: string): GroundingGap | undefined {
-  if (source === undefined) return { reason: "no-entry" };
-  const missing = figuresOf(text).filter((figure) => !holdsFigure(canonical, figure));
-  if (missing.length === 0) return undefined;
-  return source.truncated
-    ? { reason: "clipped" }
-    : { reason: "figures", tokens: missing.map((figure) => figure.display) };
+function settle(text: string, cited: CitedLines | undefined): GroundingGap | undefined {
+  if (!cited) return { reason: "no-entry" };
+  if (cited.lines.length === 0) return { reason: "bad-lines" };
+  if (cited.lines.length > MAX_CITED_LINES) return { reason: "broad-citation" };
+  const missing = figuresOf(text).filter((figure) => !holdsFigure(cited.canonical, figure));
+  return missing.length > 0
+    ? { reason: "figures", tokens: missing.map((figure) => figure.display) }
+    : undefined;
 }
 
 /**
- * A judge's "supported" stands only if every quote it gave is in the cited body and the
- * quotes between them state every number the claim does. A quote is checkable; an opinion
- * is not, and a judge will quote "37 minutes" in support of "73 minutes".
+ * A judge's "supported" stands only if it names cited lines, and those lines state every
+ * number the claim does. A line number is checkable; an opinion is not, and a judge will
+ * call "37 minutes" support for "73 minutes".
  */
-function quotesSupport(text: string, quotes: readonly string[], canonical: string): boolean {
-  const checked = quotes.map(canonicalize).filter((quote) => quote.length > 0);
-  if (checked.length === 0 || checked.length !== quotes.length) return false;
-  if (!checked.every((quote) => canonical.includes(quote))) return false;
-  const held = checked.join(" \u0000 ");
-  if (!figuresOf(text).every((figure) => holdsFigure(held, figure))) return false;
+function supportFor(text: string, cited: CitedLines, lines: readonly number[]): SupportLine[] | undefined {
+  const byNumber = new Map(cited.lines.map((line) => [line.line, line]));
+  const support = [...new Set(lines)].map((n) => byNumber.get(n));
+  if (support.length === 0 || support.some((line) => line === undefined)) return undefined;
+  const held = canonicalize(support.map((line) => line!.text).join(" \u0000 "));
+  if (!figuresOf(text).every((figure) => holdsFigure(held, figure))) return undefined;
   const stated = numbersOf(held);
-  return [...numbersOf(text)].every((value) => stated.has(value));
+  if (![...numbersOf(text)].every((value) => stated.has(value))) return undefined;
+  return support as SupportLine[];
 }
 
-function judgedGap(
+function judged(
   span: GroundingSpan,
-  source: CitedSource,
-  canonical: string,
+  cited: CitedLines,
   outcome: JudgeOutcome | undefined,
-): GroundingGap | undefined {
-  if (!outcome || "failed" in outcome) return { reason: "judge-error" };
-  if (outcome.verdict === "unclear") return { reason: "unclear" };
-  // A judge that finds no support in a clipped body may be looking at the wrong half.
-  if (outcome.verdict === "unsupported") {
-    return source.truncated ? { reason: "clipped" } : { reason: "refuted" };
-  }
-  return quotesSupport(span.text, outcome.quotes, canonical)
-    ? undefined
-    : { reason: "unverified-quote" };
+): { gap?: GroundingGap; support?: SupportLine[] } {
+  if (!outcome || "failed" in outcome) return { gap: { reason: "judge-error" } };
+  if (outcome.verdict === "unclear") return { gap: { reason: "unclear" } };
+  if (outcome.verdict === "unsupported") return { gap: { reason: "refuted" } };
+  const support = supportFor(span.text, cited, outcome.lines);
+  return support ? { support } : { gap: { reason: "unverified-support" } };
 }
 
 export interface AuditedSpan {
   arg: string;
   text: string;
   evidenceId: string;
+  /** The line numbers the span cited, as the audit read them. */
+  lines?: number[];
   tier: GroundingTier;
   gap?: GroundingGap;
   /** The judge that graded this span; absent when nothing but the deterministic checks ran. */
   judge?: string;
-  /** The verified passages of the cited body a `verifiable` tier rests on. */
-  support?: string[];
+  /** The cited lines a `verifiable` tier rests on, kept so the record outlives the body. */
+  support?: SupportLine[];
 }
 
-/** A claim the deterministic checks left open, with the passage a judge should read. */
+/** A claim the deterministic checks left open, with the only lines a judge may read. */
 export interface PendingJudgement {
   key: string;
   claim: string;
   evidenceId: string;
-  source: CitedSource;
+  lines: SupportLine[];
 }
 
 function resolvedSpans(args: unknown): { spans: GroundingSpan[]; resolved: Set<GroundingSpan> } {
@@ -222,16 +260,23 @@ function resolvedSpans(args: unknown): { spans: GroundingSpan[]; resolved: Set<G
   return { spans, resolved };
 }
 
-/** Canonicalizes each cited body once, since several spans usually cite the same entry. */
-function canonicalBodies(sources: ReadonlyMap<string, CitedSource>): (id: string) => string {
-  const cache = new Map<string, string>();
-  return (id) => {
-    let body = cache.get(id);
-    if (body === undefined) {
-      body = canonicalize(sources.get(id)?.text ?? "");
-      cache.set(id, body);
+/** Parses each cited body once, since several spans usually cite the same entry. */
+function citedLinesReader(
+  sources: ReadonlyMap<string, CitedSource>,
+): (span: GroundingSpan) => CitedLines | undefined {
+  const parsed = new Map<string, Map<number, string>>();
+  return (span) => {
+    const source = sources.get(span.evidenceId);
+    if (source === undefined) return undefined;
+    let lines = parsed.get(span.evidenceId);
+    if (!lines) {
+      lines = parseEvidenceLines(source.text);
+      parsed.set(span.evidenceId, lines);
     }
-    return body;
+    const numbers = citedLineNumbers(span);
+    if (numbers.length === 0 || numbers.some((n) => !lines!.has(n))) return { lines: [], canonical: "" };
+    const cited = numbers.map((line) => ({ line, text: lines!.get(line)! }));
+    return { lines: cited, canonical: canonicalize(cited.map((line) => line.text).join("\n")) };
   };
 }
 
@@ -241,21 +286,23 @@ export function pendingJudgements(
   sources: ReadonlyMap<string, CitedSource>,
 ): PendingJudgement[] {
   const { spans, resolved } = resolvedSpans(args);
-  const canonical = canonicalBodies(sources);
+  const read = citedLinesReader(sources);
   const pending = new Map<string, PendingJudgement>();
   for (const span of spans) {
     if (!resolved.has(span)) continue;
-    const source = sources.get(span.evidenceId);
-    if (!source || settle(span.text, source, canonical(span.evidenceId))) continue;
+    const cited = read(span);
+    if (!cited || settle(span.text, cited)) continue;
     const key = judgeKey(span);
-    if (!pending.has(key)) pending.set(key, { key, claim: span.text, evidenceId: span.evidenceId, source });
+    if (!pending.has(key)) {
+      pending.set(key, { key, claim: span.text, evidenceId: span.evidenceId, lines: cited.lines });
+    }
   }
   return [...pending.values()];
 }
 
 /**
  * Audits every span the model declared, in declaration order, against the arguments
- * actually being dispatched. Without `judged`, no span can reach `verifiable`: the
+ * actually being dispatched. Without `results`, no span can reach `verifiable`: the
  * deterministic checks only ever find reasons to doubt a claim.
  *
  * A span recorded `unresolved` failed to address a unique position in those arguments.
@@ -265,27 +312,24 @@ export function pendingJudgements(
 export function auditGroundingSpans(
   args: unknown,
   sources: ReadonlyMap<string, CitedSource>,
-  judged?: JudgeResults,
+  results?: JudgeResults,
 ): AuditedSpan[] {
   const { spans, resolved } = resolvedSpans(args);
-  const canonical = canonicalBodies(sources);
+  const read = citedLinesReader(sources);
   return spans.map((span) => {
-    const identity = { arg: span.arg, text: span.text, evidenceId: span.evidenceId };
+    const identity = { arg: span.arg, text: span.text, evidenceId: span.evidenceId, lines: citedLineNumbers(span) };
     if (!resolved.has(span)) return { ...identity, tier: "unresolved" };
-    const source = sources.get(span.evidenceId);
-    const settled = settle(span.text, source, canonical(span.evidenceId));
-    if (settled || !source) return { ...identity, tier: tierOfGap(settled), ...(settled ? { gap: settled } : {}) };
-    if (!judged) return { ...identity, tier: "inconclusive", gap: { reason: "unjudged" } };
-    const outcome = judged.outcomes.get(judgeKey(span));
-    const gap = judgedGap(span, source, canonical(span.evidenceId), outcome);
-    const support =
-      !gap && outcome && !("failed" in outcome) ? { support: outcome.quotes } : {};
+    const cited = read(span);
+    const settled = settle(span.text, cited);
+    if (settled || !cited) return { ...identity, tier: tierOfGap(settled), ...(settled ? { gap: settled } : {}) };
+    if (!results) return { ...identity, tier: "inconclusive", gap: { reason: "unjudged" } };
+    const { gap, support } = judged(span, cited, results.outcomes.get(judgeKey(span)));
     return {
       ...identity,
       tier: tierOfGap(gap),
       ...(gap ? { gap } : {}),
-      judge: judged.judge,
-      ...support,
+      judge: results.judge,
+      ...(support ? { support } : {}),
     };
   });
 }
@@ -327,6 +371,7 @@ export function segmentAuditedText(
       evidenceId: span.evidenceId,
       tier: span.tier,
       ...(span.gap ? { gap: span.gap } : {}),
+      ...(span.lines && span.lines.length > 0 ? { lines: span.lines } : {}),
       ...(span.support ? { support: span.support } : {}),
     });
     cursor = end;

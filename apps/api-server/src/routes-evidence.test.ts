@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp } from "./index.js";
 import { AgentHost } from "./agent-host.js";
-import type { ApprovalVerdict, EvidenceEntry, ThreadState } from "@pizza-bot/core";
+import { numberEvidenceLines, type ApprovalVerdict, type EvidenceEntry, type ThreadState } from "@pizza-bot/core";
 import type { AppendApprovalVerdict } from "@pizza-bot/storage";
 
 describe("evidence routes: GET /threads/:id/evidence, GET /evidence/:id", () => {
@@ -69,7 +69,7 @@ describe("evidence routes: GET /threads/:id/evidence, GET /evidence/:id", () => 
   });
 
   it("grades a pending approval's citations on the server, per action", async () => {
-    const entry = record("t1", "The renewal date is March 4th, 2027.");
+    const entry = record("t1", numberEvidenceLines("The renewal date is March 4th, 2027."));
     const state: ThreadState = {
       threadId: "t1",
       checkpointId: "c1",
@@ -87,8 +87,8 @@ describe("evidence routes: GET /threads/:id/evidence, GET /evidence/:id", () => 
                 args: {
                   body: "It renews in 2027. The fee is $45.",
                   _grounding: [
-                    { arg: "body", text: "It renews in 2027", evidenceId: entry.id },
-                    { arg: "body", text: "The fee is $45", evidenceId: entry.id },
+                    { arg: "body", text: "It renews in 2027", evidenceId: entry.id, lines: [1] },
+                    { arg: "body", text: "The fee is $45", evidenceId: entry.id, lines: [1] },
                   ],
                 },
               },

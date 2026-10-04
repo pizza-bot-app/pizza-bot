@@ -1,6 +1,7 @@
 export * from "./protocol-types.js";
 export * from "./attachment.js";
 export * from "./evidence.js";
+export * from "./evidence-lines.js";
 export * from "./grounding.js";
 export * from "./grounding-judge.js";
 export * from "./agent.js";

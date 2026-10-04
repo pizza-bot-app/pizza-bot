@@ -30,11 +30,13 @@ export interface EvidenceLedger {
   citedIds: ReadonlySet<string>;
   hoveredId: string | null;
   selectedId: string | null;
+  /** The lines of the selected entry a citation named, for the card to pick out. */
+  selectedLines: readonly number[];
   /** Declares ids as cited, so the rail lists them first. */
   cite: (ids: readonly string[]) => void;
   loadBodies: (ids: readonly string[]) => void;
   hover: (id: string | null) => void;
-  select: (id: string | null) => void;
+  select: (id: string | null, lines?: readonly number[]) => void;
 }
 
 const NO_LEDGER: EvidenceLedger = {
@@ -46,6 +48,7 @@ const NO_LEDGER: EvidenceLedger = {
   citedIds: new Set(),
   hoveredId: null,
   selectedId: null,
+  selectedLines: [],
   cite: () => {},
   loadBodies: () => {},
   hover: () => {},
@@ -80,6 +83,7 @@ export function EvidenceProvider({
   const [citedIds, setCitedIds] = useState<ReadonlySet<string>>(new Set());
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedLines, setSelectedLines] = useState<readonly number[]>([]);
   const requested = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -89,6 +93,7 @@ export function EvidenceProvider({
     setCitedIds(new Set());
     setHoveredId(null);
     setSelectedId(null);
+    setSelectedLines([]);
     setLoaded(false);
   }, [threadId]);
 
@@ -152,8 +157,9 @@ export function EvidenceProvider({
   );
 
   const select = useCallback(
-    (id: string | null) => {
+    (id: string | null, lines: readonly number[] = []) => {
       setSelectedId(id);
+      setSelectedLines(lines);
       if (id) onSelect?.(id);
     },
     [onSelect],
@@ -170,6 +176,7 @@ export function EvidenceProvider({
       citedIds,
       hoveredId,
       selectedId,
+      selectedLines,
       cite,
       loadBodies,
       hover: setHoveredId,
@@ -185,6 +192,7 @@ export function EvidenceProvider({
       citedIds,
       hoveredId,
       selectedId,
+      selectedLines,
       cite,
       loadBodies,
       select,
