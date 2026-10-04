@@ -85,11 +85,16 @@ describe("ApprovalVerdictStore", () => {
       {
         arg: "body",
         text: "renews on March 4, 2027",
-        evidenceId: "ev_1",
+        cites: [
+          {
+            evidenceId: "ev_1",
+            lines: [5],
+            breadcrumb: "mcp:mail:search (query: renewal)",
+            bytes: 4096,
+            truncated: false,
+          },
+        ],
         tier: "verifiable" as const,
-        breadcrumb: "mcp:mail:search (query: renewal)",
-        bytes: 4096,
-        truncated: false,
       },
     ],
   });
@@ -121,7 +126,7 @@ describe("ApprovalVerdictStore", () => {
       {
         arg: "body",
         text: "I've waived the $12 fee",
-        evidenceId: "ev_1",
+        cites: [{ evidenceId: "ev_1", lines: [4] }],
         tier: "asserted" as const,
         gap: { reason: "refuted" as const },
         judge: "anthropic:claude-haiku-4-5",
@@ -129,11 +134,13 @@ describe("ApprovalVerdictStore", () => {
       {
         arg: "body",
         text: "renews on March 4, 2027",
-        evidenceId: "ev_1",
+        cites: [
+          { evidenceId: "ev_1", lines: [5] },
+          { evidenceId: "ev_2", lines: [1] },
+        ],
         tier: "verifiable" as const,
         judge: "anthropic:claude-haiku-4-5",
-        lines: [5],
-        support: [{ line: 5, text: 'renewal_date: "2027-03-04"' }],
+        support: [{ evidenceId: "ev_1", line: 5, text: 'renewal_date: "2027-03-04"' }],
       },
     ];
     const { verdict: stored } = app.approvalVerdicts.append({
@@ -152,13 +159,13 @@ describe("ApprovalVerdictStore", () => {
       ...verdict("approval-2#0", "thread-1"),
       decision: "edit",
       spans: [
-        { arg: "body", text: "renews on March 4, 2027", evidenceId: "ev_1", tier: "unresolved" },
+        { arg: "body", text: "renews on March 4, 2027", cites: [{ evidenceId: "ev_1", lines: [5] }], tier: "unresolved" },
       ],
     });
 
     expect(stored.decision).toBe("edit");
     expect(stored.spans).toEqual([
-      { arg: "body", text: "renews on March 4, 2027", evidenceId: "ev_1", tier: "unresolved" },
+      { arg: "body", text: "renews on March 4, 2027", cites: [{ evidenceId: "ev_1", lines: [5] }], tier: "unresolved" },
     ]);
     app.close();
   });

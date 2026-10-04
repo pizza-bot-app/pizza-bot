@@ -10,16 +10,21 @@ export const MAX_EVIDENCE_BODY_BYTES = 256 * 1024;
 /** The citation argument a grounded tool's schema carries, stripped before dispatch. */
 export const GROUNDING_ARGUMENT = "_grounding";
 
+/** Numbered lines of one evidence entry. */
+export interface Citation {
+  evidenceId: string;
+  lines: number[];
+}
+
 /**
- * One cited span, addressed by quoting `text` verbatim out of `arg`, and resting on the
- * numbered `lines` of one evidence entry. Model-written, so `lines` may be missing or wrong;
- * the audit reports that rather than trusting it.
+ * One cited span, addressed by quoting `text` verbatim out of `arg`, and resting on lines of
+ * one or more evidence entries — a sentence can join facts from two lookups. Model-written, so
+ * a citation's lines may be missing or wrong; the audit reports that rather than trusting it.
  */
 export interface GroundingSpan {
   arg: string;
   text: string;
-  evidenceId: string;
-  lines?: number[];
+  cites: Citation[];
 }
 
 export const MAX_EVIDENCE_EXCERPT_CHARS = 280;

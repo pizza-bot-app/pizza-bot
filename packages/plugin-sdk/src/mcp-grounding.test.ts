@@ -31,7 +31,7 @@ describe("injectGroundingArgument", () => {
     expect(grounding.type).toBe("array");
     const item = grounding.items as { properties: Record<string, { enum?: string[] }>; required: string[] };
     expect(item.properties.arg?.enum).toEqual(["body", "subject"]);
-    expect(item.required).toEqual(["arg", "text", "evidenceId", "lines"]);
+    expect(item.required).toEqual(["arg", "text", "cites"]);
     // Citing is optional; a required argument would make an uncited draft impossible.
     expect((injected as { required: string[] }).required).toEqual(["to", "body"]);
   });
@@ -40,7 +40,7 @@ describe("injectGroundingArgument", () => {
     const item = groundingOf(injectGroundingArgument(sendMail, ["body"])).items as {
       properties: Record<string, unknown>;
     };
-    expect(Object.keys(item.properties)).toEqual(["arg", "text", "evidenceId", "lines"]);
+    expect(Object.keys(item.properties)).toEqual(["arg", "text", "cites"]);
   });
 
   it("leaves the schema alone when there is nothing to cite", () => {
@@ -122,7 +122,7 @@ describe("resolvableVerifiedArgs", () => {
 });
 
 describe("stripGroundingArgument", () => {
-  const spans = [{ arg: "body", text: "a 20% credit", evidenceId: "ev-2" }];
+  const spans = [{ arg: "body", text: "a 20% credit", cites: [{ evidenceId: "ev-2", lines: [1] }] }];
 
   it("removes the key without mutating the source", () => {
     const args = { to: "x@example.com", body: "…", [GROUNDING_ARGUMENT]: spans };

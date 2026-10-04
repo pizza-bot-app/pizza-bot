@@ -3,7 +3,7 @@
  * settle what is decidable from the evidence lines it cites, and grade the rest from a
  * judge's verdict, believed only through cited lines that state the claim's numbers.
  */
-import { GROUNDING_ARGUMENT, type GroundingSpan } from "./evidence.js";
+import { GROUNDING_ARGUMENT, type Citation, type GroundingSpan } from "./evidence.js";
 import { parseEvidenceLines } from "./evidence-lines.js";
 import { canonicalize, figuresOf, holdsFigure, isFigure, numbersOf, trimTrailing } from "./grounding-text.js";
 
@@ -42,6 +42,8 @@ const ACCUSING: ReadonlySet<GroundingGap["reason"]> = new Set([
 
 /** A claim resting on more lines than this is a pointer at a document, not a citation. */
 export const MAX_CITED_LINES = 12;
+/** A sentence joins facts from a few lookups; more than this is not one claim. */
+export const MAX_CITED_SOURCES = 4;
 
 function tierOfGap(gap: GroundingGap | undefined): GroundingTier {
   if (!gap) return "verifiable";
@@ -59,9 +61,12 @@ export interface CitedSource {
 
 export type JudgeVerdict = "supported" | "unsupported" | "unclear";
 
-/** A judge's answer for one claim; `lines` are the cited lines it says support it, not yet checked. */
+/**
+ * A judge's answer for one claim. `lines` are the labels ({@link labelSupportLines}) of the
+ * cited lines it says support the claim, not yet checked.
+ */
 export type JudgeOutcome =
-  | { verdict: JudgeVerdict; lines: number[] }
+  | { verdict: JudgeVerdict; lines: string[] }
   | { failed: true };
 
 /** One judging pass, keyed by {@link judgeKey}. */
@@ -72,70 +77,95 @@ export interface JudgeResults {
 }
 
 /** A judgement depends only on the claim and the lines it cites, so edits elsewhere reuse it. */
-export function judgeKey(span: Pick<GroundingSpan, "evidenceId" | "text" | "lines">): string {
-  return `${span.evidenceId}\u0000${span.text}\u0000${citedLineNumbers(span).join(",")}`;
+export function judgeKey(span: Pick<GroundingSpan, "text" | "cites">): string {
+  const cites = span.cites.map((cite) => `${cite.evidenceId}:${cite.lines.join(",")}`).join(";");
+  return `${span.text}\u0000${cites}`;
 }
 
 export interface GroundingSegment {
   text: string;
   tier: GroundingTier;
-  /** Absent on uncited text. */
-  evidenceId?: string;
+  /** The evidence the span cites, so a reviewer can be taken straight to it; absent on uncited text. */
+  cites?: Citation[];
   gap?: GroundingGap;
   /** A figure inside uncited text: the one thing a reviewer must not read as backed. */
   unbacked?: boolean;
-  /** The evidence lines the span cites, so a reviewer can be taken straight to them. */
-  lines?: number[];
   /** The cited lines a `verifiable` span rests on, shown so the reviewer can judge them. */
   support?: SupportLine[];
 }
 
 export interface SupportLine {
+  evidenceId: string;
   line: number;
   text: string;
+}
+
+/**
+ * Labels cited lines for a judge: a letter per source in citation order, then the line
+ * number, so `A3` and `B3` stay distinct when a claim joins two lookups.
+ */
+export function labelSupportLines(lines: readonly SupportLine[]): Map<string, SupportLine> {
+  const letters = new Map<string, string>();
+  const labelled = new Map<string, SupportLine>();
+  for (const line of lines) {
+    let letter = letters.get(line.evidenceId);
+    if (!letter) {
+      letter = String.fromCharCode(65 + letters.size);
+      letters.set(line.evidenceId, letter);
+    }
+    labelled.set(`${letter}${line.line}`, line);
+  }
+  return labelled;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isSpan(value: unknown): value is GroundingSpan {
-  return (
-    isRecord(value) &&
-    typeof value.arg === "string" &&
-    typeof value.text === "string" &&
-    value.text.length > 0 &&
-    typeof value.evidenceId === "string" &&
-    value.evidenceId.length > 0
-  );
-}
-
 /**
- * The line numbers a span cites, ascending and once each. Anything that is not a positive
+ * The line numbers a citation names, ascending and once each. Anything that is not a positive
  * integer empties the list, which the audit reports as a citation naming no real line.
  */
-export function citedLineNumbers(span: Pick<GroundingSpan, "lines">): number[] {
-  const lines = span.lines;
+function lineNumbers(lines: unknown): number[] {
   if (!Array.isArray(lines) || !lines.every((n) => Number.isSafeInteger(n) && n > 0)) return [];
-  return [...new Set(lines)].sort((a, b) => a - b);
+  return [...new Set(lines as number[])].sort((a, b) => a - b);
 }
 
 /**
- * Citations are model-written: a span with no usable quote or entry is dropped, and one with
- * no usable line numbers is kept so the reviewer sees the citation failed.
+ * One citation per entry, so a source named twice reads as one source with both sets of lines.
+ * An unusable line list poisons its entry: the citation cannot be checked as the model wrote it.
+ */
+function citations(raw: unknown): Citation[] {
+  if (!Array.isArray(raw)) return [];
+  const byEntry = new Map<string, number[]>();
+  for (const cite of raw) {
+    if (!isRecord(cite) || typeof cite.evidenceId !== "string" || cite.evidenceId === "") continue;
+    const lines = lineNumbers(cite.lines);
+    const seen = byEntry.get(cite.evidenceId);
+    if (seen === undefined) byEntry.set(cite.evidenceId, lines);
+    else if (seen.length === 0 || lines.length === 0) byEntry.set(cite.evidenceId, []);
+    else byEntry.set(cite.evidenceId, [...new Set([...seen, ...lines])].sort((a, b) => a - b));
+  }
+  return [...byEntry].map(([evidenceId, lines]) => ({ evidenceId, lines }));
+}
+
+/**
+ * Citations are model-written: a span with no usable quote or no named entry is dropped, and
+ * one whose line numbers are unusable is kept so the reviewer sees the citation failed.
  */
 export function groundingSpans(args: unknown): GroundingSpan[] {
   if (!isRecord(args)) return [];
   const raw = args[GROUNDING_ARGUMENT];
   if (!Array.isArray(raw)) return [];
-  return raw.filter(isSpan).map((span) => {
-    const { arg, text, evidenceId } = span;
-    return { arg, text, evidenceId, lines: citedLineNumbers(span) };
+  return raw.flatMap((span) => {
+    if (!isRecord(span) || typeof span.arg !== "string" || typeof span.text !== "string" || !span.text) return [];
+    const cites = citations(span.cites);
+    return cites.length > 0 ? [{ arg: span.arg, text: span.text, cites }] : [];
   });
 }
 
 export function citedEvidenceIds(args: unknown): string[] {
-  return [...new Set(groundingSpans(args).map((span) => span.evidenceId))];
+  return [...new Set(groundingSpans(args).flatMap((span) => span.cites.map((cite) => cite.evidenceId)))];
 }
 
 /** Citations are provenance, not content: an arguments view must not render them. */
@@ -182,10 +212,13 @@ interface CitedLines {
  * an exact figure none of its cited lines states, is an accusation that needs no opinion.
  * `undefined` means the claim is left to the judge.
  */
-function settle(text: string, cited: CitedLines | undefined): GroundingGap | undefined {
+function settle(span: GroundingSpan, cited: CitedLines | undefined): GroundingGap | undefined {
+  const { text } = span;
   if (!cited) return { reason: "no-entry" };
   if (cited.lines.length === 0) return { reason: "bad-lines" };
-  if (cited.lines.length > MAX_CITED_LINES) return { reason: "broad-citation" };
+  if (cited.lines.length > MAX_CITED_LINES || span.cites.length > MAX_CITED_SOURCES) {
+    return { reason: "broad-citation" };
+  }
   const missing = figuresOf(text).filter((figure) => !holdsFigure(cited.canonical, figure));
   return missing.length > 0
     ? { reason: "figures", tokens: missing.map((figure) => figure.display) }
@@ -194,12 +227,12 @@ function settle(text: string, cited: CitedLines | undefined): GroundingGap | und
 
 /**
  * A judge's "supported" stands only if it names cited lines, and those lines state every
- * number the claim does. A line number is checkable; an opinion is not, and a judge will
+ * number the claim does. A line label is checkable; an opinion is not, and a judge will
  * call "37 minutes" support for "73 minutes".
  */
-function supportFor(text: string, cited: CitedLines, lines: readonly number[]): SupportLine[] | undefined {
-  const byNumber = new Map(cited.lines.map((line) => [line.line, line]));
-  const support = [...new Set(lines)].map((n) => byNumber.get(n));
+function supportFor(text: string, cited: CitedLines, labels: readonly string[]): SupportLine[] | undefined {
+  const byLabel = labelSupportLines(cited.lines);
+  const support = [...new Set(labels)].map((label) => byLabel.get(label));
   if (support.length === 0 || support.some((line) => line === undefined)) return undefined;
   const held = canonicalize(support.map((line) => line!.text).join(" \u0000 "));
   if (!figuresOf(text).every((figure) => holdsFigure(held, figure))) return undefined;
@@ -220,12 +253,17 @@ function judged(
   return support ? { support } : { gap: { reason: "unverified-support" } };
 }
 
+/** A citation as audited, with the identity of its entry kept so a record outlives the body. */
+export interface AuditedCitation extends Citation {
+  breadcrumb?: string;
+  bytes?: number;
+  truncated?: boolean;
+}
+
 export interface AuditedSpan {
   arg: string;
   text: string;
-  evidenceId: string;
-  /** The line numbers the span cited, as the audit read them. */
-  lines?: number[];
+  cites: AuditedCitation[];
   tier: GroundingTier;
   gap?: GroundingGap;
   /** The judge that graded this span; absent when nothing but the deterministic checks ran. */
@@ -238,7 +276,6 @@ export interface AuditedSpan {
 export interface PendingJudgement {
   key: string;
   claim: string;
-  evidenceId: string;
   lines: SupportLine[];
 }
 
@@ -260,22 +297,35 @@ function resolvedSpans(args: unknown): { spans: GroundingSpan[]; resolved: Set<G
   return { spans, resolved };
 }
 
-/** Parses each cited body once, since several spans usually cite the same entry. */
+/**
+ * The lines a span cites across all its entries. `undefined` when an entry is missing; an
+ * empty list when any citation names no line or a line its entry does not have.
+ */
 function citedLinesReader(
   sources: ReadonlyMap<string, CitedSource>,
 ): (span: GroundingSpan) => CitedLines | undefined {
+  // Parsed once per entry, since several spans usually cite the same one.
   const parsed = new Map<string, Map<number, string>>();
-  return (span) => {
-    const source = sources.get(span.evidenceId);
+  const linesOf = (id: string): Map<number, string> | undefined => {
+    const source = sources.get(id);
     if (source === undefined) return undefined;
-    let lines = parsed.get(span.evidenceId);
+    let lines = parsed.get(id);
     if (!lines) {
       lines = parseEvidenceLines(source.text);
-      parsed.set(span.evidenceId, lines);
+      parsed.set(id, lines);
     }
-    const numbers = citedLineNumbers(span);
-    if (numbers.length === 0 || numbers.some((n) => !lines!.has(n))) return { lines: [], canonical: "" };
-    const cited = numbers.map((line) => ({ line, text: lines!.get(line)! }));
+    return lines;
+  };
+  return (span) => {
+    const cited: SupportLine[] = [];
+    let valid = true;
+    for (const cite of span.cites) {
+      const lines = linesOf(cite.evidenceId);
+      if (!lines) return undefined;
+      if (cite.lines.length === 0 || cite.lines.some((n) => !lines.has(n))) valid = false;
+      else for (const line of cite.lines) cited.push({ evidenceId: cite.evidenceId, line, text: lines.get(line)! });
+    }
+    if (!valid) return { lines: [], canonical: "" };
     return { lines: cited, canonical: canonicalize(cited.map((line) => line.text).join("\n")) };
   };
 }
@@ -291,11 +341,9 @@ export function pendingJudgements(
   for (const span of spans) {
     if (!resolved.has(span)) continue;
     const cited = read(span);
-    if (!cited || settle(span.text, cited)) continue;
+    if (!cited || settle(span, cited)) continue;
     const key = judgeKey(span);
-    if (!pending.has(key)) {
-      pending.set(key, { key, claim: span.text, evidenceId: span.evidenceId, lines: cited.lines });
-    }
+    if (!pending.has(key)) pending.set(key, { key, claim: span.text, lines: cited.lines });
   }
   return [...pending.values()];
 }
@@ -317,10 +365,10 @@ export function auditGroundingSpans(
   const { spans, resolved } = resolvedSpans(args);
   const read = citedLinesReader(sources);
   return spans.map((span) => {
-    const identity = { arg: span.arg, text: span.text, evidenceId: span.evidenceId, lines: citedLineNumbers(span) };
+    const identity = { arg: span.arg, text: span.text, cites: span.cites };
     if (!resolved.has(span)) return { ...identity, tier: "unresolved" };
     const cited = read(span);
-    const settled = settle(span.text, cited);
+    const settled = settle(span, cited);
     if (settled || !cited) return { ...identity, tier: tierOfGap(settled), ...(settled ? { gap: settled } : {}) };
     if (!results) return { ...identity, tier: "inconclusive", gap: { reason: "unjudged" } };
     const { gap, support } = judged(span, cited, results.outcomes.get(judgeKey(span)));
@@ -368,10 +416,9 @@ export function segmentAuditedText(
     if (start > cursor) segments.push(...uncitedSegments(text.slice(cursor, start)));
     segments.push({
       text: text.slice(start, end),
-      evidenceId: span.evidenceId,
       tier: span.tier,
+      cites: span.cites.map(({ evidenceId, lines }) => ({ evidenceId, lines })),
       ...(span.gap ? { gap: span.gap } : {}),
-      ...(span.lines && span.lines.length > 0 ? { lines: span.lines } : {}),
       ...(span.support ? { support: span.support } : {}),
     });
     cursor = end;
@@ -393,12 +440,8 @@ export function countGroundedSegments(
 /** A decision that dispatches the action under review; reject and respond do not. */
 export type ApprovalDecision = "approve" | "edit";
 
-export interface ApprovalVerdictSpan extends AuditedSpan {
-  /** Evidence identity, kept so the record still means something once the body is gone. */
-  breadcrumb?: string;
-  bytes?: number;
-  truncated?: boolean;
-}
+/** A span as the approval record keeps it; its citations carry their entries' identities. */
+export type ApprovalVerdictSpan = AuditedSpan;
 
 export interface ApprovalVerdict {
   seq: number;

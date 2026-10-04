@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { AuditedSpan, SupportLine } from "@pizza-bot/core";
+import type { AuditedSpan, Citation, SupportLine } from "@pizza-bot/core";
 import {
   groundingSpans,
   segmentAuditedText,
@@ -21,8 +21,8 @@ export interface GroundingLinks {
   status: "checking" | "ready" | "unavailable";
   hoveredId: string | null;
   onHover: (id: string | null) => void;
-  /** Opens the evidence card, with the span's cited lines picked out. */
-  onSelect: (id: string, lines?: readonly number[]) => void;
+  /** Opens the cited evidence cards, with the span's cited lines picked out. */
+  onSelect: (cites: readonly Citation[]) => void;
 }
 
 /** A live citation: the links, plus the tiers the server graded for this call's spans. */
@@ -268,7 +268,10 @@ function GroundedSpan({
   segment: GroundingSegment;
   links: GroundingLinks;
 }) {
-  const id = segment.evidenceId!;
+  const cites = segment.cites ?? [];
+  // Hovering lights the first source's card; a click opens every cited one.
+  const id = cites[0]?.evidenceId ?? null;
+  const hovered = links.hoveredId !== null && cites.some((cite) => cite.evidenceId === links.hoveredId);
   const tier: SpanTier =
     links.status === "unavailable" ? "unchecked" : links.status === "checking" ? "pending" : segment.tier;
   // A button is an atomic inline box in Chromium, so a multi-word citation would
@@ -277,17 +280,17 @@ function GroundedSpan({
     <span
       role="button"
       tabIndex={0}
-      className={`grounding-span grounding-${tier}${links.hoveredId === id ? " hovered" : ""}`}
+      className={`grounding-span grounding-${tier}${hovered ? " hovered" : ""}`}
       title={groundingTitle(tier, segment.gap, segment.support)}
       onMouseEnter={() => links.onHover(id)}
       onMouseLeave={() => links.onHover(null)}
       onFocus={() => links.onHover(id)}
       onBlur={() => links.onHover(null)}
-      onClick={() => links.onSelect(id, segment.lines)}
+      onClick={() => links.onSelect(cites)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          links.onSelect(id, segment.lines);
+          links.onSelect(cites);
         }
       }}
     >
@@ -307,7 +310,7 @@ export function GroundedSegments({
   return (
     <>
       {segments.map((segment, index) =>
-        segment.evidenceId !== undefined ? (
+        segment.cites !== undefined ? (
           <GroundedSpan key={index} segment={segment} links={links} />
         ) : segment.unbacked ? (
           <span key={index} className="grounding-unbacked" title={UNBACKED_TITLE}>

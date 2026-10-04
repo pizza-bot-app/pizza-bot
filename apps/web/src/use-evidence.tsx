@@ -12,7 +12,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { CitedSource, EvidenceEntry } from "@pizza-bot/core";
+import type { Citation, CitedSource, EvidenceEntry } from "@pizza-bot/core";
 import type { ApiClient } from "@/api-client";
 
 export interface EvidenceLedger {
@@ -29,14 +29,14 @@ export interface EvidenceLedger {
   /** Ids some approval card quotes, so the rail can list those entries first. */
   citedIds: ReadonlySet<string>;
   hoveredId: string | null;
-  selectedId: string | null;
-  /** The lines of the selected entry a citation named, for the card to pick out. */
-  selectedLines: readonly number[];
+  /** The entries a clicked citation named, each with the lines its card should pick out. */
+  selection: ReadonlyMap<string, readonly number[]>;
   /** Declares ids as cited, so the rail lists them first. */
   cite: (ids: readonly string[]) => void;
   loadBodies: (ids: readonly string[]) => void;
   hover: (id: string | null) => void;
-  select: (id: string | null, lines?: readonly number[]) => void;
+  /** Opens the cards a citation names; an entry named without lines just opens. */
+  select: (cites: readonly Citation[] | null) => void;
 }
 
 const NO_LEDGER: EvidenceLedger = {
@@ -47,8 +47,7 @@ const NO_LEDGER: EvidenceLedger = {
   unavailable: new Set(),
   citedIds: new Set(),
   hoveredId: null,
-  selectedId: null,
-  selectedLines: [],
+  selection: new Map(),
   cite: () => {},
   loadBodies: () => {},
   hover: () => {},
@@ -82,8 +81,7 @@ export function EvidenceProvider({
   const [unavailable, setUnavailable] = useState<ReadonlySet<string>>(new Set());
   const [citedIds, setCitedIds] = useState<ReadonlySet<string>>(new Set());
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedLines, setSelectedLines] = useState<readonly number[]>([]);
+  const [selection, setSelection] = useState<ReadonlyMap<string, readonly number[]>>(new Map());
   const requested = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -92,8 +90,7 @@ export function EvidenceProvider({
     setUnavailable(new Set());
     setCitedIds(new Set());
     setHoveredId(null);
-    setSelectedId(null);
-    setSelectedLines([]);
+    setSelection(new Map());
     setLoaded(false);
   }, [threadId]);
 
@@ -157,10 +154,10 @@ export function EvidenceProvider({
   );
 
   const select = useCallback(
-    (id: string | null, lines: readonly number[] = []) => {
-      setSelectedId(id);
-      setSelectedLines(lines);
-      if (id) onSelect?.(id);
+    (cites: readonly Citation[] | null) => {
+      setSelection(new Map((cites ?? []).map((cite) => [cite.evidenceId, cite.lines])));
+      const first = cites?.[0];
+      if (first) onSelect?.(first.evidenceId);
     },
     [onSelect],
   );
@@ -175,8 +172,7 @@ export function EvidenceProvider({
       unavailable,
       citedIds,
       hoveredId,
-      selectedId,
-      selectedLines,
+      selection,
       cite,
       loadBodies,
       hover: setHoveredId,
@@ -191,8 +187,7 @@ export function EvidenceProvider({
       unavailable,
       citedIds,
       hoveredId,
-      selectedId,
-      selectedLines,
+      selection,
       cite,
       loadBodies,
       select,

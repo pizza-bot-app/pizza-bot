@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { numberEvidenceLines } from "./evidence-lines.js";
 import {
   MAX_CITED_LINES,
+  MAX_CITED_SOURCES,
   auditGroundingSpans,
   groundingSpans,
   judgeKey,
@@ -18,8 +19,7 @@ const bodies = (entries: Record<string, string>) =>
 const span = (text: string, lines: number[] = [1], evidenceId = "ev_1", arg = "body") => ({
   arg,
   text,
-  evidenceId,
-  lines,
+  cites: [{ evidenceId, lines }],
 });
 
 const judged = (outcomes: Array<[ReturnType<typeof span>, JudgeOutcome]>): JudgeResults => ({
@@ -39,17 +39,30 @@ const sources = () => bodies({ ev_1: ACCOUNT });
 
 describe("groundingSpans", () => {
   it("normalizes cited lines, and keeps a span whose lines are unusable so the failure shows", () => {
+    const cite = (evidenceId: string, lines?: unknown) => ({ evidenceId, lines });
     expect(
       groundingSpans({
         body: "x",
         _grounding: [
-          { arg: "body", text: "a", evidenceId: "ev_1", lines: [3, 1, 3] },
-          { arg: "body", text: "b", evidenceId: "ev_1", lines: ["2"] },
-          { arg: "body", text: "c", evidenceId: "ev_1" },
-          { arg: "body", text: "", evidenceId: "ev_1", lines: [1] },
+          { arg: "body", text: "a", cites: [cite("ev_1", [3, 1, 3])] },
+          { arg: "body", text: "b", cites: [cite("ev_1", ["2"])] },
+          { arg: "body", text: "c", cites: [cite("ev_1")] },
+          { arg: "body", text: "", cites: [cite("ev_1", [1])] },
+          { arg: "body", text: "d", cites: [] },
+          { arg: "body", text: "e", cites: [cite("", [1])] },
         ],
       }),
     ).toEqual([span("a", [1, 3]), span("b", []), span("c", [])]);
+  });
+
+  it("reads an entry named twice as one source with both sets of lines", () => {
+    const [merged] = groundingSpans({
+      _grounding: [{ arg: "body", text: "a", cites: [{ evidenceId: "ev_1", lines: [4] }, { evidenceId: "ev_2", lines: [1] }, { evidenceId: "ev_1", lines: [2] }] }],
+    });
+    expect(merged?.cites).toEqual([
+      { evidenceId: "ev_1", lines: [2, 4] },
+      { evidenceId: "ev_2", lines: [1] },
+    ]);
   });
 });
 
@@ -76,8 +89,7 @@ describe("auditGroundingSpans without a judge", () => {
       {
         key: judgeKey(amount),
         claim: amount.text,
-        evidenceId: "ev_1",
-        lines: [{ line: 3, text: 'annual_amount: "1200.00"' }],
+        lines: [{ evidenceId: "ev_1", line: 3, text: 'annual_amount: "1200.00"' }],
       },
     ]);
   });
@@ -141,17 +153,17 @@ describe("auditGroundingSpans with a judge", () => {
   const args = { body: `${renews.text}.`, _grounding: [renews] };
 
   it("grants green only through cited lines the judge names, and keeps them for the reviewer", () => {
-    const [audited] = auditGroundingSpans(args, sources(), judged([[renews, { verdict: "supported", lines: [2] }]]));
+    const [audited] = auditGroundingSpans(args, sources(), judged([[renews, { verdict: "supported", lines: ["A2"] }]]));
     expect(audited).toMatchObject({
       tier: "verifiable",
       judge: "test:judge",
-      lines: [1, 2],
-      support: [{ line: 2, text: 'renewal_date: "2027-03-04"' }],
+      cites: [{ evidenceId: "ev_1", lines: [1, 2] }],
+      support: [{ evidenceId: "ev_1", line: 2, text: 'renewal_date: "2027-03-04"' }],
     });
   });
 
   it("refuses support from a line the span did not cite", () => {
-    const [audited] = auditGroundingSpans(args, sources(), judged([[renews, { verdict: "supported", lines: [3] }]]));
+    const [audited] = auditGroundingSpans(args, sources(), judged([[renews, { verdict: "supported", lines: ["A3", "B2"] }]]));
     expect(audited).toMatchObject({ tier: "inconclusive", gap: { reason: "unverified-support" } });
   });
 
@@ -161,7 +173,7 @@ describe("auditGroundingSpans with a judge", () => {
   });
 
   it("refuses support from lines that do not state the claim's numbers", () => {
-    const [audited] = auditGroundingSpans(args, sources(), judged([[renews, { verdict: "supported", lines: [1] }]]));
+    const [audited] = auditGroundingSpans(args, sources(), judged([[renews, { verdict: "supported", lines: ["A1"] }]]));
     expect(audited?.gap).toEqual({ reason: "unverified-support" });
   });
 
@@ -170,7 +182,7 @@ describe("auditGroundingSpans with a judge", () => {
     const [audited] = auditGroundingSpans(
       { body: `${outage.text}.`, _grounding: [outage] },
       sources(),
-      judged([[outage, { verdict: "supported", lines: [5] }]]),
+      judged([[outage, { verdict: "supported", lines: ["A5"] }]]),
     );
     expect(audited?.gap).toEqual({ reason: "unverified-support" });
   });
@@ -180,7 +192,7 @@ describe("auditGroundingSpans with a judge", () => {
     const [audited] = auditGroundingSpans(
       { body: `${arrives.text}.`, _grounding: [arrives] },
       bodies({ ev_1: '{"eta": "2026-10-02"}' }),
-      judged([[arrives, { verdict: "supported", lines: [1] }]]),
+      judged([[arrives, { verdict: "supported", lines: ["A1"] }]]),
     );
     expect(audited?.tier).toBe("verifiable");
   });
@@ -209,10 +221,82 @@ describe("auditGroundingSpans with a judge", () => {
     const [audited] = auditGroundingSpans(
       { body: `${wrong.text}.`, _grounding: [wrong] },
       sources(),
-      judged([[wrong, { verdict: "supported", lines: [3] }]]),
+      judged([[wrong, { verdict: "supported", lines: ["A3"] }]]),
     );
     expect(audited).toMatchObject({ tier: "asserted", gap: { reason: "figures" } });
     expect(audited?.judge).toBeUndefined();
+  });
+});
+
+describe("claims joining several sources", () => {
+  /** [1] order id  [2] status  [3] carrier — and a second lookup: [1] the refund. */
+  const ORDER = JSON.stringify({ order_id: "ORD-88213", status: "shipped", carrier: "UPS" });
+  const REFUND = "Refund RF-2210 of $18.50 was issued on 2026-10-01.";
+  const multi = () => bodies({ ev_1: ORDER, ev_2: REFUND });
+  const joined = {
+    arg: "body",
+    text: "Order ORD-88213 shipped via UPS, and refund RF-2210 of $18.50 went out",
+    cites: [
+      { evidenceId: "ev_1", lines: [1, 2, 3] },
+      { evidenceId: "ev_2", lines: [1] },
+    ],
+  };
+  const args = { body: `${joined.text}.`, _grounding: [joined] };
+
+  it("shows the judge every cited line under a label naming its source", () => {
+    const [pending] = pendingJudgements(args, multi());
+    expect(pending?.lines.map((l) => [l.evidenceId, l.line])).toEqual([
+      ["ev_1", 1],
+      ["ev_1", 2],
+      ["ev_1", 3],
+      ["ev_2", 1],
+    ]);
+  });
+
+  it("verifies a claim from support drawn from both sources", () => {
+    const [audited] = auditGroundingSpans(
+      args,
+      multi(),
+      judged([[joined, { verdict: "supported", lines: ["A1", "A2", "A3", "B1"] }]]),
+    );
+    expect(audited?.tier).toBe("verifiable");
+    expect(audited?.support?.map((l) => `${l.evidenceId}#${l.line}`)).toEqual(["ev_1#1", "ev_1#2", "ev_1#3", "ev_2#1"]);
+  });
+
+  it("refuses support that leaves out the source holding one of the claim's numbers", () => {
+    const [audited] = auditGroundingSpans(
+      args,
+      multi(),
+      judged([[joined, { verdict: "supported", lines: ["A1", "A2", "A3"] }]]),
+    );
+    expect(audited?.gap).toEqual({ reason: "unverified-support" });
+  });
+
+  it("checks figures against the lines of every cited source", () => {
+    const onlyOrder = { ...joined, cites: [joined.cites[0]!] };
+    const [audited] = auditGroundingSpans({ body: `${joined.text}.`, _grounding: [onlyOrder] }, multi());
+    expect(audited).toMatchObject({ tier: "asserted", gap: { reason: "figures", tokens: ["RF-2210", "$18.50"] } });
+  });
+
+  it("asserts the whole span when any one of its sources is gone or misnumbered", () => {
+    const gone = { ...joined, cites: [joined.cites[0]!, { evidenceId: "ev_missing", lines: [1] }] };
+    const misnumbered = { ...joined, cites: [joined.cites[0]!, { evidenceId: "ev_2", lines: [9] }] };
+    expect(auditGroundingSpans({ body: `${joined.text}.`, _grounding: [gone] }, multi())[0]?.gap).toEqual({
+      reason: "no-entry",
+    });
+    expect(auditGroundingSpans({ body: `${joined.text}.`, _grounding: [misnumbered] }, multi())[0]?.gap).toEqual({
+      reason: "bad-lines",
+    });
+  });
+
+  it("will not grade a sentence citing more sources than one claim joins", () => {
+    const ids = Array.from({ length: MAX_CITED_SOURCES + 1 }, (_, i) => `ev_${i + 1}`);
+    const many = { arg: "body", text: "It all checks out", cites: ids.map((evidenceId) => ({ evidenceId, lines: [1] })) };
+    const [audited] = auditGroundingSpans(
+      { body: "It all checks out.", _grounding: [many] },
+      bodies(Object.fromEntries(ids.map((id) => [id, "A fact."]))),
+    );
+    expect(audited?.gap).toEqual({ reason: "broad-citation" });
   });
 });
 
@@ -223,7 +307,7 @@ describe("hostile input", () => {
     const s = span(hostile, [1]);
     const args = { body: hostile, _grounding: [s] };
     pendingJudgements(args, bodies({ ev_1: hostile }));
-    auditGroundingSpans(args, bodies({ ev_1: hostile }), judged([[s, { verdict: "supported", lines: [1] }]]));
+    auditGroundingSpans(args, bodies({ ev_1: hostile }), judged([[s, { verdict: "supported", lines: ["A1"] }]]));
     segmentAuditedText(hostile, []);
     expect(performance.now() - started).toBeLessThan(2_000);
   });
@@ -248,7 +332,11 @@ describe("segmentAuditedText", () => {
     const text = "Renews 2027. A $45.00 fee applies.";
     const segments = segmentAuditedText(text, [{ ...span("Renews 2027", [2]), tier: "verifiable" }]);
     expect(segments.map((s) => s.text).join("")).toBe(text);
-    expect(segments[0]).toMatchObject({ text: "Renews 2027", tier: "verifiable", evidenceId: "ev_1", lines: [2] });
+    expect(segments[0]).toMatchObject({
+      text: "Renews 2027",
+      tier: "verifiable",
+      cites: [{ evidenceId: "ev_1", lines: [2] }],
+    });
     expect(segments.find((s) => s.unbacked)?.text).toBe("$45.00");
   });
 });

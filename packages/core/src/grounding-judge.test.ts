@@ -8,22 +8,24 @@ import {
 import type { PendingJudgement } from "./grounding.js";
 import { isGroundingJudgeSetting } from "./settings.js";
 
-const pending = (claim: string, lines = [{ line: 1, text: claim }], evidenceId = "ev_1"): PendingJudgement => ({
-  key: `${evidenceId}:${claim}`,
+const pending = (claim: string, lines = [{ evidenceId: "ev_1", line: 1, text: claim }]): PendingJudgement => ({
+  key: claim,
   claim,
-  evidenceId,
   lines,
 });
 
 describe("judgeItems", () => {
-  it("addresses each claim by a short id and shows the judge only its cited lines", () => {
+  it("addresses each claim by a short id and shows the judge only its cited lines, labelled by source", () => {
     const items = judgeItems([
-      pending("Renews 2027", [{ line: 2, text: "renewal: 2027" }]),
-      pending("Fee $12", [{ line: 4, text: "fee 12" }, { line: 5, text: "waived=false" }]),
+      pending("Renews 2027", [{ evidenceId: "ev_1", line: 2, text: "renewal: 2027" }]),
+      pending("Fee $12 refunded", [
+        { evidenceId: "ev_1", line: 4, text: "fee 12" },
+        { evidenceId: "ev_9", line: 1, text: "refund issued" },
+      ]),
     ]);
     expect(items.map((item) => item.id)).toEqual(["c1", "c2"]);
     expect(judgePrompt(items)).toContain(
-      '<item id="c2">\n<lines>\n[4] fee 12\n[5] waived=false\n</lines>\n<claim>Fee $12</claim>\n</item>',
+      '<item id="c2">\n<lines>\n[A4] fee 12\n[B1] refund issued\n</lines>\n<claim>Fee $12 refunded</claim>\n</item>',
     );
   });
 });
@@ -37,25 +39,34 @@ describe("parseJudgeResponse", () => {
       {
         verdicts: [
           { id: "c2", verdict: "unsupported", lines: [] },
-          { id: "c1", verdict: "supported", lines: [1] },
+          { id: "c1", verdict: "supported", lines: ["A1"] },
           { id: "c3", verdict: "unclear", lines: [] },
         ],
       },
       items,
       batch,
     );
-    expect(outcomes.get(batch[0]!.key)).toEqual({ verdict: "supported", lines: [1] });
+    expect(outcomes.get(batch[0]!.key)).toEqual({ verdict: "supported", lines: ["A1"] });
     expect(outcomes.get(batch[1]!.key)).toEqual({ verdict: "unsupported", lines: [] });
     expect(outcomes.get(batch[2]!.key)).toEqual({ verdict: "unclear", lines: [] });
+  });
+
+  it("reads a label the judge copied with its brackets as the label itself", () => {
+    const outcomes = parseJudgeResponse(
+      { verdicts: [{ id: "c1", verdict: "supported", lines: ["[A3]", " [b12] "] }] },
+      items,
+      batch,
+    );
+    expect(outcomes.get(batch[0]!.key)).toEqual({ verdict: "supported", lines: ["A3", "B12"] });
   });
 
   it("fails any claim the answer omits, repeats or misshapes, never reading it as support", () => {
     const outcomes = parseJudgeResponse(
       {
         verdicts: [
-          { id: "c1", verdict: "supported", lines: [1] },
-          { id: "c1", verdict: "supported", lines: [1] },
-          { id: "c2", verdict: "supported", lines: ["1"] },
+          { id: "c1", verdict: "supported", lines: ["A1"] },
+          { id: "c1", verdict: "supported", lines: ["A1"] },
+          { id: "c2", verdict: "supported", lines: [1] },
         ],
       },
       items,

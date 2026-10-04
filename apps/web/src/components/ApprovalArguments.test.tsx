@@ -138,7 +138,7 @@ function groundingView(
   return { status, spans, hoveredId: null, onHover: () => undefined, onSelect: () => undefined };
 }
 
-const cited = { arg: "body", text: "renews on March 4th", evidenceId: "ev_1" };
+const cited = { arg: "body", text: "renews on March 4th", cites: [{ evidenceId: "ev_1", lines: [2] }] };
 const graded = (tier: GroundingView["spans"][number]["tier"], extra: Partial<GroundingView["spans"][number]> = {}) => ({
   ...cited,
   tier,
@@ -151,7 +151,7 @@ describe("ApprovalArguments citations", () => {
       <ApprovalArguments
         value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
         grounding={groundingView([
-          graded("verifiable", { judge: "test:judge", lines: [2], support: [{ line: 2, text: "renews 2027-03-04" }] }),
+          graded("verifiable", { judge: "test:judge", support: [{ evidenceId: "ev_1", line: 2, text: "renews 2027-03-04" }] }),
         ])}
       />,
     );

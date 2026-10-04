@@ -79,7 +79,10 @@ export class GroundingJudge {
     );
     return {
       judge: judgeId ?? null,
-      spans: audited.map((span) => ({ ...span, ...(identities.get(span.evidenceId) ?? {}) })),
+      spans: audited.map((span) => ({
+        ...span,
+        cites: span.cites.map((cite) => ({ ...cite, ...(identities.get(cite.evidenceId) ?? {}) })),
+      })),
     };
   }
 

@@ -8,7 +8,7 @@ import {
   withoutGroundingArgument,
 } from "./grounding.js";
 
-const span = (text: string, evidenceId = "ev_1", arg = "body") => ({ arg, text, evidenceId, lines: [1] });
+const span = (text: string, evidenceId = "ev_1", arg = "body") => ({ arg, text, cites: [{ evidenceId, lines: [1] }] });
 
 const audited = (text: string, tier: AuditedSpan["tier"], evidenceId = "ev_1"): AuditedSpan => ({
   ...span(text, evidenceId),
@@ -63,16 +63,15 @@ describe("withoutGroundingArgument", () => {
 describe("segmentAuditedText", () => {
   it("replays the stored tier and its verified support rather than grading the text again", () => {
     const segments = segmentAuditedText("We renew in 2027.", [
-      { ...audited("renew in 2027", "verifiable"), judge: "test:judge", lines: [3], support: [{ line: 3, text: "renewal: 2027" }] },
+      { ...audited("renew in 2027", "verifiable"), judge: "test:judge", support: [{ evidenceId: "ev_1", line: 1, text: "renewal: 2027" }] },
     ]);
     expect(segments).toEqual([
       { text: "We ", tier: "uncited" },
       {
         text: "renew in 2027",
         tier: "verifiable",
-        evidenceId: "ev_1",
-        lines: [3],
-        support: [{ line: 3, text: "renewal: 2027" }],
+        cites: [{ evidenceId: "ev_1", lines: [1] }],
+        support: [{ evidenceId: "ev_1", line: 1, text: "renewal: 2027" }],
       },
       { text: ".", tier: "uncited" },
     ]);
@@ -96,7 +95,7 @@ describe("segmentAuditedText", () => {
       audited("two free swaps and", "verifiable", "ev_1"),
       audited("swaps and a waived", "asserted", "ev_2"),
     ]);
-    expect(segments.map((segment) => segment.evidenceId)).toEqual(["ev_1", undefined]);
+    expect(segments.map((segment) => segment.cites?.[0]?.evidenceId)).toEqual(["ev_1", undefined]);
   });
 
   it("counts what checked out for a reviewer's summary", () => {

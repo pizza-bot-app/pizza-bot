@@ -1,16 +1,16 @@
 /** A judge model double: answers each item of a judge prompt with `decide`, counting calls. */
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import type { JudgeVerdict, SupportLine } from "@pizza-bot/core";
+import type { JudgeItem, JudgeVerdict } from "@pizza-bot/core";
 import type { JudgeModel } from "./grounding-judge.js";
 
-export type Decide = (claim: string, lines: SupportLine[]) => { verdict: JudgeVerdict; lines: number[] };
+export type Decide = (claim: string, lines: JudgeItem["lines"]) => { verdict: JudgeVerdict; lines: string[] };
 
 const ITEM = /<item id="([^"]+)">\n<lines>\n([\s\S]*?)\n<\/lines>\n<claim>([\s\S]*?)<\/claim>\n<\/item>/g;
 
-function parseLines(block: string): SupportLine[] {
+function parseLines(block: string): JudgeItem["lines"] {
   return block.split("\n").flatMap((row) => {
-    const match = /^\[(\d+)\] (.*)$/.exec(row);
-    return match ? [{ line: Number(match[1]), text: match[2]! }] : [];
+    const match = /^\[([A-Z]\d+)\] (.*)$/.exec(row);
+    return match ? [{ label: match[1]!, text: match[2]! }] : [];
   });
 }
 
@@ -39,5 +39,5 @@ export function fakeJudge(decide: Decide, id = "test:judge"): JudgeModel & { cal
 /** Supports every claim with all of the lines it cites. */
 export const supportAll: Decide = (_claim, lines) => ({
   verdict: "supported",
-  lines: lines.map((line) => line.line),
+  lines: lines.map((line) => line.label),
 });
