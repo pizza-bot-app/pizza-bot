@@ -150,14 +150,16 @@ describe("ApprovalArguments citations", () => {
     const html = renderToStaticMarkup(
       <ApprovalArguments
         value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
-        grounding={groundingView([graded("verifiable", { judge: "test:judge", support: ["renews 2027-03-04"] })])}
+        grounding={groundingView([
+          graded("verifiable", { judge: "test:judge", lines: [2], support: [{ line: 2, text: "renews 2027-03-04" }] }),
+        ])}
       />,
     );
 
     expect(html).toContain("grounding-verifiable");
     expect(html).toContain(">renews on March 4th</span>");
     expect(html).toContain("The source says:");
-    expect(html).toContain("renews 2027-03-04");
+    expect(html).toContain("[2] renews 2027-03-04");
     expect(html).toContain("Your plan ");
     expect(html).not.toContain("Grounding");
     expect(html).not.toContain("ev_1");
@@ -174,7 +176,7 @@ describe("ApprovalArguments citations", () => {
     );
 
     expect(html).toContain("grounding-asserted");
-    expect(html).toContain("Not in the cited source: $12");
+    expect(html).toContain("Not in the cited lines: $12");
   });
 
   it("says when the judge found the source does not support the span", () => {
@@ -186,7 +188,7 @@ describe("ApprovalArguments citations", () => {
     );
 
     expect(html).toContain("grounding-asserted");
-    expect(html).toContain("does not support this");
+    expect(html).toContain("do not support this");
   });
 
   it("says claim checking is off instead of implying the span was checked", () => {
@@ -202,28 +204,27 @@ describe("ApprovalArguments citations", () => {
     expect(html).not.toContain("grounding-verifiable");
   });
 
-  it("refuses to trust a supported verdict whose quote did not check out", () => {
+  it("refuses to trust a supported verdict whose lines did not check out", () => {
     const html = renderToStaticMarkup(
       <ApprovalArguments
         value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
-        grounding={groundingView([graded("inconclusive", { gap: { reason: "unverified-quote" } })])}
+        grounding={groundingView([graded("inconclusive", { gap: { reason: "unverified-support" } })])}
       />,
     );
 
     expect(html).toContain("was not trusted");
   });
 
-  it("says a clipped source could not settle the span, rather than calling it unsupported", () => {
+  it("says a citation naming lines the source does not have points at nothing", () => {
     const html = renderToStaticMarkup(
       <ApprovalArguments
         value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
-        grounding={groundingView([graded("inconclusive", { gap: { reason: "clipped" } })])}
+        grounding={groundingView([graded("asserted", { gap: { reason: "bad-lines" } })])}
       />,
     );
 
-    expect(html).toContain("grounding-inconclusive");
-    expect(html).toContain("too large to keep in full");
-    expect(html).not.toContain("grounding-asserted");
+    expect(html).toContain("grounding-asserted");
+    expect(html).toContain("points at nothing");
   });
 
   it("marks cited spans as being checked until the server's grading arrives", () => {

@@ -43,6 +43,7 @@ describe("applySkillGrounding", () => {
     // The audit resolves a span by searching the argument, so the contract must ask for
     // the model's own wording rather than the evidence's.
     expect(description).toContain("never the evidence's wording");
+    expect(description).toContain("`lines`: the [n] numbers of the lines");
   });
 
   it("never passes verifiedArgs through to the upstream config", () => {

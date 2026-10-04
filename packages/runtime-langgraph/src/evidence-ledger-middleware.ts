@@ -1,13 +1,13 @@
 /**
- * Records the tool outputs a grounded skill may cite and stamps each result with its
- * evidence id, which is the only way the model learns an id to cite. The body cap is
- * applied to the output itself, so the bytes the model reads are the bytes a
- * reviewer verifies against.
+ * Records the tool outputs a grounded skill may cite and hands the model each one as
+ * numbered lines under its evidence id — the only way it learns what to cite. The ledger
+ * stores that numbered text, so a cited line means the same bytes to model and reviewer.
  */
 import { ToolMessage } from "@langchain/core/messages";
 import { createMiddleware } from "langchain";
 import {
   clipEvidenceBody,
+  numberEvidenceLines,
   MAX_EVIDENCE_BODY_BYTES,
   type EvidenceRecorder,
   type Logger,
@@ -56,25 +56,16 @@ export function evidenceBreadcrumb(toolRef: string, args: unknown): string {
   return parts.length > 0 ? `${toolRef} (${parts.join(", ")})` : toolRef;
 }
 
-function stampedContent(
-  message: ToolMessage,
-  marker: string,
-  clipped: string | undefined,
-): ToolMessage["content"] {
-  if (clipped !== undefined) return `${marker}\n${clipped}`;
-  if (typeof message.content === "string") return `${marker}\n${message.content}`;
-  return [{ type: "text" as const, text: marker }, ...message.content];
+/** The numbered text replaces the result's text; anything else it carried (an image) stays. */
+function stampedContent(message: ToolMessage, stamped: string): ToolMessage["content"] {
+  if (typeof message.content === "string") return stamped;
+  const rest = message.content.filter((part) => part.type !== "text");
+  return rest.length === 0 ? stamped : [{ type: "text" as const, text: stamped }, ...rest];
 }
 
-function withMarker(
-  message: ToolMessage,
-  marker: string,
-  clipped: string | undefined,
-): ToolMessage {
-  const stamped = Object.create(Object.getPrototypeOf(message)) as ToolMessage;
-  return Object.assign(stamped, message, {
-    content: stampedContent(message, marker, clipped),
-  });
+function withNumberedLines(message: ToolMessage, stamped: string): ToolMessage {
+  const copy = Object.create(Object.getPrototypeOf(message)) as ToolMessage;
+  return Object.assign(copy, message, { content: stampedContent(message, stamped) });
 }
 
 export function evidenceLedgerMiddleware(options: EvidenceLedgerOptions) {
@@ -96,6 +87,8 @@ export function evidenceLedgerMiddleware(options: EvidenceLedgerOptions) {
       const text = result.text.trim() || JSON.stringify(result.content);
       if (!text) return result;
       const clip = clipEvidenceBody(text, maxBodyBytes);
+      const numbered = numberEvidenceLines(clip.body);
+      if (!numbered) return result;
 
       try {
         const entry = await options.recorder({
@@ -103,17 +96,13 @@ export function evidenceLedgerMiddleware(options: EvidenceLedgerOptions) {
           runId: typeof runId === "string" ? runId : "",
           toolRef,
           breadcrumb: evidenceBreadcrumb(toolRef, request.toolCall.args),
-          body: clip.body,
+          body: numbered,
           bytes: clip.bytes,
           truncated: clip.truncated,
         });
         // A full ledger leaves the result uncitable rather than citable-but-unrecorded.
         if (!entry) return result;
-        return withMarker(
-          result,
-          evidenceMarker(entry.id, clip),
-          clip.truncated ? clip.body : undefined,
-        );
+        return withNumberedLines(result, `${evidenceMarker(entry.id, clip)}\n${numbered}`);
       } catch (err) {
         options.logger?.warn(
           `[evidence] failed to record ${toolRef}: ${err instanceof Error ? err.message : String(err)}`,

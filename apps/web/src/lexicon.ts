@@ -43,7 +43,7 @@ export const L = {
   maxSubagentToolCallsHint: "Most tool calls a subagent can make for one delegated task. At the limit further tool calls are refused and the task ends. Leave empty for no limit. Applies to new runs.",
   toolCallLimitInvalid: "Enter a whole number of 1 or more, or leave it empty for no limit.",
   groundingJudgeLabel: "Claim checking",
-  groundingJudgeHint: "Before you approve an action, a model checks each cited claim against the tool output it cites and quotes the passage that supports it. Only claims whose quote is found in the source are marked as checked. Automatic uses a small, inexpensive model from your default provider.",
+  groundingJudgeHint: "Before you approve an action, a model checks each cited claim against the lines of tool output it cites. A claim is marked as checked only when those lines support it and state its numbers. Automatic uses a small, inexpensive model from your default provider.",
   groundingJudgeOff: "Off",
   groundingJudgeAuto: "Automatic (small model)",
   notificationsTitle: "Notifications",

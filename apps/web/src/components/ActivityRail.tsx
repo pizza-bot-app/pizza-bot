@@ -255,11 +255,11 @@ function VerdictQuote({ span, links }: { span: ApprovalVerdictSpan; links: Groun
       onMouseLeave={() => links.onHover(null)}
       onFocus={() => links.onHover(id)}
       onBlur={() => links.onHover(null)}
-      onClick={() => links.onSelect(id)}
+      onClick={() => links.onSelect(id, span.lines)}
       onKeyDown={(e: KeyboardEvent) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          links.onSelect(id);
+          links.onSelect(id, span.lines);
         }
       }}
     >
@@ -358,7 +358,11 @@ function EvidenceCard({
       </div>
       {open ? (
         <>
-          <pre className="evidence-body">{body?.text ?? entry.excerpt}</pre>
+          {body ? (
+            <EvidenceBody text={body.text} cited={selected ? ledger.selectedLines : NO_LINES} />
+          ) : (
+            <pre className="evidence-body">{entry.excerpt}</pre>
+          )}
           {entry.truncated && (
             <div className="evidence-note">
               Clipped — the model read {formatSize(MAX_EVIDENCE_BODY_BYTES)} of this{" "}
@@ -375,6 +379,34 @@ function EvidenceCard({
         <div className="evidence-excerpt">{entry.excerpt}</div>
       )}
     </li>
+  );
+}
+
+const NO_LINES: readonly number[] = [];
+const NUMBERED_LINE = /^\[(\d+)\] /;
+
+/** The stored lines, with the ones a clicked citation named picked out and scrolled to. */
+export function EvidenceBody({ text, cited }: { text: string; cited: readonly number[] }) {
+  const first = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    first.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [cited]);
+  let marked = false;
+  return (
+    <pre className="evidence-body">
+      {text.split("\n").map((line, index) => {
+        const number = Number(NUMBERED_LINE.exec(line)?.[1]);
+        const isCited = cited.includes(number);
+        const ref = isCited && !marked ? first : undefined;
+        if (isCited) marked = true;
+        return (
+          <span key={index} ref={ref} className={isCited ? "evidence-line cited" : "evidence-line"}>
+            {line}
+            {"\n"}
+          </span>
+        );
+      })}
+    </pre>
   );
 }
 

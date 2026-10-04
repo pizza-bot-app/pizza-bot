@@ -382,6 +382,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
               arg: "body",
               text: "The renewal date is March 4th.",
               evidenceId: "ev_1",
+              lines: [1],
             }],
           },
           type: "tool_call",
@@ -427,19 +428,19 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       threadId,
       runId: "run_grounding",
       toolRef: "mcp:mailer:search",
-      body: "The renewal date is March 4th.",
+      body: "[1] The renewal date is March 4th.",
     }]);
 
-    // Without the marker in its own prompt the model has no id it could cite.
+    // Without the marker and line numbers in its own prompt the model has nothing it could cite.
     const shown = model.prompts.flat().map((message) => String(message.content));
-    expect(shown.some((content) => content.includes("[evidence ev_1]"))).toBe(true);
+    expect(shown.some((content) => content.includes("[evidence ev_1]\n[1] The renewal date is March 4th."))).toBe(true);
 
     const requested = events.find((e) => channelOf(e) === "input.requested");
     const args = (requested!.params.data as {
       payload: { actionRequests: Array<{ args: Record<string, unknown> }> };
     }).payload.actionRequests[0]!.args;
     expect(args._grounding).toEqual([
-      { arg: "body", text: "The renewal date is March 4th.", evidenceId: "ev_1" },
+      { arg: "body", text: "The renewal date is March 4th.", evidenceId: "ev_1", lines: [1] },
     ]);
   });
 

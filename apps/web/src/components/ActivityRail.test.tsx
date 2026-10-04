@@ -6,7 +6,7 @@ import {
   type EvidenceEntry,
 } from "@pizza-bot/core";
 import type { DelegationInfo } from "@/projection";
-import { ActivityRail, ApprovalsSection, EvidenceSection, formatSize } from "./ActivityRail.js";
+import { ActivityRail, ApprovalsSection, EvidenceBody, EvidenceSection, formatSize } from "./ActivityRail.js";
 import type { EvidenceLedger } from "../use-evidence.js";
 
 function delegation(overrides: Partial<DelegationInfo> = {}): DelegationInfo {
@@ -96,6 +96,7 @@ function ledger(
     citedIds: new Set(citedIds),
     hoveredId: null,
     selectedId: null,
+    selectedLines: [],
     cite: () => undefined,
     loadBodies: () => undefined,
     hover: () => undefined,
@@ -189,7 +190,7 @@ describe("ActivityRail approved actions", () => {
     expect(html).toContain("grounding-verifiable");
     expect(html).toContain("grounding-asserted");
     expect(html).toContain("grounding-unresolved");
-    expect(html).toContain("Not in the cited source: $1,200.00");
+    expect(html).toContain("Not in the cited lines: $1,200.00");
     expect(html).toContain("sent with edits");
   });
 
@@ -261,5 +262,15 @@ describe("ActivityRail approved actions", () => {
     expect(html).toContain("verdict-spans");
     expect(html).toContain("not checked");
     expect(html).toContain("Rewritten by the reviewer.");
+  });
+});
+
+describe("EvidenceBody", () => {
+  it("picks out the lines a clicked citation named, and only those", () => {
+    const html = renderToStaticMarkup(
+      <EvidenceBody text={'[1] plan: "Standard"\n[2] renewal_date: "2027-03-04"\n[3] status: "active"'} cited={[2]} />,
+    );
+    expect(html.match(/evidence-line cited/g)).toHaveLength(1);
+    expect(html).toContain('<span class="evidence-line cited">[2] renewal_date: &quot;2027-03-04&quot;');
   });
 });

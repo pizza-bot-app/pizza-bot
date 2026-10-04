@@ -3,28 +3,21 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openAppDatabase, type AppDatabase } from "@pizza-bot/storage";
-import type { ThreadState } from "@pizza-bot/core";
+import { numberEvidenceLines, type ThreadState } from "@pizza-bot/core";
 import { approvalAuditor } from "./approval-audit.js";
 import { GroundingJudge, type JudgeModel } from "./grounding-judge.js";
-import { fakeJudge, type Decide } from "./grounding-judge.test-support.js";
+import { fakeJudge, supportAll, type Decide } from "./grounding-judge.test-support.js";
 import { dispatchProtocolCommand } from "./protocol-commands.js";
 import type { ProtocolRunManager } from "./protocol-run-manager.js";
 
 const THREAD = "t1";
 const BODY = "Your contract renews on March 4, 2027 and includes two free swaps.";
+/** Numbered as the ledger stores it: [1] the renewal, [2] the swaps. */
 const LEDGER = "Agreement: renews March 4, 2027. Entitlements: two free swaps per year.";
 
-const span = (text: string, evidenceId: string) => ({ arg: "body", text, evidenceId });
+const span = (text: string, evidenceId: string, lines = [1]) => ({ arg: "body", text, evidenceId, lines });
 
-/** Supports a claim by quoting the source sentence that shares one of its longer words. */
-const quoting: Decide = (claim, source) => {
-  const sentence = source
-    .split(/(?<=\.)\s+/)
-    .find((s) => claim.split(" ").some((word) => word.length > 4 && s.includes(word)));
-  return sentence ? { verdict: "supported", quotes: [sentence] } : { verdict: "unsupported", quotes: [] };
-};
-
-const refuting: Decide = () => ({ verdict: "unsupported", quotes: [] });
+const refuting: Decide = () => ({ verdict: "unsupported", lines: [] });
 
 describe("approval verdict trail", () => {
   let evidenceDir: string;
@@ -37,7 +30,7 @@ describe("approval verdict trail", () => {
       runId: "run_paused",
       toolRef: "mcp:mail:search",
       breadcrumb: opts.breadcrumb ?? "mcp:mail:search (query: renewal)",
-      body,
+      body: numberEvidenceLines(body),
       bytes: opts.bytes ?? body.length,
       truncated: opts.truncated ?? false,
     })!.id;
@@ -77,7 +70,7 @@ describe("approval verdict trail", () => {
     value: unknown,
     resume: unknown,
     /** `null` is claim checking switched off. */
-    judge: JudgeModel | null = fakeJudge(quoting),
+    judge: JudgeModel | null = fakeJudge(supportAll),
   ) => {
     const getState = vi.fn(async () => pausedState(value));
     const runs = {
@@ -110,7 +103,7 @@ describe("approval verdict trail", () => {
       body: BODY,
       _grounding: [
         span("renews on March 4, 2027", evidenceId),
-        span("includes two free swaps", evidenceId),
+        span("includes two free swaps", evidenceId, [2]),
         span("waived the $12 fee", evidenceId),
       ],
     };
@@ -136,15 +129,16 @@ describe("approval verdict trail", () => {
   });
 
   it("keeps the judge, its verified support and the evidence identity behind a span", async () => {
-    await respond(interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId)] }), approve);
+    await respond(interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId, [2])] }), approve);
 
     expect(app.approvalVerdicts.listByThread(THREAD)[0]?.spans[0]).toEqual({
       arg: "body",
       text: "two free swaps",
       evidenceId,
+      lines: [2],
       tier: "verifiable",
       judge: "test:judge",
-      support: ["Entitlements: two free swaps per year."],
+      support: [{ line: 2, text: "Entitlements: two free swaps per year." }],
       breadcrumb: "mcp:mail:search (query: renewal)",
       bytes: LEDGER.length,
       truncated: false,
@@ -152,7 +146,7 @@ describe("approval verdict trail", () => {
   });
 
   it("asserts a figure the cited entry never states without asking the judge", async () => {
-    const judge = fakeJudge(quoting);
+    const judge = fakeJudge(supportAll);
     const args = { body: "The $12 fee is waived.", _grounding: [span("The $12 fee is waived", evidenceId)] };
     await respond(interruptValue(args), approve, judge);
 
@@ -186,7 +180,7 @@ describe("approval verdict trail", () => {
 
   it("records nothing green when claim checking is off", async () => {
     await respond(
-      interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId)] }),
+      interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId, [2])] }),
       approve,
       null,
     );
@@ -201,7 +195,7 @@ describe("approval verdict trail", () => {
       throw new Error("provider down");
     });
     await respond(
-      interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId)] }),
+      interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId, [2])] }),
       approve,
       broken,
     );
@@ -212,7 +206,7 @@ describe("approval verdict trail", () => {
     });
   });
 
-  it("withholds a verdict rather than accusing a draft the clipped source cannot answer", async () => {
+  it("rejects a citation of a line the clipped source never kept", async () => {
     const clippedId = record("Mailbox export, first page: renewal correspondence.", {
       bytes: 512_000,
       truncated: true,
@@ -221,14 +215,14 @@ describe("approval verdict trail", () => {
     await respond(
       interruptValue({
         body: "The renewal amount is $1,200.00.",
-        _grounding: [span("renewal amount is $1,200.00", clippedId)],
+        _grounding: [span("renewal amount is $1,200.00", clippedId, [40])],
       }),
       approve,
     );
 
     expect(app.approvalVerdicts.listByThread(THREAD)[0]?.spans[0]).toMatchObject({
-      tier: "inconclusive",
-      gap: { reason: "clipped" },
+      tier: "asserted",
+      gap: { reason: "bad-lines" },
       truncated: true,
     });
   });
@@ -236,7 +230,7 @@ describe("approval verdict trail", () => {
   it("will not read another thread's evidence as a source", async () => {
     const foreign = record(LEDGER, { threadId: "t2", breadcrumb: "other thread" });
 
-    await respond(interruptValue({ body: BODY, _grounding: [span("two free swaps", foreign)] }), approve);
+    await respond(interruptValue({ body: BODY, _grounding: [span("two free swaps", foreign, [2])] }), approve);
 
     expect(app.approvalVerdicts.listByThread(THREAD)[0]?.spans[0]).toMatchObject({
       tier: "asserted",
@@ -247,7 +241,7 @@ describe("approval verdict trail", () => {
   it("re-audits an edit against the text that ships, not the draft it replaced", async () => {
     const drafted = {
       body: BODY,
-      _grounding: [span("renews on March 4, 2027", evidenceId), span("includes two free swaps", evidenceId)],
+      _grounding: [span("renews on March 4, 2027", evidenceId), span("includes two free swaps", evidenceId, [2])],
     };
     const edited = { ...drafted, body: "Your contract renews on March 4, 2027. Swap terms are attached." };
 
@@ -267,7 +261,7 @@ describe("approval verdict trail", () => {
 
   it("keeps the dispatched arguments, minus the citations that are not content", async () => {
     await respond(
-      interruptValue({ to: "someone@example.test", body: BODY, _grounding: [span("two free swaps", evidenceId)] }),
+      interruptValue({ to: "someone@example.test", body: BODY, _grounding: [span("two free swaps", evidenceId, [2])] }),
       approve,
     );
 
@@ -291,7 +285,7 @@ describe("approval verdict trail", () => {
 
   it("records nothing on a reject, and does not even read the paused state", async () => {
     const { getState } = await respond(
-      interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId)] }),
+      interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId, [2])] }),
       { interruptId: "approval-1", decisions: [{ decision: "reject", message: "no" }] },
     );
 
@@ -300,7 +294,7 @@ describe("approval verdict trail", () => {
   });
 
   it("records one row per approved call in a batch", async () => {
-    const args = { body: BODY, _grounding: [span("two free swaps", evidenceId)] };
+    const args = { body: BODY, _grounding: [span("two free swaps", evidenceId, [2])] };
     await respond(interruptValue(args, [{ name: "mcp:mail:send", args: { body: "No citations here." } }]), {
       interruptId: "approval-1",
       decisions: [{ decision: "approve" }, { decision: "approve" }],
@@ -312,7 +306,7 @@ describe("approval verdict trail", () => {
   });
 
   it("leaves no record when the resume names an interrupt the thread is not holding", async () => {
-    await respond(interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId)] }), {
+    await respond(interruptValue({ body: BODY, _grounding: [span("two free swaps", evidenceId, [2])] }), {
       interruptId: "approval-stale",
       decisions: [{ decision: "approve" }],
     });

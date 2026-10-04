@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  JUDGE_PASSAGE_CHARS,
   judgeItems,
   judgePrompt,
   parseJudgeResponse,
@@ -9,76 +8,60 @@ import {
 import type { PendingJudgement } from "./grounding.js";
 import { isGroundingJudgeSetting } from "./settings.js";
 
-const pending = (claim: string, text: string, evidenceId = "ev_1"): PendingJudgement => ({
+const pending = (claim: string, lines = [{ line: 1, text: claim }], evidenceId = "ev_1"): PendingJudgement => ({
   key: `${evidenceId}:${claim}`,
   claim,
   evidenceId,
-  source: { text },
+  lines,
 });
 
 describe("judgeItems", () => {
-  it("addresses each claim by a short id and passes a short source whole", () => {
-    const items = judgeItems([pending("Renews 2027", "renewal: 2027"), pending("Fee $12", "fee 12")]);
-    expect(items).toEqual([
-      { id: "c1", claim: "Renews 2027", source: "renewal: 2027" },
-      { id: "c2", claim: "Fee $12", source: "fee 12" },
+  it("addresses each claim by a short id and shows the judge only its cited lines", () => {
+    const items = judgeItems([
+      pending("Renews 2027", [{ line: 2, text: "renewal: 2027" }]),
+      pending("Fee $12", [{ line: 4, text: "fee 12" }, { line: 5, text: "waived=false" }]),
     ]);
-    expect(judgePrompt(items)).toContain('<item id="c2">\n<claim>Fee $12</claim>');
-  });
-
-  it("shows the judge the part of a long source that talks about the claim", () => {
-    const noise = "heartbeat ok, queue depth 3. ".repeat(2_000);
-    const needle = "ALERT: the processor returned 503 for 37 minutes; 212 charges were retried.";
-    const body = noise + needle + noise;
-    const [item] = judgeItems([pending("212 charges were retried after the outage", body)]);
-    expect(item!.source.length).toBeLessThanOrEqual(JUDGE_PASSAGE_CHARS + 20);
-    expect(item!.source).toContain("212 charges were retried");
+    expect(items.map((item) => item.id)).toEqual(["c1", "c2"]);
+    expect(judgePrompt(items)).toContain(
+      '<item id="c2">\n<lines>\n[4] fee 12\n[5] waived=false\n</lines>\n<claim>Fee $12</claim>\n</item>',
+    );
   });
 });
 
 describe("parseJudgeResponse", () => {
-  const batch = [pending("a", "x"), pending("b", "y"), pending("c", "z")];
+  const batch = [pending("a"), pending("b"), pending("c")];
   const items = judgeItems(batch);
 
   it("maps verdicts back onto the claims they answer", () => {
     const outcomes = parseJudgeResponse(
       {
         verdicts: [
-          { id: "c2", verdict: "unsupported", quotes: [] },
-          { id: "c1", verdict: "supported", quotes: ["x"] },
-          { id: "c3", verdict: "unclear", quotes: [] },
+          { id: "c2", verdict: "unsupported", lines: [] },
+          { id: "c1", verdict: "supported", lines: [1] },
+          { id: "c3", verdict: "unclear", lines: [] },
         ],
       },
       items,
       batch,
     );
-    expect(outcomes.get(batch[0]!.key)).toEqual({ verdict: "supported", quotes: ["x"] });
-    expect(outcomes.get(batch[1]!.key)).toEqual({ verdict: "unsupported", quotes: [] });
-    expect(outcomes.get(batch[2]!.key)).toEqual({ verdict: "unclear", quotes: [] });
+    expect(outcomes.get(batch[0]!.key)).toEqual({ verdict: "supported", lines: [1] });
+    expect(outcomes.get(batch[1]!.key)).toEqual({ verdict: "unsupported", lines: [] });
+    expect(outcomes.get(batch[2]!.key)).toEqual({ verdict: "unclear", lines: [] });
   });
 
   it("fails any claim the answer omits, repeats or misshapes, never reading it as support", () => {
     const outcomes = parseJudgeResponse(
       {
         verdicts: [
-          { id: "c1", verdict: "supported", quotes: ["x"] },
-          { id: "c1", verdict: "supported", quotes: ["x"] },
-          { id: "c2", verdict: "probably", quotes: [] },
+          { id: "c1", verdict: "supported", lines: [1] },
+          { id: "c1", verdict: "supported", lines: [1] },
+          { id: "c2", verdict: "supported", lines: ["1"] },
         ],
       },
       items,
       batch,
     );
     expect([...outcomes.values()]).toEqual([{ failed: true }, { failed: true }, { failed: true }]);
-  });
-
-  it("fails a support claim with more quotes than the contract allows", () => {
-    const outcomes = parseJudgeResponse(
-      { verdicts: [{ id: "c1", verdict: "supported", quotes: ["1", "2", "3", "4"] }] },
-      items,
-      batch,
-    );
-    expect(outcomes.get(batch[0]!.key)).toEqual({ failed: true });
   });
 
   it("fails everything when the answer is not the requested shape", () => {

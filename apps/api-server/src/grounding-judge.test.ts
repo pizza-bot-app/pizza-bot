@@ -3,14 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openAppDatabase, type AppDatabase } from "@pizza-bot/storage";
-import { JUDGE_BATCH, type ThreadState } from "@pizza-bot/core";
+import { JUDGE_BATCH, numberEvidenceLines, type ThreadState } from "@pizza-bot/core";
 import { GroundingJudge, type JudgeModel } from "./grounding-judge.js";
-import { fakeJudge, type Decide } from "./grounding-judge.test-support.js";
+import { fakeJudge, supportAll } from "./grounding-judge.test-support.js";
 
 const THREAD = "t1";
 const LEDGER = "Plan: Standard. Renewal: 2027-03-04. Two free swaps per year.";
 
-const supportWithWholeSource: Decide = (_claim, source) => ({ verdict: "supported", quotes: [source] });
 
 describe("GroundingJudge", () => {
   let dir: string;
@@ -25,7 +24,7 @@ describe("GroundingJudge", () => {
       runId: "r1",
       toolRef: "mcp:billing:account",
       breadcrumb: "billing account",
-      body: LEDGER,
+      body: numberEvidenceLines(LEDGER),
       bytes: LEDGER.length,
       truncated: false,
     })!.id;
@@ -41,11 +40,12 @@ describe("GroundingJudge", () => {
 
   const args = (...claims: string[]) => ({
     body: claims.join(" "),
-    _grounding: claims.map((text) => ({ arg: "body", text, evidenceId })),
+    // Every claim cites the whole ledger: [1] plan, [2] renewal, [3] swaps.
+    _grounding: claims.map((text) => ({ arg: "body", text, evidenceId, lines: [1, 2, 3] })),
   });
 
   it("asks the judge once per claim, however often the claim is graded", async () => {
-    const model = fakeJudge(supportWithWholeSource);
+    const model = fakeJudge(supportAll);
     const judge = judgeWith(async () => model);
     const first = await judge.audit(THREAD, args("Your plan renews in 2027."));
     const again = await judge.audit(THREAD, { ...args("Your plan renews in 2027."), to: "x@example.test" });
@@ -57,7 +57,7 @@ describe("GroundingJudge", () => {
   });
 
   it("shares one in-flight judgement between a card and an approval that ask together", async () => {
-    const model = fakeJudge(supportWithWholeSource);
+    const model = fakeJudge(supportAll);
     const judge = judgeWith(async () => model);
     await Promise.all([
       judge.audit(THREAD, args("Your plan renews in 2027.")),
@@ -70,7 +70,7 @@ describe("GroundingJudge", () => {
     let fail = true;
     const model = fakeJudge((claim, source) => {
       if (fail) throw new Error("timeout");
-      return supportWithWholeSource(claim, source);
+      return supportAll(claim, source);
     });
     const judge = judgeWith(async () => model);
     const failed = await judge.audit(THREAD, args("Your plan renews in 2027."));
@@ -83,7 +83,7 @@ describe("GroundingJudge", () => {
   });
 
   it("splits a large approval across several calls", async () => {
-    const model = fakeJudge(supportWithWholeSource);
+    const model = fakeJudge(supportAll);
     const claims = Array.from({ length: JUDGE_BATCH + 1 }, (_, i) => `Claim ${String.fromCharCode(97 + i)} renews in 2027.`);
     const { spans } = await judgeWith(async () => model).audit(THREAD, args(...claims));
     expect(spans.every((span) => span.tier === "verifiable")).toBe(true);
@@ -107,7 +107,7 @@ describe("GroundingJudge", () => {
   });
 
   it("grades every action of a pending interrupt in order, and nothing for one it is not holding", async () => {
-    const model = fakeJudge(supportWithWholeSource);
+    const model = fakeJudge(supportAll);
     const judge = judgeWith(async () => model);
     const state: ThreadState = {
       threadId: THREAD,

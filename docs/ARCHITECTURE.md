@@ -756,17 +756,20 @@ makes the draft carry its sources and checks the ones it claims, so the tiers be
 are drawn over the arguments that are about to be dispatched.
 
 The pipeline has five stages. Only the last uses a model, and its answer is
-checked against the source before it is believed:
+checked against the cited lines before it is believed:
 
 1. **Evidence ledger.** `runtime-langgraph/src/evidence-ledger-middleware.ts` is a
    `wrapToolCall` middleware bound to any skill-subagent whose tools carry the
-   citation argument. Each successful non-gated MCP result records one entry and
-   comes back stamped with an `[evidence ev_…]` marker — the only way the model
-   learns an id it can cite. Gated tools are skipped, because the action under
-   review is not its own evidence, and a thrown error passes through to
-   `toolErrorRecovery` (which wraps this middleware from outside) so failures are
-   never recorded as sources. `instrumentMcpTool` is the right shape for this and
-   the wrong layer: it cannot see `thread_id` / `run_id`.
+   citation argument. Each successful non-gated MCP result is split into numbered
+   lines (`core/src/evidence-lines.ts`: one line per JSON field, with each nested
+   object whose fields are all scalars — a row — kept on one line; one per sentence
+   of prose) and handed back as `[evidence ev_…]` followed by `[n] …` lines. That
+   numbered text is what the ledger stores, so a cited line number means the same
+   bytes to the model, the judge and the reviewer. Gated tools are skipped, because
+   the action under review is not its own evidence, and a thrown error passes
+   through to `toolErrorRecovery` (which wraps this middleware from outside) so
+   failures are never recorded as sources. `instrumentMcpTool` is the right shape
+   for this and the wrong layer: it cannot see `thread_id` / `run_id`.
 2. **Storage.** `storage/src/evidence.ts` keeps metadata in SQLite and bodies at
    `evidence/<id>`, reaching the runtime as an `EvidenceRecorder` on `RuntimeDeps`.
    `api-server/src/routes-evidence.ts` exposes read-only routes; there is
@@ -775,33 +778,36 @@ checked against the source before it is believed:
    verifiable prose (`verifiedArgs: [body]` beside `allowedDecisions` in
    `interruptOn`, parsed in `core/src/skill.ts`). For a declared tool,
    `plugin-sdk/src/mcp-grounding.ts` injects one optional
-   `_grounding?: Array<{arg, text, evidenceId}>` into the *adapted* schema bound to
-   the model, and `instrumentMcpTool` strips it at `args[0].args` before dispatch,
-   so the MCP server never sees it. `runtime-langgraph/src/skill-grounding.ts`
+   `_grounding?: Array<{arg, text, evidenceId, lines}>` into the *adapted* schema
+   bound to the model, and `instrumentMcpTool` strips it at `args[0].args` before
+   dispatch, so the MCP server never sees it. `text` quotes the draft; `lines` names
+   the evidence lines the claim rests on. `runtime-langgraph/src/skill-grounding.ts`
    appends the contract to the **tool's own description** — a directive injected
    into a tool *result* reads as prompt injection.
 4. **Deterministic checks** (`core/src/grounding.ts`, pure). Resolve each quoted span
-   to a unique position in the argument; a cited entry that is missing is `asserted`
-   (`no-entry`), and so is an exact figure — an amount, rate, year or identifier —
-   the cited body never states (`figures`). These checks only ever find reasons to
-   doubt a claim; none of them can mark one green.
+   to a unique position in the argument, then settle what needs no opinion: a missing
+   entry (`no-entry`), cited lines the entry does not have (`bad-lines`), and an
+   exact figure — an amount, rate, year or identifier — none of the cited lines
+   states (`figures`) are `asserted`; a span citing more than `MAX_CITED_LINES` is
+   `inconclusive` (`broad-citation`). These checks only ever find reasons to doubt a
+   claim; none of them can mark one green.
 5. **Judge** (`api-server/src/grounding-judge.ts`, contract in
    `core/src/grounding-judge.ts`). The claims left open go to the model chosen in
    Settings → Claim checking (`groundingJudge`: `off` by default, `auto`, or a
-   qualified model id). The judge reads each claim beside the passage of its cited
-   body that mentions it, and answers through structured output with a verdict and,
-   for `supported`, quotes copied from the source. A `supported` verdict counts only
-   if every quote is found in the cited body and the quotes hold the claim's
-   figures; otherwise the span is `inconclusive` (`unverified-quote`). Grading starts
-   when a run pauses on an interrupt, the card reads it from
+   qualified model id). The judge sees each claim beside only the lines it cites and
+   answers through structured output with a verdict and, for `supported`, the line
+   numbers that establish it. A `supported` verdict counts only if those lines are
+   among the cited ones and state every number the claim does; otherwise the span
+   is `inconclusive` (`unverified-support`). Grading starts when a run pauses on an
+   interrupt, the card reads it from
    `GET /threads/:id/interrupts/:interrupt_id/grounding`, and the approval record
    (`approval-audit.ts`) reuses the same cached judgement for the text that ships.
 
 | Tier | Means | Reviewer reads it as |
 | :--- | :--- | :--- |
-| `verifiable` | The judge found support and every passage it quoted is in the cited body | Checked. Hover to read the passage it rests on. |
-| `inconclusive` | Not settled: checking is off, the judge failed, abstained or quoted something the source does not hold, or the stored copy was clipped | Unchecked. Read the source. |
-| `asserted` | The cited entry is missing, an exact figure is not in it, or the judge found the source does not support the claim | The draft claims a source that does not hold it. |
+| `verifiable` | The judge found support in cited lines that state the claim's numbers | Checked. Click to open the source at those lines. |
+| `inconclusive` | Not settled: checking is off, the judge failed or abstained, its support did not check out, or the citation was too broad to judge | Unchecked. Read the source. |
+| `asserted` | The cited entry or lines do not exist, an exact figure is not in the cited lines, or the judge found they do not support the claim | The draft claims a source that does not hold it. |
 | `uncited` | The span carries no citation | Unsourced. May be discourse, may be a claim. |
 | `unresolved` | The quote addresses no unique position in the text that was sent | Never checked; listed beside the record, not drawn on it. |
 
@@ -811,37 +817,41 @@ No percentage is displayed, because none is calibrated. The decisions behind it:
   co-occur in the source passes the cases that matter most: a JSON `"waived": false`
   beside "the fee has been waived", a price bound to the wrong plan, "delivered"
   for a record that says shipped. Measured on pizza-bot-shaped cases, word matching
-  marked 12 of 30 unsupported claims green; a small judge model marked none. The
-  judge is still an opinion, so it must show its work: a verdict is believed only
-  through quotes the server can find in the body, and the reviewer sees them.
-- **A small model, off by default.** The judge reads one passage and answers per
-  claim, which a small model does about as well as the orchestrating one. `auto`
-  picks the newest small tier from the default model's provider
+  marked 12 of 30 unsupported claims green; a small judge model reading the cited
+  lines marked none. The judge is still an opinion, so it must point at its
+  evidence, and the reviewer is taken to the same lines.
+- **Cite lines, not passages.** A judge handed a whole tool output has to find the
+  claim in it, and misses what is buried in a long one; a judge asked to quote its
+  support paraphrases, and the quote then fails to match. Naming numbered lines
+  fixes both: the judge reads exactly what the draft relied on, a line number is
+  checked with a lookup, and the reviewer reads a few lines instead of a payload.
+  On the evaluation cases a 4B local judge went from 16 to 25 of 26 true claims
+  checked with no false greens added.
+- **A small model, off by default.** The judge reads a few cited lines and answers
+  per claim, which a small model does about as well as the orchestrating one.
+  `auto` picks the newest small tier from the default model's provider
   (`pickJudgeModel`), skipping nano-class and sub-4B local models, which grade
   false claims with near-certain confidence. Nothing is graded green until a user
   turns checking on, since it sends cited sources to the judge's provider.
 - **Every failure is unsettled, never green.** No judge configured, a timeout, a
   malformed or missing answer, or a model that cannot be built all yield
   `inconclusive`; a failed judgement is not cached, so the next read asks again.
-- **The model quotes; the code computes the offsets.** Models cannot address their
-  own text numerically — Sonnet 5 produced an exactly correct offset pair in 0 of 32
-  measured spans and Sonnet 4.5 in 0 of 31, every one of them still *in bounds*,
-  which is the dangerous shape. Verbatim quotes resolved present-and-unique 115/115
-  over the same spans, so `indexOf` addresses both the draft's spans and the
-  judge's support quotes; a quote that is absent or repeated degrades rather than
-  guessing.
+- **The model quotes its own text; the code computes the offsets.** Models cannot
+  address text numerically — Sonnet 5 produced an exactly correct offset pair in 0
+  of 32 measured spans and Sonnet 4.5 in 0 of 31, every one of them still *in
+  bounds*, which is the dangerous shape. Verbatim quotes resolved
+  present-and-unique 115/115 over the same spans, so `indexOf` addresses the
+  draft's spans and a quote that is absent or repeated degrades rather than
+  guessing. Evidence lines need no counting: the model copies numbers it was shown.
 - **Citations ride in the tool call's own arguments,** so they are checkpointed,
   streamed, rendered and edited by machinery that already exists. Evidence *bodies*
   stay out of checkpoints, because raw MCP payloads reach hundreds of KB and every
-  checkpoint would rewrite the ledger. A long body is cut to the passages that
-  mention the claim before the judge reads it, since a judge given 256 KB to find
-  one sentence misses it.
+  checkpoint would rewrite the ledger.
 - **The body cap is applied to the tool output, not just to the stored copy.**
-  Clipping only the record would let the model quote text the reviewer's copy lacks;
-  clipping once, where the model reads it, keeps the two byte-identical, with the
-  pre-clip size and a `truncated` flag on the entry. A gap that rests on absence —
-  a missing figure, or a judge finding no support — cannot be established from a
-  clipped body, so it yields `inconclusive` (`clipped`), not an accusation.
+  Clipping only the record would let the model cite lines the reviewer's copy
+  lacks; clipping once, before numbering, keeps the two identical, with the pre-clip
+  size and a `truncated` flag on the entry. A citation can only name lines that
+  were kept, so a line beyond the clip is `bad-lines`.
 - **One computation, on the server.** The card and the record both read the
   server's judgement, so they cannot report different tiers for the same span,
   and the browser never grades a claim.
@@ -858,8 +868,9 @@ means a skill's origin (`user | plugin | builtin`).
 `ApprovalArguments.tsx` marks spans inside the existing `TextArgumentField`,
 `use-grounding-view.ts` fetches the server's grading for a card, and
 `ActivityRail.tsx` renders the evidence cards (cited first, collapsed — a run with
-forty tool calls must not open forty cards) and replays each stored verdict over the
-arguments that were sent, through the same renderer as the live card.
+forty tool calls must not open forty cards; clicking a span opens its card with the
+cited lines picked out) and replays each stored verdict over the arguments that were
+sent, through the same renderer as the live card.
 
 ---
 
