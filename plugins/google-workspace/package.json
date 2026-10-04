@@ -1,0 +1,20 @@
+{
+  "name": "@pizza-bot/plugin-google-workspace",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Gmail and Google Calendar MCP server and skills.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "auth": "node auth.mjs",
+    "test": "node --test \"src/*.test.mjs\""
+  },
+  "dependencies": {
+    "@googleapis/calendar": "^20.1.0",
+    "@googleapis/gmail": "^22.0.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@napi-rs/keyring": "^2.1.0",
+    "google-auth-library": "^11.1.0",
+    "zod": "^4.0.0"
+  }
+}
