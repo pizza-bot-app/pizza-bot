@@ -95,8 +95,7 @@ function ledger(
     unavailable: new Set(unavailable),
     citedIds: new Set(citedIds),
     hoveredId: null,
-    selectedId: null,
-    selectedLines: [],
+    selection: new Map(),
     cite: () => undefined,
     loadBodies: () => undefined,
     hover: () => undefined,
@@ -155,9 +154,8 @@ function verdict(overrides: Partial<ApprovalVerdict> = {}): ApprovalVerdict {
       {
         arg: "body",
         text: "Renewal: 4 March 2027",
-        evidenceId: "ev_1",
+        cites: [{ evidenceId: "ev_1", lines: [1], breadcrumb: "lookup_account" }],
         tier: "verifiable",
-        breadcrumb: "lookup_account",
       },
     ],
     createdAt: "2026-09-21T00:00:00.000Z",
@@ -174,15 +172,15 @@ describe("ActivityRail approved actions", () => {
       verdict({
         decision: "edit",
         spans: [
-          { arg: "body", text: "Renewal: 4 March 2027", evidenceId: "ev_1", tier: "verifiable" },
+          { arg: "body", text: "Renewal: 4 March 2027", cites: [{ evidenceId: "ev_1", lines: [1] }], tier: "verifiable" },
           {
             arg: "body",
             text: "Annual cost: $1,200.00",
-            evidenceId: "ev_1",
+            cites: [{ evidenceId: "ev_1", lines: [1] }],
             tier: "asserted",
             gap: { reason: "figures", tokens: ["$1,200.00"] },
           },
-          { arg: "body", text: "Plan: Trattoria Pro", evidenceId: "ev_1", tier: "unresolved" },
+          { arg: "body", text: "Plan: Trattoria Pro", cites: [{ evidenceId: "ev_1", lines: [1] }], tier: "unresolved" },
         ],
       }),
     ]);
@@ -198,8 +196,8 @@ describe("ActivityRail approved actions", () => {
     const html = render([
       verdict({
         spans: [
-          { arg: "body", text: "Renewal date: March 4, 2027", evidenceId: "ev_1", tier: "verifiable" },
-          { arg: "body", text: "Plan: Trattoria Pro", evidenceId: "ev_1", tier: "unresolved" },
+          { arg: "body", text: "Renewal date: March 4, 2027", cites: [{ evidenceId: "ev_1", lines: [1] }], tier: "verifiable" },
+          { arg: "body", text: "Plan: Trattoria Pro", cites: [{ evidenceId: "ev_1", lines: [1] }], tier: "unresolved" },
         ],
       }),
     ]);
@@ -208,6 +206,32 @@ describe("ActivityRail approved actions", () => {
     expect(html).toContain("not checked");
     // The chip precedes the text it qualifies, so the reviewer reads it first.
     expect(html.indexOf("not checked")).toBeLessThan(html.indexOf("Plan: Trattoria Pro"));
+  });
+
+  it("names every source a span joined, even when their ledger entries are gone", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalsSection
+        verdicts={[
+          verdict({
+            spans: [
+              {
+                arg: "body",
+                text: "Renewal: 4 March 2027",
+                cites: [
+                  { evidenceId: "ev_1", lines: [1], breadcrumb: "lookup_account" },
+                  { evidenceId: "ev_2", lines: [3], breadcrumb: "lookup_refunds" },
+                ],
+                tier: "verifiable",
+              },
+            ],
+          }),
+        ]}
+        ledger={ledger([])}
+      />,
+    );
+
+    expect(html).toContain("lookup_account");
+    expect(html).toContain("lookup_refunds");
   });
 
   it("names the source a span quoted even when its ledger entry is gone", () => {
@@ -254,7 +278,7 @@ describe("ActivityRail approved actions", () => {
       verdict({
         args: { body: "Rewritten by the reviewer." },
         spans: [
-          { arg: "body", text: "Renewal: 4 March 2027", evidenceId: "ev_1", tier: "unresolved" },
+          { arg: "body", text: "Renewal: 4 March 2027", cites: [{ evidenceId: "ev_1", lines: [1] }], tier: "unresolved" },
         ],
       }),
     ]);

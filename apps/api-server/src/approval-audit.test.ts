@@ -15,7 +15,11 @@ const BODY = "Your contract renews on March 4, 2027 and includes two free swaps.
 /** Numbered as the ledger stores it: [1] the renewal, [2] the swaps. */
 const LEDGER = "Agreement: renews March 4, 2027. Entitlements: two free swaps per year.";
 
-const span = (text: string, evidenceId: string, lines = [1]) => ({ arg: "body", text, evidenceId, lines });
+const span = (text: string, evidenceId: string, lines = [1]) => ({
+  arg: "body",
+  text,
+  cites: [{ evidenceId, lines }],
+});
 
 const refuting: Decide = () => ({ verdict: "unsupported", lines: [] });
 
@@ -134,14 +138,18 @@ describe("approval verdict trail", () => {
     expect(app.approvalVerdicts.listByThread(THREAD)[0]?.spans[0]).toEqual({
       arg: "body",
       text: "two free swaps",
-      evidenceId,
-      lines: [2],
+      cites: [
+        {
+          evidenceId,
+          lines: [2],
+          breadcrumb: "mcp:mail:search (query: renewal)",
+          bytes: LEDGER.length,
+          truncated: false,
+        },
+      ],
       tier: "verifiable",
       judge: "test:judge",
-      support: [{ line: 2, text: "Entitlements: two free swaps per year." }],
-      breadcrumb: "mcp:mail:search (query: renewal)",
-      bytes: LEDGER.length,
-      truncated: false,
+      support: [{ evidenceId, line: 2, text: "Entitlements: two free swaps per year." }],
     });
   });
 
@@ -174,7 +182,7 @@ describe("approval verdict trail", () => {
     expect(app.approvalVerdicts.listByThread(THREAD)[0]?.spans[0]).toMatchObject({
       tier: "asserted",
       gap: { reason: "refuted" },
-      breadcrumb: "mcp:mail:search (query: fee)",
+      cites: [{ breadcrumb: "mcp:mail:search (query: fee)" }],
     });
   });
 
@@ -223,8 +231,25 @@ describe("approval verdict trail", () => {
     expect(app.approvalVerdicts.listByThread(THREAD)[0]?.spans[0]).toMatchObject({
       tier: "asserted",
       gap: { reason: "bad-lines" },
-      truncated: true,
+      cites: [{ truncated: true }],
     });
+  });
+
+  it("records a sentence that joins two lookups, with both sources' identities", async () => {
+    const refundId = record("Refund RF-2210 issued for the duplicate charge.", { breadcrumb: "billing refund" });
+    const text = "renews on March 4, 2027 and refund RF-2210 was issued";
+    await respond(
+      interruptValue({
+        body: `Your contract ${text}.`,
+        _grounding: [{ arg: "body", text, cites: [{ evidenceId, lines: [1] }, { evidenceId: refundId, lines: [1] }] }],
+      }),
+      approve,
+    );
+
+    const [recorded] = app.approvalVerdicts.listByThread(THREAD)[0]!.spans;
+    expect(recorded?.tier).toBe("verifiable");
+    expect(recorded?.cites.map((c) => c.breadcrumb)).toEqual(["mcp:mail:search (query: renewal)", "billing refund"]);
+    expect(recorded?.support?.map((l) => l.evidenceId)).toEqual([evidenceId, refundId]);
   });
 
   it("will not read another thread's evidence as a source", async () => {

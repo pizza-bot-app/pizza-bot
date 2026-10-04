@@ -381,8 +381,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
             _grounding: [{
               arg: "body",
               text: "The renewal date is March 4th.",
-              evidenceId: "ev_1",
-              lines: [1],
+              cites: [{ evidenceId: "ev_1", lines: [1] }],
             }],
           },
           type: "tool_call",
@@ -440,7 +439,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       payload: { actionRequests: Array<{ args: Record<string, unknown> }> };
     }).payload.actionRequests[0]!.args;
     expect(args._grounding).toEqual([
-      { arg: "body", text: "The renewal date is March 4th.", evidenceId: "ev_1", lines: [1] },
+      { arg: "body", text: "The renewal date is March 4th.", cites: [{ evidenceId: "ev_1", lines: [1] }] },
     ]);
   });
 

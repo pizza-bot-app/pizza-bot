@@ -38,19 +38,32 @@ function groundingSchema(verifiedArgs: readonly string[]): JsonSchema {
             "you wrote in that argument — never the evidence's phrasing. Long enough to " +
             "appear only once in the argument.",
         },
-        evidenceId: {
-          type: "string",
-          description: "Id of the evidence entry supporting the span. Never invent an id.",
-        },
-        lines: {
+        cites: {
           type: "array",
-          items: { type: "integer" },
           description:
-            "The [n] numbers of the lines in that evidence entry the span is based on: every " +
-            "line a reviewer must read to check it, and no others.",
+            "The evidence the span is based on: one entry per evidence result it draws from, " +
+            "more than one when the sentence joins facts from several lookups.",
+          items: {
+            type: "object",
+            properties: {
+              evidenceId: {
+                type: "string",
+                description: "Id of an evidence entry the span draws on. Never invent an id.",
+              },
+              lines: {
+                type: "array",
+                items: { type: "integer" },
+                description:
+                  "The [n] numbers of the lines in that entry the span is based on: every line " +
+                  "a reviewer must read to check it, and no others.",
+              },
+            },
+            required: ["evidenceId", "lines"],
+            additionalProperties: false,
+          },
         },
       },
-      required: ["arg", "text", "evidenceId", "lines"],
+      required: ["arg", "text", "cites"],
       additionalProperties: false,
     },
   };
@@ -66,9 +79,10 @@ export function groundingContract(verifiedArgs: readonly string[]): string {
     "  - `text`: your own drafted words, copied character for character out of that argument",
     "    and long enough to be unique in it. An exact search of the argument must find it, so",
     "    quote the sentence you wrote, never the evidence's wording.",
-    "  - `evidenceId`: the id of the evidence entry it came from. Never invent an id.",
-    "  - `lines`: the [n] numbers of the lines in that entry the span rests on — every line a",
-    "    reviewer must read to check it, and no others.",
+    "  - `cites`: each evidence entry the span draws on, as `{evidenceId, lines}` — the entry's",
+    "    id (never invent one) and the [n] numbers of its lines the span rests on: every line a",
+    "    reviewer must read to check it, and no others. A sentence joining facts from two",
+    "    lookups cites both entries.",
     "Cite only spans an evidence entry actually supports; leave your own connective prose uncited.",
   ].join("\n");
 }

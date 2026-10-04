@@ -43,7 +43,7 @@ describe("applySkillGrounding", () => {
     // The audit resolves a span by searching the argument, so the contract must ask for
     // the model's own wording rather than the evidence's.
     expect(description).toContain("never the evidence's wording");
-    expect(description).toContain("`lines`: the [n] numbers of the lines");
+    expect(description).toContain("A sentence joining facts from two");
   });
 
   it("never passes verifiedArgs through to the upstream config", () => {
@@ -118,7 +118,7 @@ describe("applySkillGrounding", () => {
     it("omits the citation argument but keeps the real ones", () => {
       const rendered = describeCall({
         body: "You qualify for a 20% credit.",
-        [GROUNDING_ARGUMENT]: [{ arg: "body", text: "a 20% credit", evidenceId: "ev-2" }],
+        [GROUNDING_ARGUMENT]: [{ arg: "body", text: "a 20% credit", cites: [{ evidenceId: "ev-2", lines: [1] }] }],
       });
       expect(rendered).toContain("You qualify for a 20% credit.");
       expect(rendered).not.toContain(GROUNDING_ARGUMENT);

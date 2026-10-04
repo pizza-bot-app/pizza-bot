@@ -778,26 +778,29 @@ checked against the cited lines before it is believed:
    verifiable prose (`verifiedArgs: [body]` beside `allowedDecisions` in
    `interruptOn`, parsed in `core/src/skill.ts`). For a declared tool,
    `plugin-sdk/src/mcp-grounding.ts` injects one optional
-   `_grounding?: Array<{arg, text, evidenceId, lines}>` into the *adapted* schema
-   bound to the model, and `instrumentMcpTool` strips it at `args[0].args` before
-   dispatch, so the MCP server never sees it. `text` quotes the draft; `lines` names
-   the evidence lines the claim rests on. `runtime-langgraph/src/skill-grounding.ts`
+   `_grounding?: Array<{arg, text, cites: Array<{evidenceId, lines}>}>` into the
+   *adapted* schema bound to the model, and `instrumentMcpTool` strips it at
+   `args[0].args` before dispatch, so the MCP server never sees it. `text` quotes the
+   draft; `cites` names the evidence lines the claim rests on, across as many entries
+   as the sentence joins (up to `MAX_CITED_SOURCES`). `runtime-langgraph/src/skill-grounding.ts`
    appends the contract to the **tool's own description** — a directive injected
    into a tool *result* reads as prompt injection.
 4. **Deterministic checks** (`core/src/grounding.ts`, pure). Resolve each quoted span
-   to a unique position in the argument, then settle what needs no opinion: a missing
-   entry (`no-entry`), cited lines the entry does not have (`bad-lines`), and an
-   exact figure — an amount, rate, year or identifier — none of the cited lines
-   states (`figures`) are `asserted`; a span citing more than `MAX_CITED_LINES` is
-   `inconclusive` (`broad-citation`). These checks only ever find reasons to doubt a
+   to a unique position in the argument, then settle what needs no opinion: any
+   missing entry (`no-entry`), cited lines an entry does not have (`bad-lines`), and an
+   exact figure — an amount, rate, year or identifier — none of the cited lines, across
+   all cited entries, states (`figures`) are `asserted`; a span citing more than
+   `MAX_CITED_LINES` lines or `MAX_CITED_SOURCES` entries is `inconclusive`
+   (`broad-citation`). These checks only ever find reasons to doubt a
    claim; none of them can mark one green.
 5. **Judge** (`api-server/src/grounding-judge.ts`, contract in
    `core/src/grounding-judge.ts`). The claims left open go to the model chosen in
    Settings → Claim checking (`groundingJudge`: `off` by default, `auto`, or a
-   qualified model id). The judge sees each claim beside only the lines it cites and
-   answers through structured output with a verdict and, for `supported`, the line
-   numbers that establish it. A `supported` verdict counts only if those lines are
-   among the cited ones and state every number the claim does; otherwise the span
+   qualified model id). The judge sees each claim beside only the lines it cites,
+   labelled by source and line (`[A3]`, `[B1]`), and answers through structured
+   output with a verdict and, for `supported`, the labels of the lines that establish
+   it. A `supported` verdict counts only if those lines are among the cited ones and,
+   together, state every number the claim does; otherwise the span
    is `inconclusive` (`unverified-support`). Grading starts when a run pauses on an
    interrupt, the card reads it from
    `GET /threads/:id/interrupts/:interrupt_id/grounding`, and the approval record
@@ -827,6 +830,12 @@ No percentage is displayed, because none is calibrated. The decisions behind it:
   checked with a lookup, and the reviewer reads a few lines instead of a payload.
   On the evaluation cases a 4B local judge went from 16 to 25 of 26 true claims
   checked with no false greens added.
+- **A sentence may join several lookups.** "Your order shipped, and the refund went
+  out" draws on two tool results; a citation format with one source per span forces
+  the model to cite half of it, and stitching facts across sources is exactly where a
+  draft goes wrong. A span cites every entry it uses, the judge sees their lines
+  together under per-source labels, and is told not to combine facts that belong to
+  different records.
 - **A small model, off by default.** The judge reads a few cited lines and answers
   per claim, which a small model does about as well as the orchestrating one.
   `auto` picks the newest small tier from the default model's provider
@@ -868,8 +877,8 @@ means a skill's origin (`user | plugin | builtin`).
 `ApprovalArguments.tsx` marks spans inside the existing `TextArgumentField`,
 `use-grounding-view.ts` fetches the server's grading for a card, and
 `ActivityRail.tsx` renders the evidence cards (cited first, collapsed — a run with
-forty tool calls must not open forty cards; clicking a span opens its card with the
-cited lines picked out) and replays each stored verdict over the arguments that were
+forty tool calls must not open forty cards; clicking a span opens every card it cites
+with the cited lines picked out) and replays each stored verdict over the arguments that were
 sent, through the same renderer as the live card.
 
 ---

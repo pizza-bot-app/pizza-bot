@@ -183,7 +183,7 @@ describe("connectMcpServers", () => {
     );
     try {
       const tool = r.tools["mcp:union:search_records"]!;
-      const spans = [{ arg: "queryTerm", text: "aster", evidenceId: "ev-1" }];
+      const spans = [{ arg: "queryTerm", text: "aster", cites: [{ evidenceId: "ev-1", lines: [1] }] }];
 
       // The server echoes the arguments it actually received.
       const bare = await tool.invoke({ queryTerm: "aster", _grounding: spans });

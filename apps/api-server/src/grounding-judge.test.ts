@@ -41,7 +41,7 @@ describe("GroundingJudge", () => {
   const args = (...claims: string[]) => ({
     body: claims.join(" "),
     // Every claim cites the whole ledger: [1] plan, [2] renewal, [3] swaps.
-    _grounding: claims.map((text) => ({ arg: "body", text, evidenceId, lines: [1, 2, 3] })),
+    _grounding: claims.map((text) => ({ arg: "body", text, cites: [{ evidenceId, lines: [1, 2, 3] }] })),
   });
 
   it("asks the judge once per claim, however often the claim is graded", async () => {

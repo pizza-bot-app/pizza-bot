@@ -214,12 +214,12 @@ function sentFields(
 
 /** The breadcrumb is stored with the verdict, so it still names the source once the
  *  ledger entry is gone. */
-function sourceOf(span: ApprovalVerdictSpan | undefined): string | undefined {
-  return span && (span.breadcrumb ?? span.evidenceId);
+function sourcesOf(span: ApprovalVerdictSpan): string[] {
+  return span.cites.map((cite) => cite.breadcrumb ?? cite.evidenceId);
 }
 
 function VerdictSources({ spans }: { spans: readonly ApprovalVerdictSpan[] }) {
-  const sources = [...new Set(spans.map((span) => sourceOf(span)!).filter(Boolean))];
+  const sources = [...new Set(spans.flatMap(sourcesOf))];
   if (sources.length === 0) return null;
   return (
     <div className="verdict-sources">
@@ -242,24 +242,23 @@ function NotCheckedChip({ tier }: { tier: GroundingTier }) {
 }
 
 function VerdictQuote({ span, links }: { span: ApprovalVerdictSpan; links: GroundingLinks }) {
-  const id = span.evidenceId;
+  const id = span.cites[0]?.evidenceId ?? null;
+  const hovered = span.cites.some((cite) => cite.evidenceId === links.hoveredId);
   return (
     <span
       role="button"
       tabIndex={0}
-      className={`grounding-span grounding-${span.tier}${
-        links.hoveredId === id ? " hovered" : ""
-      }`}
+      className={`grounding-span grounding-${span.tier}${hovered ? " hovered" : ""}`}
       title={groundingTitle(span.tier, span.gap, span.support)}
       onMouseEnter={() => links.onHover(id)}
       onMouseLeave={() => links.onHover(null)}
       onFocus={() => links.onHover(id)}
       onBlur={() => links.onHover(null)}
-      onClick={() => links.onSelect(id, span.lines)}
+      onClick={() => links.onSelect(span.cites)}
       onKeyDown={(e: KeyboardEvent) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          links.onSelect(id, span.lines);
+          links.onSelect(span.cites);
         }
       }}
     >
@@ -310,7 +309,7 @@ function EvidenceCard({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLLIElement>(null);
   const { loadBodies } = ledger;
-  const selected = ledger.selectedId === entry.id;
+  const selected = ledger.selection.has(entry.id);
 
   useEffect(() => {
     if (!selected) return;
@@ -359,7 +358,7 @@ function EvidenceCard({
       {open ? (
         <>
           {body ? (
-            <EvidenceBody text={body.text} cited={selected ? ledger.selectedLines : NO_LINES} />
+            <EvidenceBody text={body.text} cited={ledger.selection.get(entry.id) ?? NO_LINES} />
           ) : (
             <pre className="evidence-body">{entry.excerpt}</pre>
           )}

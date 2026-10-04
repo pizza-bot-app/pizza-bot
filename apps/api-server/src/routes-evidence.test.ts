@@ -87,8 +87,8 @@ describe("evidence routes: GET /threads/:id/evidence, GET /evidence/:id", () => 
                 args: {
                   body: "It renews in 2027. The fee is $45.",
                   _grounding: [
-                    { arg: "body", text: "It renews in 2027", evidenceId: entry.id, lines: [1] },
-                    { arg: "body", text: "The fee is $45", evidenceId: entry.id, lines: [1] },
+                    { arg: "body", text: "It renews in 2027", cites: [{ evidenceId: entry.id, lines: [1] }] },
+                    { arg: "body", text: "The fee is $45", cites: [{ evidenceId: entry.id, lines: [1] }] },
                   ],
                 },
               },
@@ -140,7 +140,7 @@ describe("evidence routes: GET /threads/:id/evidence, GET /evidence/:id", () => 
         toolName: "billing__send_reply",
         decision: "approve",
         spans: [
-          { arg: "body", text: "Renewal: 4 March 2027", evidenceId: "ev_1", tier: "verifiable" },
+          { arg: "body", text: "Renewal: 4 March 2027", cites: [{ evidenceId: "ev_1", lines: [2] }], tier: "verifiable" },
         ],
         ...overrides,
       }).verdict;
