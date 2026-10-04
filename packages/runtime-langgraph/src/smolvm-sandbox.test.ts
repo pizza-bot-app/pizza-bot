@@ -191,6 +191,40 @@ describe("SmolvmSandbox", () => {
     expect(subcommands(calls).filter((call) => call === "machine start")).toHaveLength(2);
   });
 
+  it("waits for an in-flight stop before booting again", async () => {
+    let finishStop!: () => void;
+    const events: string[] = [];
+    const { run } = fakeRunner(async (args) => {
+      events.push(args[1]!);
+      if (args[1] === "stop") {
+        await new Promise<void>((resolve) => (finishStop = resolve));
+        events.push("stopped");
+      }
+      return ok("ran");
+    });
+    const sandbox = new SmolvmSandbox(run, "vm");
+    await sandbox.execute("x");
+    events.length = 0;
+    const stopped = sandbox.stop();
+    const next = sandbox.execute("x");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    finishStop();
+    await stopped;
+
+    expect((await next).output).toBe("ran");
+    expect(events).toEqual(["stop", "stopped", "create", "start", "exec", "exec"]);
+  });
+
+  it("reports a failed stop or delete but not a machine that is already gone", async () => {
+    const { run } = fakeRunner((args) =>
+      args.includes("busy") ? fail("Error: machine is busy") : fail("Error: vm not found: gone"),
+    );
+    await expect(new SmolvmSandbox(run, "gone").stop()).resolves.toBeUndefined();
+    await expect(new SmolvmSandbox(run, "gone").destroy()).resolves.toBeUndefined();
+    await expect(new SmolvmSandbox(run, "busy").destroy()).rejects.toThrow("machine is busy");
+    await expect(new SmolvmSandbox(run, "busy").stop()).rejects.toThrow("machine is busy");
+  });
+
   it("reports a command timeout", async () => {
     const { run } = fakeRunner((args) =>
       args.includes("/bin/sh") ? { ...ok("partial"), exitCode: null, timedOut: true } : ok(),

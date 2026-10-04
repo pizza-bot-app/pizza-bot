@@ -248,7 +248,7 @@ example) every VM start fails with `krun_start_enter returned: -22 (EINVAL)`.
 | `PIZZA_SANDBOX` | `smolvm` turns the sandbox on; unset or `off` leaves it off. |
 | `PIZZA_SMOLVM_DIR` | Unpacked smolvm release directory. |
 | `PIZZA_SMOLVM_BIN` | smolvm executable, when no release directory is set. Defaults to `smolvm` on `PATH`. |
-| `PIZZA_SANDBOX_NETWORK` | `1` gives the VMs outbound network access. |
+| `PIZZA_SANDBOX_NETWORK` | `1` gives the VMs outbound network access, which also lets a prompt-injected command upload anything under `/workspace/`. |
 | `PIZZA_SANDBOX_IMAGE` | OCI image for the VMs, such as `python:3.12-alpine`. Needs `PIZZA_SANDBOX_NETWORK=1` to pull; without an image the VMs run smolvm's bundled Alpine rootfs. |
 
 ## Deploy on Linux

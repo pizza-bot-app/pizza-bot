@@ -166,6 +166,11 @@ function cliFailure(result: CliResult): string {
   return (result.stderr || result.stdout).trim() || `smolvm exited with code ${result.exitCode}`;
 }
 
+/** A machine already deleted, by another process or an earlier attempt. */
+function isMissingMachine(result: CliResult): boolean {
+  return /vm not found/i.test(result.stderr);
+}
+
 function uploadError(stderr: string): FileOperationError {
   if (/is a directory/i.test(stderr)) return "is_directory";
   if (/no such file/i.test(stderr)) return "file_not_found";
@@ -176,6 +181,7 @@ function uploadError(stderr: string): FileOperationError {
 export class SmolvmSandbox extends BaseSandbox {
   readonly id: string;
   private ready: Promise<void> | undefined;
+  private stopping: Promise<CliResult> | undefined;
 
   constructor(
     private readonly run: SmolvmRunner,
@@ -197,6 +203,8 @@ export class SmolvmSandbox extends BaseSandbox {
    */
   private ensureReady(): Promise<void> {
     this.ready ??= (async () => {
+      // `start` is a no-op while a stop is still landing, which would then win.
+      await this.stopping;
       const { image, network, cpus, memoryMib } = this.options;
       const created = await this.run([
         "machine",
@@ -398,16 +406,22 @@ export class SmolvmSandbox extends BaseSandbox {
 
   async stop(): Promise<void> {
     this.ready = undefined;
-    await this.run(["machine", "stop", "--name", this.name], {
+    const stopping = this.run(["machine", "stop", "--name", this.name], {
       timeoutMs: HOST_TIMEOUT_GRACE_MS,
     });
+    this.stopping = stopping;
+    const result = await stopping;
+    if (this.stopping === stopping) this.stopping = undefined;
+    if (result.exitCode !== 0 && !isMissingMachine(result)) throw new Error(cliFailure(result));
   }
 
   async destroy(): Promise<void> {
     this.ready = undefined;
-    await this.run(["machine", "delete", "--name", this.name, "--force"], {
+    await this.stopping;
+    const result = await this.run(["machine", "delete", "--name", this.name, "--force"], {
       timeoutMs: HOST_TIMEOUT_GRACE_MS,
     });
+    if (result.exitCode !== 0 && !isMissingMachine(result)) throw new Error(cliFailure(result));
   }
 }
 
@@ -499,7 +513,10 @@ export class SmolvmSandboxPool {
     }
   }
 
-  /** Deletes the thread's VM and its disk; a no-op when the thread never used one. */
+  /**
+   * Deletes the thread's VM and its disk, including one an earlier process
+   * created, so every call spawns smolvm even for a thread that never used one.
+   */
   async deleteThread(threadId: string): Promise<void> {
     const name = machineNameForThread(threadId);
     const entry = this.entries.get(name);
