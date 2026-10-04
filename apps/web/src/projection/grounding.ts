@@ -1,13 +1,12 @@
 /**
- * The citation audit itself lives in `@pizza-bot/core` so the api-server can recompute
- * it when a human approves, rather than trusting a tier a browser arrived at.
+ * The citation audit lives in `@pizza-bot/core` and runs on the server; the web only splits
+ * text at the tiers the server reached, so the card and the record cannot disagree.
  */
 export {
   citedEvidenceIds,
   countGroundedSegments,
   groundingSpans,
   segmentAuditedText,
-  segmentGroundedText,
   withoutGroundingArgument,
   type GroundingGap,
   type GroundingSegment,

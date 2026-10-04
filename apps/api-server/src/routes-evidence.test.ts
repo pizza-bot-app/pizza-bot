@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp } from "./index.js";
 import { AgentHost } from "./agent-host.js";
-import type { ApprovalVerdict, EvidenceEntry } from "@pizza-bot/core";
+import type { ApprovalVerdict, EvidenceEntry, ThreadState } from "@pizza-bot/core";
 import type { AppendApprovalVerdict } from "@pizza-bot/storage";
 
 describe("evidence routes: GET /threads/:id/evidence, GET /evidence/:id", () => {
@@ -66,6 +66,52 @@ describe("evidence routes: GET /threads/:id/evidence, GET /evidence/:id", () => 
     const res = await app.request("/evidence/ev_missing");
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not_found" });
+  });
+
+  it("grades a pending approval's citations on the server, per action", async () => {
+    const entry = record("t1", "The renewal date is March 4th, 2027.");
+    const state: ThreadState = {
+      threadId: "t1",
+      checkpointId: "c1",
+      values: { messages: [] },
+      next: ["tools"],
+      createdAt: "t0",
+      awaitingInput: true,
+      interrupts: [
+        {
+          id: "approval-1",
+          value: {
+            actionRequests: [
+              {
+                name: "mcp:mail:send",
+                args: {
+                  body: "It renews in 2027. The fee is $45.",
+                  _grounding: [
+                    { arg: "body", text: "It renews in 2027", evidenceId: entry.id },
+                    { arg: "body", text: "The fee is $45", evidenceId: entry.id },
+                  ],
+                },
+              },
+            ],
+            reviewConfigs: [{ allowedDecisions: ["approve"] }],
+          },
+        },
+      ],
+    };
+    vi.spyOn(host.agent, "getState").mockResolvedValue(state);
+
+    const res = await app.request("/threads/t1/interrupts/approval-1/grounding");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { judge: string | null; actions: Array<{ spans: Array<{ tier: string; gap?: unknown }> }> };
+    // Claim checking ships off: the figure the source lacks is still caught, nothing goes green.
+    expect(body.judge).toBeNull();
+    expect(body.actions[0]?.spans.map((s) => [s.tier, s.gap])).toEqual([
+      ["inconclusive", { reason: "unjudged" }],
+      ["asserted", { reason: "figures", tokens: ["$45"] }],
+    ]);
+
+    const gone = await app.request("/threads/t1/interrupts/approval-2/grounding");
+    expect(gone.status).toBe(404);
   });
 
   it("exposes no write route: evidence is recorded only server-side", async () => {

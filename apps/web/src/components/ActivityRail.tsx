@@ -135,7 +135,6 @@ export function ApprovalsSection({
 }
 
 /** A stored verdict is never redrawn by what this browser can load, so nothing is pending. */
-const NO_IDS: ReadonlySet<string> = new Set();
 
 function VerdictCard({
   verdict,
@@ -153,8 +152,7 @@ function VerdictCard({
       ? verdict.spans
       : verdict.spans.filter((span) => span.tier === "unresolved");
   const links: GroundingLinks = {
-    pending: NO_IDS,
-    unavailable: NO_IDS,
+    status: "ready",
     hoveredId: ledger.hoveredId,
     onHover: ledger.hover,
     onSelect: ledger.select,
@@ -251,7 +249,7 @@ function VerdictQuote({ span, links }: { span: ApprovalVerdictSpan; links: Groun
       className={`grounding-span grounding-${span.tier}${
         links.hoveredId === id ? " hovered" : ""
       }`}
-      title={groundingTitle(span.tier, span.gap)}
+      title={groundingTitle(span.tier, span.gap, span.support)}
       onMouseEnter={() => links.onHover(id)}
       onMouseLeave={() => links.onHover(null)}
       onFocus={() => links.onHover(id)}

@@ -132,77 +132,92 @@ describe("ApprovalArguments", () => {
 });
 
 function groundingView(
-  bodies: Record<string, string>,
-  pending: string[] = [],
-  unavailable: string[] = [],
-  clipped: string[] = [],
+  spans: GroundingView["spans"],
+  status: GroundingView["status"] = "ready",
 ): GroundingView {
-  return {
-    bodies: new Map(
-      Object.entries(bodies).map(([id, text]) => [
-        id,
-        clipped.includes(id) ? { text, truncated: true } : { text },
-      ]),
-    ),
-    pending: new Set(pending),
-    unavailable: new Set(unavailable),
-    hoveredId: null,
-    onHover: () => undefined,
-    onSelect: () => undefined,
-  };
+  return { status, spans, hoveredId: null, onHover: () => undefined, onSelect: () => undefined };
 }
 
 const cited = { arg: "body", text: "renews on March 4th", evidenceId: "ev_1" };
+const graded = (tier: GroundingView["spans"][number]["tier"], extra: Partial<GroundingView["spans"][number]> = {}) => ({
+  ...cited,
+  tier,
+  ...extra,
+});
 
 describe("ApprovalArguments citations", () => {
-  it("marks a span the cited source supports and hides the citation argument itself", () => {
+  it("marks a span the judge verified, shows what the source says, and hides the citation argument", () => {
     const html = renderToStaticMarkup(
       <ApprovalArguments
         value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
-        grounding={groundingView({ ev_1: "Subscription renews March 4, 2027." })}
+        grounding={groundingView([graded("verifiable", { judge: "test:judge", support: ["renews 2027-03-04"] })])}
       />,
     );
 
     expect(html).toContain("grounding-verifiable");
     expect(html).toContain(">renews on March 4th</span>");
+    expect(html).toContain("The source says:");
+    expect(html).toContain("renews 2027-03-04");
     expect(html).toContain("Your plan ");
     expect(html).not.toContain("Grounding");
     expect(html).not.toContain("ev_1");
   });
 
-  it("names the words a cited source does not contain", () => {
+  it("names the figures a cited source does not contain", () => {
     const html = renderToStaticMarkup(
       <ApprovalArguments
         value={{ body: "We waived the $12 fee.", _grounding: [{ ...cited, text: "waived the $12 fee" }] }}
-        grounding={groundingView({ ev_1: "A $12 charge applies." })}
+        grounding={groundingView([
+          { ...cited, text: "waived the $12 fee", tier: "asserted", gap: { reason: "figures", tokens: ["$12"] } },
+        ])}
       />,
     );
 
     expect(html).toContain("grounding-asserted");
-    expect(html).toContain("Not in the cited source: waived");
+    expect(html).toContain("Not in the cited source: $12");
   });
 
-  it("warns that a cited source may contradict the span instead of clearing it", () => {
+  it("says when the judge found the source does not support the span", () => {
     const html = renderToStaticMarkup(
       <ApprovalArguments
-        value={{
-          body: "We waived the $12 fee.",
-          _grounding: [{ ...cited, text: "waived the $12 fee" }],
-        }}
-        grounding={groundingView({ ev_1: "The $12 fee is not waived." })}
+        value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
+        grounding={groundingView([graded("asserted", { gap: { reason: "refuted" }, judge: "test:judge" })])}
+      />,
+    );
+
+    expect(html).toContain("grounding-asserted");
+    expect(html).toContain("does not support this");
+  });
+
+  it("says claim checking is off instead of implying the span was checked", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalArguments
+        value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
+        grounding={groundingView([graded("inconclusive", { gap: { reason: "unjudged" } })])}
       />,
     );
 
     expect(html).toContain("grounding-inconclusive");
-    expect(html).toContain("may contradict this");
+    expect(html).toContain("Claim checking is off");
     expect(html).not.toContain("grounding-verifiable");
+  });
+
+  it("refuses to trust a supported verdict whose quote did not check out", () => {
+    const html = renderToStaticMarkup(
+      <ApprovalArguments
+        value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
+        grounding={groundingView([graded("inconclusive", { gap: { reason: "unverified-quote" } })])}
+      />,
+    );
+
+    expect(html).toContain("was not trusted");
   });
 
   it("says a clipped source could not settle the span, rather than calling it unsupported", () => {
     const html = renderToStaticMarkup(
       <ApprovalArguments
-        value={{ body: "We waived the $12 fee.", _grounding: [{ ...cited, text: "waived the $12 fee" }] }}
-        grounding={groundingView({ ev_1: "Mailbox export, first page." }, [], [], ["ev_1"])}
+        value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
+        grounding={groundingView([graded("inconclusive", { gap: { reason: "clipped" } })])}
       />,
     );
 
@@ -211,23 +226,24 @@ describe("ApprovalArguments citations", () => {
     expect(html).not.toContain("grounding-asserted");
   });
 
-  it("treats a body still in flight as pending rather than unsupported", () => {
+  it("marks cited spans as being checked until the server's grading arrives", () => {
     const html = renderToStaticMarkup(
       <ApprovalArguments
         value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
-        grounding={groundingView({}, ["ev_1"])}
+        grounding={groundingView([], "checking")}
       />,
     );
 
     expect(html).toContain("grounding-pending");
+    expect(html).toContain(">renews on March 4th</span>");
     expect(html).not.toContain("grounding-asserted");
   });
 
-  it("says a source it could not load went unchecked instead of checking forever", () => {
+  it("says a grading it could not load went unchecked instead of checking forever", () => {
     const html = renderToStaticMarkup(
       <ApprovalArguments
         value={{ body: "Your plan renews on March 4th.", _grounding: [cited] }}
-        grounding={groundingView({}, ["ev_1"], ["ev_1"])}
+        grounding={groundingView([], "unavailable")}
       />,
     );
 

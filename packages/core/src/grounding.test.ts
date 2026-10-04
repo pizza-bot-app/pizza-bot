@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { auditGroundingSpans, segmentGroundedText } from "./grounding.js";
+import {
+  auditGroundingSpans,
+  judgeKey,
+  pendingJudgements,
+  segmentAuditedText,
+  type JudgeOutcome,
+  type JudgeResults,
+} from "./grounding.js";
 
 const bodies = (entries: Record<string, string>) =>
   new Map(Object.entries(entries).map(([id, text]) => [id, { text }]));
@@ -10,130 +17,89 @@ const clippedBodies = (entries: Record<string, string>) =>
 
 const span = (text: string, evidenceId = "ev_1", arg = "body") => ({ arg, text, evidenceId });
 
-describe("auditGroundingSpans", () => {
-  it("keeps one entry per declared span, in declaration order", () => {
+const judged = (
+  outcomes: Array<[text: string, outcome: JudgeOutcome, evidenceId?: string]>,
+): JudgeResults => ({
+  judge: "test:judge",
+  outcomes: new Map(outcomes.map(([text, outcome, evidenceId = "ev_1"]) => [judgeKey({ text, evidenceId }), outcome])),
+});
+
+const ACCOUNT = JSON.stringify({
+  plan: "Standard",
+  renewal_date: "2027-03-04",
+  annual_amount: "1200.00",
+  swap_fee: { amount: "12.00", waived: false },
+});
+
+describe("auditGroundingSpans without a judge", () => {
+  it("leaves every claim it cannot fault unsettled, in declaration order", () => {
     const args = {
-      body: "Renews on March 4, 2027. Two free swaps are included.",
-      _grounding: [span("Renews on March 4, 2027", "ev_1"), span("Two free swaps", "ev_2")],
+      body: "Renews on March 4, 2027. Your fee is $12.00.",
+      _grounding: [span("Renews on March 4, 2027"), span("Your fee is $12.00")],
     };
-    const audited = auditGroundingSpans(
-      args,
-      bodies({
-        ev_1: "The contract renews on March 4, 2027.",
-        ev_2: "Plan entitlements: two free swaps per year.",
-      }),
-    );
-    expect(audited.map((s) => [s.text, s.tier])).toEqual([
-      ["Renews on March 4, 2027", "verifiable"],
-      ["Two free swaps", "verifiable"],
+    expect(auditGroundingSpans(args, bodies({ ev_1: ACCOUNT }))).toEqual([
+      { ...span("Renews on March 4, 2027"), tier: "inconclusive", gap: { reason: "unjudged" } },
+      { ...span("Your fee is $12.00"), tier: "inconclusive", gap: { reason: "unjudged" } },
     ]);
   });
 
-  it("marks a span asserted when its cited body never stated the specific", () => {
+  it("never marks a contradicted claim green just because its words co-occur", () => {
+    const args = {
+      body: "Your $12.00 swap fee has been waived.",
+      _grounding: [span("Your $12.00 swap fee has been waived.")],
+    };
+    expect(auditGroundingSpans(args, bodies({ ev_1: ACCOUNT }))[0]?.tier).toBe("inconclusive");
+  });
+
+  it("asserts a claim whose exact figure the cited body never states", () => {
     const audited = auditGroundingSpans(
-      { body: "The waived fee was $12.00.", _grounding: [span("waived fee was $12.00")] },
+      { body: "The waived fee was $12.50.", _grounding: [span("waived fee was $12.50")] },
       bodies({ ev_1: "The swap fee is $40.00 and is not waived." }),
     );
-    expect(audited[0]?.tier).toBe("asserted");
-    expect(audited[0]?.gap).toEqual({ reason: "tokens", tokens: ["$12.00"] });
+    expect(audited[0]).toMatchObject({ tier: "asserted", gap: { reason: "figures", tokens: ["$12.50"] } });
   });
 
-  it("records a span its cited body contradicts as inconclusive, never verifiable", () => {
-    const audited = auditGroundingSpans(
-      { body: "I've waived the $12 fee.", _grounding: [span("I've waived the $12 fee.")] },
-      bodies({ ev_1: "The $12 fee is not waived." }),
-    );
-    expect(audited[0]).toMatchObject({ tier: "inconclusive", gap: { reason: "polarity" } });
-  });
-
-  it("does not let a distant word drag an unrelated negated clause into the passage", () => {
-    const audited = auditGroundingSpans(
-      { body: "Renewal date: March 4, 2027", _grounding: [span("Renewal date: March 4, 2027")] },
-      bodies({
-        // "dated", 90 characters away, is the only occurrence of the span's word "date".
-        ev_1:
-          "Renewal: 4 March 2027, billed $1,200.00 for the year. " +
-          "Late-fee waiver request: NOT approved. The $45.00 fee dated 12 January 2027 remains due.",
-      }),
-    );
-    expect(audited[0]?.tier).toBe("verifiable");
-  });
-
-  it("flags a draft that adds a negation its cited body does not carry", () => {
-    const audited = auditGroundingSpans(
+  it("reads grouping, currency and trailing zeros as formatting, not as a different figure", () => {
+    const pending = pendingJudgements(
       {
-        body: "The $12 swap fee will not be charged.",
-        _grounding: [span("The $12 swap fee will not be charged")],
+        body: "Your annual amount is $1,200. It renews in 2027.",
+        _grounding: [span("Your annual amount is $1,200"), span("It renews in 2027")],
       },
-      bodies({ ev_1: "The $12 swap fee is waived for this account." }),
+      bodies({ ev_1: ACCOUNT }),
     );
-    expect(audited[0]).toMatchObject({ tier: "inconclusive", gap: { reason: "polarity" } });
+    expect(pending.map((p) => p.claim)).toEqual(["Your annual amount is $1,200", "It renews in 2027"]);
   });
 
-  it("still verifies the honest clauses of a record that denies something else", () => {
-    const record =
-      "Account A-4471, Standard plan. Swap fee schedule: the $12 swap fee is not waived " +
-      "on this plan. Plan renewal date: April 9, 2028. Annual amount 2,400.00 USD.";
-    const body =
-      "Confirming that your plan renewal date is April 9, 2028 and your annual amount " +
-      "is 2,400.00 USD.";
+  it("does not let a shorter number match inside a longer one", () => {
     const audited = auditGroundingSpans(
-      {
-        body,
-        _grounding: [
-          span("your plan renewal date is April 9, 2028"),
-          span("your annual amount is 2,400.00 USD"),
-        ],
-      },
-      bodies({ ev_1: record }),
+      { body: "The fee is $120.", _grounding: [span("The fee is $120")] },
+      bodies({ ev_1: "Fee: 1200" }),
     );
-    expect(audited.map((s) => s.tier)).toEqual(["verifiable", "verifiable"]);
+    expect(audited[0]?.gap).toEqual({ reason: "figures", tokens: ["$120"] });
   });
 
-  it("marks a span asserted when the cited entry is gone", () => {
+  it("asserts a span whose cited entry is gone", () => {
     const audited = auditGroundingSpans(
       { body: "Renews on March 4.", _grounding: [span("Renews on March 4", "ev_missing")] },
       bodies({}),
     );
-    expect(audited[0]).toMatchObject({
-      tier: "asserted",
-      evidenceId: "ev_missing",
-      gap: { reason: "no-entry" },
-    });
+    expect(audited[0]).toMatchObject({ tier: "asserted", gap: { reason: "no-entry" } });
   });
 
-  it("will not call a claim invented when the ledger kept only part of its source", () => {
+  it("will not call a figure invented when the ledger kept only part of its source", () => {
     const audited = auditGroundingSpans(
-      { body: "The waived fee was $12.00.", _grounding: [span("waived fee was $12.00")] },
+      { body: "The waived fee was $12.50.", _grounding: [span("waived fee was $12.50")] },
       clippedBodies({ ev_1: "The swap fee is $40.00 and was waived." }),
     );
     expect(audited[0]).toMatchObject({ tier: "inconclusive", gap: { reason: "clipped" } });
   });
 
-  it("still reports a contradiction a clipped source does state", () => {
-    const audited = auditGroundingSpans(
-      { body: "I've waived the $12 fee.", _grounding: [span("I've waived the $12 fee.")] },
-      clippedBodies({ ev_1: "The $12 fee is not waived." }),
-    );
-    expect(audited[0]).toMatchObject({ tier: "inconclusive", gap: { reason: "polarity" } });
-  });
-
-  it("holds a span with nothing checkable to account even against a clipped source", () => {
-    const audited = auditGroundingSpans(
-      { body: "they will", _grounding: [span("they will")] },
-      clippedBodies({ ev_1: "they will" }),
-    );
-    expect(audited[0]).toMatchObject({ tier: "asserted", gap: { reason: "tokens", tokens: [] } });
-  });
-
   it("leaves a quote it cannot place unresolved rather than guessing a position", () => {
     const audited = auditGroundingSpans(
       { body: "Rewritten by the reviewer.", _grounding: [span("Renews on March 4, 2027")] },
-      bodies({ ev_1: "Contract renewal date: March 4, 2027." }),
+      bodies({ ev_1: ACCOUNT }),
     );
-    expect(audited).toEqual([
-      { arg: "body", text: "Renews on March 4, 2027", evidenceId: "ev_1", tier: "unresolved" },
-    ]);
+    expect(audited).toEqual([{ ...span("Renews on March 4, 2027"), tier: "unresolved" }]);
   });
 
   it("leaves an ambiguous quote unresolved, since either position may be the claim", () => {
@@ -142,22 +108,6 @@ describe("auditGroundingSpans", () => {
       bodies({ ev_1: "Plan includes two swaps." }),
     );
     expect(audited[0]?.tier).toBe("unresolved");
-  });
-
-  it("audits each argument against its own text", () => {
-    const args = {
-      subject: "Renewal on March 4",
-      body: "Two free swaps are included.",
-      _grounding: [
-        span("Renewal on March 4", "ev_1", "subject"),
-        span("Two free swaps", "ev_1", "body"),
-      ],
-    };
-    const audited = auditGroundingSpans(args, bodies({ ev_1: "Renewal March 4: two free swaps." }));
-    expect(audited.map((s) => [s.arg, s.tier])).toEqual([
-      ["subject", "verifiable"],
-      ["body", "verifiable"],
-    ]);
   });
 
   it("cannot resolve a quote of a non-string argument", () => {
@@ -172,13 +122,162 @@ describe("auditGroundingSpans", () => {
     expect(auditGroundingSpans({ body: "hi" }, bodies({}))).toEqual([]);
     expect(auditGroundingSpans(undefined, bodies({}))).toEqual([]);
   });
+});
 
-  it("stays linear on a long run of trailing punctuation", () => {
-    const hostile = "$".repeat(200_000) + "a " + "/".repeat(200_000) + "1";
-    const started = performance.now();
-    auditGroundingSpans({ body: hostile, _grounding: [span(hostile)] }, bodies({ ev_1: "x" }));
-    segmentGroundedText(hostile, [], bodies({}));
-    expect(performance.now() - started).toBeLessThan(2_000);
+describe("auditGroundingSpans with a judge", () => {
+  const args = {
+    body: "Your plan renews on March 4, 2027.",
+    _grounding: [span("Your plan renews on March 4, 2027")],
+  };
+  const claim = "Your plan renews on March 4, 2027";
+
+  it("grants green only for support it can find in the cited body, and keeps the passage", () => {
+    const [audited] = auditGroundingSpans(
+      args,
+      bodies({ ev_1: ACCOUNT }),
+      judged([[claim, { verdict: "supported", quotes: ['"renewal_date":"2027-03-04"'] }]]),
+    );
+    expect(audited).toMatchObject({
+      tier: "verifiable",
+      judge: "test:judge",
+      support: ['"renewal_date":"2027-03-04"'],
+    });
   });
 
+  it("matches a quote regardless of case and spacing", () => {
+    const [audited] = auditGroundingSpans(
+      args,
+      bodies({ ev_1: "Renewal  Date:\n2027-03-04" }),
+      judged([[claim, { verdict: "supported", quotes: ["renewal date: 2027-03-04"] }]]),
+    );
+    expect(audited?.tier).toBe("verifiable");
+  });
+
+  it("refuses a supported verdict whose quote is not in the cited body", () => {
+    const [audited] = auditGroundingSpans(
+      args,
+      bodies({ ev_1: ACCOUNT }),
+      judged([[claim, { verdict: "supported", quotes: ["The plan renews on March 4, 2027."] }]]),
+    );
+    expect(audited).toMatchObject({ tier: "inconclusive", gap: { reason: "unverified-quote" } });
+  });
+
+  it("refuses support whose quotes do not hold the claim's figures", () => {
+    const [audited] = auditGroundingSpans(
+      args,
+      bodies({ ev_1: ACCOUNT }),
+      judged([[claim, { verdict: "supported", quotes: ['"plan":"Standard"'] }]]),
+    );
+    expect(audited?.gap).toEqual({ reason: "unverified-quote" });
+  });
+
+  it("refuses support whose quote states a different small number than the claim", () => {
+    const outage = "The processor was down for 73 minutes";
+    const [audited] = auditGroundingSpans(
+      { body: `${outage}.`, _grounding: [span(outage)] },
+      bodies({ ev_1: "ALERT: payment processor returned 503 for 37 minutes." }),
+      judged([[outage, { verdict: "supported", quotes: ["payment processor returned 503 for 37 minutes"] }]]),
+    );
+    expect(audited?.gap).toEqual({ reason: "unverified-quote" });
+  });
+
+  it("reads a day of the month inside an ISO date as the same number", () => {
+    const [audited] = auditGroundingSpans(
+      { body: "It arrives on October 2.", _grounding: [span("It arrives on October 2")] },
+      bodies({ ev_1: '{"eta": "2026-10-02"}' }),
+      judged([["It arrives on October 2", { verdict: "supported", quotes: ['"eta": "2026-10-02"'] }]]),
+    );
+    expect(audited?.tier).toBe("verifiable");
+  });
+
+  it("refuses a supported verdict that offers no quote at all", () => {
+    const [audited] = auditGroundingSpans(
+      args,
+      bodies({ ev_1: ACCOUNT }),
+      judged([[claim, { verdict: "supported", quotes: [] }]]),
+    );
+    expect(audited?.gap).toEqual({ reason: "unverified-quote" });
+  });
+
+  it("asserts what the judge finds unsupported, the contradicted fee included", () => {
+    const fee = "Your $12.00 swap fee has been waived.";
+    const [audited] = auditGroundingSpans(
+      { body: fee, _grounding: [span(fee)] },
+      bodies({ ev_1: ACCOUNT }),
+      judged([[fee, { verdict: "unsupported", quotes: [] }]]),
+    );
+    expect(audited).toMatchObject({ tier: "asserted", gap: { reason: "refuted" }, judge: "test:judge" });
+  });
+
+  it("will not accuse a claim the judge could not find in a clipped source", () => {
+    const [audited] = auditGroundingSpans(
+      args,
+      clippedBodies({ ev_1: ACCOUNT }),
+      judged([[claim, { verdict: "unsupported", quotes: [] }]]),
+    );
+    expect(audited?.gap).toEqual({ reason: "clipped" });
+  });
+
+  it("reads an abstention and a failed or missing answer as unsettled", () => {
+    const sources = bodies({ ev_1: ACCOUNT });
+    const unclear = auditGroundingSpans(args, sources, judged([[claim, { verdict: "unclear", quotes: [] }]]));
+    const failed = auditGroundingSpans(args, sources, judged([[claim, { failed: true }]]));
+    const missing = auditGroundingSpans(args, sources, judged([]));
+    expect(unclear[0]?.gap).toEqual({ reason: "unclear" });
+    expect(failed[0]?.gap).toEqual({ reason: "judge-error" });
+    expect(missing[0]?.gap).toEqual({ reason: "judge-error" });
+  });
+
+  it("keeps a deterministic accusation even when the judge would have agreed with the draft", () => {
+    const wrong = "Your annual amount is $1,020.00";
+    const [audited] = auditGroundingSpans(
+      { body: `${wrong}.`, _grounding: [span(wrong)] },
+      bodies({ ev_1: ACCOUNT }),
+      judged([[wrong, { verdict: "supported", quotes: ['"annual_amount":"1200.00"'] }]]),
+    );
+    expect(audited).toMatchObject({ tier: "asserted", gap: { reason: "figures" } });
+    expect(audited?.judge).toBeUndefined();
+  });
+});
+
+describe("hostile input", () => {
+  it("stays linear on long runs of punctuation in the span, the body and a judge's quote", () => {
+    const hostile = "$".repeat(200_000) + "a " + "/".repeat(200_000) + "1";
+    const started = performance.now();
+    const args = { body: hostile, _grounding: [span(hostile)] };
+    pendingJudgements(args, bodies({ ev_1: hostile }));
+    auditGroundingSpans(args, bodies({ ev_1: hostile }), judged([[hostile, { verdict: "supported", quotes: [hostile] }]]));
+    segmentAuditedText(hostile, []);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe("pendingJudgements", () => {
+  it("sends the judge only claims the deterministic checks left open, once each", () => {
+    const args = {
+      body: "Renews 2027. Fee $99.00. Renews 2027. Gone.",
+      subject: "Renews 2027",
+      _grounding: [
+        span("Fee $99.00"),
+        span("Gone", "ev_missing"),
+        span("Renews 2027", "ev_1", "subject"),
+        span("not in the text"),
+      ],
+    };
+    const pending = pendingJudgements(args, bodies({ ev_1: ACCOUNT }));
+    expect(pending.map((p) => [p.claim, p.evidenceId])).toEqual([["Renews 2027", "ev_1"]]);
+    expect(pending[0]?.key).toBe(judgeKey(span("Renews 2027")));
+  });
+});
+
+describe("segmentAuditedText", () => {
+  it("draws the stored tiers over the text and marks figures no citation covers", () => {
+    const text = "Renews 2027. A $45.00 fee applies.";
+    const segments = segmentAuditedText(text, [
+      { ...span("Renews 2027"), tier: "verifiable" },
+    ]);
+    expect(segments.map((s) => s.text).join("")).toBe(text);
+    expect(segments[0]).toMatchObject({ text: "Renews 2027", tier: "verifiable", evidenceId: "ev_1" });
+    expect(segments.find((s) => s.unbacked)?.text).toBe("$45.00");
+  });
 });

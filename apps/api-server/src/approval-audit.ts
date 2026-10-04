@@ -1,24 +1,21 @@
 /**
- * Recomputes the citation audit when a human approves a gated action, from the
- * interrupt's own spans and the server-owned evidence ledger. A verdict a client
- * computed would be provenance the client could choose.
+ * Records the citation audit when a human approves a gated action, graded by the server's
+ * judge over the arguments that ship. A verdict a client computed would be provenance the
+ * client could choose.
  */
 import {
-  auditGroundingSpans,
-  citedEvidenceIds,
   parseInterruptActions,
   withoutGroundingArgument,
   type ApprovalDecision,
-  type ApprovalVerdictSpan,
-  type CitedSource,
   type ResumeCommand,
   type ThreadState,
 } from "@pizza-bot/core";
-import type { ApprovalVerdictStore, EvidenceStore } from "@pizza-bot/storage";
+import type { ApprovalVerdictStore } from "@pizza-bot/storage";
+import type { GroundingJudge } from "./grounding-judge.js";
 
 export interface ApprovalAuditDeps {
   verdicts: ApprovalVerdictStore;
-  evidence?: EvidenceStore | undefined;
+  judge: GroundingJudge;
 }
 
 export interface ApprovalAuditInput {
@@ -30,7 +27,8 @@ export interface ApprovalAuditInput {
   resume: ResumeCommand;
 }
 
-export type ApprovalAuditor = (input: ApprovalAuditInput) => void;
+/** Settles once the verdicts are stored; the resume it describes never waits on it. */
+export type ApprovalAuditor = (input: ApprovalAuditInput) => Promise<void>;
 
 const DISPATCHING: ReadonlySet<string> = new Set<ApprovalDecision>(["approve", "edit"]);
 
@@ -43,62 +41,40 @@ export function dispatchesAction(resume: unknown): resume is ResumeCommand {
 }
 
 export function approvalAuditor(deps: ApprovalAuditDeps): ApprovalAuditor {
-  return (input) => {
+  return async (input) => {
     // A failed audit must never reject a decision the reviewer already made.
     try {
-      recordVerdicts(deps, input);
+      await recordVerdicts(deps, input);
     } catch (err) {
       console.error("[grounding] failed to record approval verdicts:", err);
     }
   };
 }
 
-function recordVerdicts(deps: ApprovalAuditDeps, input: ApprovalAuditInput): void {
+async function recordVerdicts(deps: ApprovalAuditDeps, input: ApprovalAuditInput): Promise<void> {
   const interrupt = input.state.interrupts?.find((i) => i.id === input.resume.interruptId);
   if (!interrupt) return;
   const { actions } = parseInterruptActions(interrupt.value);
 
-  actions.forEach((action, index) => {
-    const decision = input.resume.decisions[index]?.decision;
-    if (decision !== "approve" && decision !== "edit") return;
-    const edit = decision === "edit" ? input.resume.decisions[index]! : undefined;
-    // An edit invalidates quotes of the draft it replaced, so audit what ships.
-    const args = edit ? edit.editedArgs : action.args;
-    deps.verdicts.append({
-      verdictId: `${input.resume.interruptId}#${index}`,
-      threadId: input.threadId,
-      runId: input.runId,
-      interruptId: input.resume.interruptId,
-      toolName: edit?.editedName ?? action.toolName,
-      decision,
-      // Citations are provenance, not content, and the spans already carry them.
-      args: withoutGroundingArgument(args),
-      spans: auditedSpans(deps, input.threadId, args),
-    });
-  });
-}
-
-function auditedSpans(
-  deps: ApprovalAuditDeps,
-  threadId: string,
-  args: unknown,
-): ApprovalVerdictSpan[] {
-  const sources = new Map<string, CitedSource>();
-  const identities = new Map<string, { breadcrumb: string; bytes: number; truncated: boolean }>();
-  for (const id of citedEvidenceIds(args)) {
-    // A citation naming another thread's entry is not this thread's evidence.
-    const entry = deps.evidence?.get(id);
-    if (!entry || entry.threadId !== threadId) continue;
-    identities.set(id, {
-      breadcrumb: entry.breadcrumb,
-      bytes: entry.bytes,
-      truncated: entry.truncated,
-    });
-    const text = deps.evidence?.readBody(id);
-    if (text !== undefined) sources.set(id, { text, truncated: entry.truncated });
-  }
-  return auditGroundingSpans(args, sources).map((span) => {
-    const identity = identities.get(span.evidenceId);
-    return { ...span, ...(identity ?? {}) };
-  });
+  await Promise.all(
+    actions.map(async (action, index) => {
+      const decision = input.resume.decisions[index]?.decision;
+      if (decision !== "approve" && decision !== "edit") return;
+      const edit = decision === "edit" ? input.resume.decisions[index]! : undefined;
+      // An edit invalidates quotes of the draft it replaced, so audit what ships.
+      const args = edit ? edit.editedArgs : action.args;
+      const { spans } = await deps.judge.audit(input.threadId, args);
+      deps.verdicts.append({
+        verdictId: `${input.resume.interruptId}#${index}`,
+        threadId: input.threadId,
+        runId: input.runId,
+        interruptId: input.resume.interruptId,
+        toolName: edit?.editedName ?? action.toolName,
+        decision,
+        // Citations are provenance, not content, and the spans already carry them.
+        args: withoutGroundingArgument(args),
+        spans,
+      });
+    }),
+  );
 }
