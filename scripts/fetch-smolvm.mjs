@@ -10,6 +10,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Git for Windows can put GNU tar ahead of System32's bsdtar on PATH; GNU tar
+// cannot read the zip and treats a `C:` path as a remote host.
+const TAR =
+  process.platform === "win32"
+    ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+    : "tar";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export const SMOLVM_VERSION = "1.22.2";
@@ -92,9 +99,12 @@ export async function fetchSmolvm({ platform, arch, output }) {
     const unpacked = path.join(work, "unpacked");
     fs.mkdirSync(unpacked);
     // bsdtar, which macOS and Windows ship as `tar`, also reads the Windows zip.
-    execFileSync("tar", ["-xf", archivePath, "-C", unpacked], { stdio: "inherit" });
-    const [root] = fs.readdirSync(unpacked);
-    const staged = path.join(unpacked, root);
+    execFileSync(TAR, ["-xf", archivePath, "-C", unpacked], { stdio: "inherit" });
+    const entries = fs.readdirSync(unpacked);
+    const staged = path.join(unpacked, entries[0] ?? "");
+    if (entries.length !== 1 || !fs.statSync(staged).isDirectory()) {
+      throw new Error(`${release.asset} should hold one top-level directory, found: ${entries.join(", ")}`);
+    }
     for (const entry of PRUNED) {
       fs.rmSync(path.join(staged, entry), { recursive: true, force: true });
     }
@@ -103,7 +113,7 @@ export async function fetchSmolvm({ platform, arch, output }) {
     // user cache instead, as the Windows release already ships it.
     const rootfs = path.join(staged, "agent-rootfs");
     if (fs.existsSync(rootfs)) {
-      execFileSync("tar", ["-czf", path.join(staged, "agent-rootfs.tar.gz"), "-C", rootfs, "."], {
+      execFileSync(TAR, ["-czf", path.join(staged, "agent-rootfs.tar.gz"), "-C", rootfs, "."], {
         stdio: "inherit",
       });
       fs.rmSync(rootfs, { recursive: true, force: true });
