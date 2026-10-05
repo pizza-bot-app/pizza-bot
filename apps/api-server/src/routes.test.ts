@@ -697,6 +697,8 @@ describe("api-server: checkpoint-shaped state surface", () => {
   // so these cases are sent as raw bodies rather than through JSON.stringify.
   it.each([
     ["fractional", '{"limit":2.7}', 2],
+    ["at the maximum", '{"limit":100}', 100],
+    ["just above the maximum", '{"limit":101}', 100],
     ["above the maximum", '{"limit":1000000}', 100],
     ["zero", '{"limit":0}', 10],
     ["negative", '{"limit":-5}', 10],
@@ -712,6 +714,37 @@ describe("api-server: checkpoint-shaped state surface", () => {
     });
     expect(res.status).toBe(200);
     expect(calls).toEqual([{ limit: expected }]);
+  });
+
+  it("POST /threads/:id/history returns the full page when `limit` equals the available row count", async () => {
+    const res = await buildApp(fakeHost()).request("/threads/t1/history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ limit: 2 }),
+    });
+    const list = (await res.json()) as Array<{ checkpoint_id: string }>;
+    expect(list.map((s) => s.checkpoint_id)).toEqual(["chk2", "chk1"]);
+  });
+
+  // `fakeHost`'s source mirrors the checkpointer and honors `limit` itself, so it
+  // can't exercise collectHistory's defensive `break` (routes-langgraph.ts). This
+  // fake deliberately ignores `limit` and over-yields, the only way to prove the
+  // route still truncates if a future source doesn't bound its own reads.
+  it("POST /threads/:id/history truncates when the source over-yields past the limit", async () => {
+    const host = fakeHost();
+    host.agent.getStateHistory = async function* (threadId: string) {
+      for (const checkpointId of ["chk5", "chk4", "chk3", "chk2", "chk1"]) {
+        yield { threadId, checkpointId, values: {}, next: [], createdAt: "t0" };
+      }
+    };
+
+    const res = await buildApp(host).request("/threads/t1/history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ limit: 2 }),
+    });
+    const list = (await res.json()) as Array<{ checkpoint_id: string }>;
+    expect(list.map((s) => s.checkpoint_id)).toEqual(["chk5", "chk4"]);
   });
 
 });
