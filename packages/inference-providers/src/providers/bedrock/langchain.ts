@@ -2,6 +2,7 @@
 import type { BaseMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import {
+  BEDROCK_DOCUMENT_MIME_TYPES,
   ModelCatalogError,
   type ModelProvider,
   type ModelCatalogDegradation,
@@ -369,8 +370,13 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     // The base signatures use `this["ParsedCallOptions"]`, which cannot be named
     // from this dynamically imported class, so only `messages` remains typed.
     class ReasoningSafeChatBedrockConverse extends ChatBedrockConverse {
+      // @langchain/aws reports no profile, and DeepAgents' unsupported-content
+      // middleware replaces any non-PDF document without a declared MIME type.
       override get profile() {
-        return withContextWindow(super.profile, descriptor?.contextWindow);
+        return withContextWindow(
+          { fileMimeTypes: [...BEDROCK_DOCUMENT_MIME_TYPES], ...super.profile },
+          descriptor?.contextWindow,
+        );
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
