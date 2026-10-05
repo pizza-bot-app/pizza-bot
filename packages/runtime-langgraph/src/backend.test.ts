@@ -346,6 +346,41 @@ describe("buildBackend", () => {
     },
   );
 
+  it.skipIf(process.platform === "win32")(
+    "rejects a symlink that escapes the memories directory",
+    async () => {
+      const parent = mkdtempSync(join(tmpdir(), "memory-symlink-"));
+      const memories = join(parent, "memories");
+      const outside = join(parent, "outside");
+      mkdirSync(memories);
+      mkdirSync(outside);
+      writeFileSync(join(outside, "secret.txt"), "not a memory", "utf8");
+      symlinkSync(outside, join(memories, "linked"), "dir");
+      symlinkSync(join(outside, "secret.txt"), join(memories, "leaf.md"));
+      const backend = buildBackend({
+        memoriesDir: realpathSync(memories),
+      }) as CompositeBackend;
+
+      expect((await backend.read("/memories/linked/secret.txt")).error).toBeTruthy();
+      expect((await backend.read("/memories/leaf.md")).error).toBeTruthy();
+      expect((await backend.ls("/memories/linked/")).files ?? []).toEqual([]);
+      expect(
+        (await backend.grep("not a memory", "/memories/linked/")).matches ?? [],
+      ).toEqual([]);
+      expect(
+        (await backend.write("/memories/linked/new.md", "escaped")).error,
+      ).toBeTruthy();
+      expect(
+        (await backend.edit("/memories/leaf.md", "not", "now")).error,
+      ).toBeTruthy();
+      expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe(
+        "not a memory",
+      );
+
+      removeDir(parent);
+    },
+  );
+
   it("blocks every durable memory operation while the live gate is disabled", async () => {
     const dir = mkdtempSync(join(tmpdir(), "memory-backend-"));
     writeFileSync(join(dir, "preferences.md"), "likes thin crust", "utf8");

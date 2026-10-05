@@ -83,14 +83,6 @@ cross-package hazard. Type-checking is still done by `tsc --noEmit` (the
 
 ## Packaging prerequisites (important)
 
-- **Use Node 24 or 25 to package** (`npm run make`/`package`). The repo requires
-  Node `>=24`; Node 26 and newer are affected by an Electron Forge extraction hang
-  ([electron/forge#4277]). On
-  macOS the root
-  `npm run desktop:package` / `desktop:make` scripts use Homebrew's `node@24`
-  binary automatically. On other platforms they fail early unless the selected
-  runtime is Node 24, so prefer those scripts. To invoke directly:
-  `PATH="/opt/homebrew/opt/node@24/bin:$PATH" npm run make -w @pizza-bot/desktop-shell`.
 - **Linux packaging needs `dpkg` and `fakeroot` for deb, `rpmbuild` for rpm.**
   Forge checks a maker's external binaries while resolving targets, so a host
   missing one fails before packaging starts, naming the binary. Debian/Ubuntu:
@@ -109,8 +101,6 @@ cross-package hazard. Type-checking is still done by `tsc --noEmit` (the
 
 Packaging is supported on macOS, Windows, and Linux; each `npm run make` host
 produces installers for its own platform (see the makers in `forge.config.ts`).
-
-[electron/forge#4277]: https://github.com/electron/forge/issues/4277
 
 ## Commands
 

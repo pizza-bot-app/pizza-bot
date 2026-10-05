@@ -1,6 +1,6 @@
 {
   "name": "@pizza-bot/cli",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Interactive terminal shell — a thin client that streams agent turns from a running Pizza Bot server.",
@@ -22,12 +22,12 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
-    "@langchain/langgraph-sdk": "~1.9.28",
-    "@langchain/protocol": "^0.0.18",
+    "@langchain/langgraph-sdk": "~1.12.0",
+    "@langchain/protocol": "^0.0.19",
     "@pizza-bot/core": "*",
     "@pizza-bot/logging": "*"
   },
   "devDependencies": {
-    "tsx": "^4.23.11"
+    "tsx": "^4.23.15"
   }
 }

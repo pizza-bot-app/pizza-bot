@@ -210,6 +210,65 @@ in `core/src/protocol-types.ts`:
   Standalone directory browsing is a separate, operator-configured capability:
   the API lists directories only beneath canonical
   `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS` and never follows symlinks while browsing.
+
+  One backend is shared by the orchestrator and every skill worker. Workers
+  inherit the thread's `/` state files and their writes merge back, and the
+  memory setting and folder grants apply to the whole thread rather than to one
+  skill:
+
+  ```mermaid
+  flowchart LR
+    subgraph Thread["One thread"]
+      O[Orchestrator]
+      W1[Skill worker A]
+      W2[Skill worker B]
+    end
+    O & W1 & W2 --> CB{{"Shared CompositeBackend"}}
+    CB -->|"/ (incl. /skills/)"| SB["StateBackend<br/>thread checkpoint · not on disk"]
+    CB -->|"/memories/"| MEM["Memories dir on disk<br/>only while Memory is on in Settings"]
+    CB -->|"/local/&lt;id&gt;/"| LF["Granted folders on disk<br/>read-only unless the grant allows writes"]
+  ```
+- **Sandboxed evaluation** is `@langchain/quickjs`'s code interpreter, hosted on a
+  worker thread: `runtime-langgraph`'s `code-interpreter-middleware.ts` wraps
+  upstream's middleware and keeps only the thread boundary, with `eval-worker.ts`
+  as the thread entry. Guest code holds whichever thread it runs on for its whole
+  execution — the interpreter's deadline aborts it but never yields — so running it
+  on the server's thread stops the event loop for as long as the guest computes,
+  and the desktop supervisor SIGKILLs a sidecar that stops answering health probes.
+  Bridged calls travel back to the main thread, which owns the graph execution
+  context a filesystem write needs; that hop must pass the eval tool's config
+  explicitly, because the worker's message handler runs outside the call's async
+  context. Cancellation terminates the worker rather than disposing the isolate.
+  Each agent invocation gets its own worker, keyed by the `checkpoint_ns` prefix
+  its eval calls and `afterAgent` share, so parallel runs of one skill neither swap
+  configs nor tear each other down; and since upstream's eval queue is
+  module-global, per-worker hosting also stops evals in different agents from
+  serializing behind one another.
+  The packaged server emits the worker as a second esbuild entry beside `index.js`,
+  since both resolve the QuickJS wasm as a sibling file.
+  The QuickJS guest has no filesystem of its own. Its bridges are the `task()` global
+  and the `tools.*` namespace, into which the runtime exposes exactly the
+  DeepAgents filesystem tools (`ls`/`read_file`/`glob`/`grep`/`write_file`/
+  `edit_file`) as camelCase functions. Paging a large file through `read_file`'s
+  `offset`/`limit` inside `eval` is how bulk data is processed without entering the
+  conversation. Upstream special-cases `read_file` by name, stripping the `cat -n`
+  line numbers and `@@ … @@` status header the tool shows in a transcript, so a
+  page arrives in the guest as raw content; no other bridged tool gets that
+  treatment. That header is also the only mark of a page DeepAgents cut at its
+  size cap, so the bridge makes such a read throw instead, naming the offset to
+  resume from (and, for a cut page, the limit that fits); an uncut page is
+  unchanged.
+  MCP tools are deliberately withheld: reaching one from generated code
+  would bypass the approval a skill declares through `interruptOn`. Writes are not
+  narrowed at the bridge — the composite backend re-reads each grant's `readOnly`
+  flag on every call, so it refuses the write and names why, whereas the bridged
+  list is fixed when the graph compiles and would freeze a live gate. Two sandbox
+  bounds are pinned here: `maxResultChars`, raised because a distillate is all that
+  should come back through that string, and `executionTimeoutMs`, which has to
+  cover awaited host work — paged reads and subagent dispatch — rather than a
+  synchronous computation. The rest (`maxPtcCalls`, the memory and stack ceilings)
+  deliberately track upstream's defaults and will move with a `@langchain/quickjs`
+  bump.
 - **Model context limits** are resolved by each inference-provider adapter from
   effective local configuration or provider metadata, with models.dev filling
   missing catalog fields. The adapter publishes the same available limit as
@@ -232,7 +291,8 @@ in `core/src/protocol-types.ts`:
   the same filesystem tools and `eval` directly, so the only loss is an isolated
   context to do noisy filesystem work in. With no ready skills there is nothing
   to route to, so the `task` tool
-  and the QuickJS `task()` bridge are both absent; readiness is dynamic, so an
+  and the QuickJS `task()` bridge are both absent, and the orchestrator prompt
+  omits its delegation guidance; readiness is dynamic, so an
   installed-but-unavailable skill also withholds them. With skills, the root
   QuickJS interpreter exposes `task()` for programmatic fan-out.
   Each skill catalog entry compiles directly into one subagent invoked through the
@@ -280,7 +340,8 @@ in the `middleware` array, which replaces DeepAgents' entry because
 `mergeMiddlewareStack` matches on the middleware name (`subAgentMiddleware`).
 Nothing is written to state, so the Activity drill-down still renders the plain
 dispatch a human could have written. That name match is the one fragile joint: if
-a DeepAgents release renames the entry, theirs survives alongside ours and the
+a DeepAgents release renames the entry, theirs survives alongside ours with no
+subagents, since the roster is given only to `taskDispatchMiddleware`, and the
 briefing notes come back, so `skill-dispatch.test.ts` asserts the upstream
 phrasing is absent.
 
@@ -611,7 +672,8 @@ The model seam (`core/model-provider.ts`) is provider-agnostic: `ModelProvider`
 the `provider:model` prefix. The composition root registers
 providers (`agent-host.ts` registers them through `registerBuiltinProviders`) and
 each turn carries its model as `configurable.model`. Amazon Bedrock, Anthropic,
-Google Gemini, OpenAI, OpenRouter, and Ollama are peer `ModelProvider` adapters;
+Google Gemini, OpenAI, OpenRouter, Requesty, and Ollama are peer
+`ModelProvider` adapters;
 another provider can follow the same pattern without changing the runtime,
 transport, or frontend. Each adapter is a peer submodule under
 `packages/inference-providers/src/providers/<id>` (Bedrock keeps its own

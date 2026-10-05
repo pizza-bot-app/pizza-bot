@@ -7,9 +7,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 
-type ToastTone = "info" | "success" | "error";
+type ToastTone = "info" | "success" | "warning" | "error";
 
 interface ToastInput {
   title: string;
@@ -29,6 +29,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 const icons: Record<ToastTone, typeof Info> = {
   info: Info,
   success: CheckCircle2,
+  warning: AlertTriangle,
   error: AlertCircle,
 };
 
@@ -47,7 +48,8 @@ export function AppToastProvider({ children }: { children: ReactNode }) {
         ...current.slice(-2),
         { ...input, id, tone: input.tone ?? "info" },
       ]);
-      window.setTimeout(() => dismiss(id), input.tone === "error" ? 6500 : 4000);
+      const lingers = input.tone === "error" || input.tone === "warning";
+      window.setTimeout(() => dismiss(id), lingers ? 6500 : 4000);
     },
     [dismiss],
   );

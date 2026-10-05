@@ -152,6 +152,7 @@ describe("startSidecar (real api-server)", () => {
     const wasm = path.join(distServer, "emscripten-module.wasm");
     expect(existsSync(bundle)).toBe(true);
     expect(existsSync(wasm)).toBe(true);
+    expect(existsSync(path.join(distServer, "eval-worker.js"))).toBe(true);
 
     const evalProbe = path.join(distServer, "eval-probe.js");
     await build({

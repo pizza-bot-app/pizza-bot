@@ -41,13 +41,15 @@ discarded; run `npm install` afterward.
 
 A running api-server needs access to at least one model provider; the CLI and a
 desktop app connected to a remote backend do not. Amazon Bedrock, Anthropic,
-Google Gemini, OpenAI, OpenRouter, and Ollama are supported as peer adapters.
+Google Gemini, OpenAI, OpenRouter, Requesty, and Ollama are supported as peer
+adapters.
 See [`.env.example`](.env.example). Without credentials for a selected provider,
 the code builds and tests pass, but live runs fail at the first model call.
 
 ## How code ships
 
-Four workflows, and only one of them publishes anything.
+Four workflows ship code, and only one of them publishes anything. Two more
+review it and publish nothing — see [Claude review](#claude-review).
 
 ```
 PULL REQUEST ────────────────────────────────────────────────────────────────
@@ -58,6 +60,14 @@ PULL REQUEST ──────────────────────�
     ├── image           2 container images · 3 smokes         no push
     └── desktop         make --arch x64 · verify the payload  no signing
     all five required by branch protection
+
+  claude-code-review.yml
+       review           Claude reviews the diff, inline comments   advisory
+                        same-repo branches only; not Dependabot
+
+@claude MENTION ─────────────────────────────────────────────────────────────
+  claude.yml            in a comment, a review, or a new issue. Answers in a
+                        comment; the only path that reaches a fork's pull request
 
 MERGE TO main ───────────────────────────────────────────────────────────────
   ci.yml, again. Nothing is published: no installers, no image, no release.
@@ -144,6 +154,146 @@ npx tsc --noEmit -p packages/<pkg>/tsconfig.json
 > **Why `npm test` caps concurrency at 2:** uncapped, the parallel vitest+esbuild
 > workers can exhaust file descriptors/memory and fail en masse — that's a
 > resource limit, not real failures. The cap is baked into the root script.
+
+## Claude review
+
+Claude reviews pull requests through Amazon Bedrock, so inference is billed to our
+own AWS account and no model credential is stored here: each run exchanges its
+GitHub OIDC token for a short-lived IAM role session. Reviews are advisory —
+neither workflow is a required check, and both comment rather than block a merge.
+
+Two workflows, split by what GitHub is willing to hand a run:
+
+| Workflow | Fires on | Reaches a fork's pull request |
+| --- | --- | --- |
+| [`claude-code-review.yml`](.github/workflows/claude-code-review.yml) | a pull request opening, or a draft marked ready | no |
+| [`claude.yml`](.github/workflows/claude.yml) | `@claude` in a comment, a review, or an issue | yes |
+
+That split is forced rather than chosen. GitHub withholds secrets and the OIDC
+token from a run triggered by a fork's pull request, so the automatic review
+cannot authenticate to Bedrock there and skips it instead of failing at the
+credentials step. Comment and review events fire in this repository's context and
+keep full access, which makes `@claude` the only way to review an outside
+contributor's branch. Dependabot is skipped for a related reason — it gets its own
+secret store — and a lockfile bump is already `audit.yml`'s job.
+
+Both workflows pin `global.anthropic.claude-opus-5-5`. Pinning the full model ID
+matters: left unpinned, Claude Code derives a region-prefixed profile from
+`AWS_REGION` and would call a `us.` one instead. Pinning does not confine a run
+to that one model, though — a review also invokes Haiku and Sonnet for background
+tasks, which is why the invocation policy covers every inference profile rather
+than naming Opus alone. `claude.yml` also verifies the
+commenting actor has write access before the credentials step, because the action
+enforces that itself only afterwards — on a public repository any comment carrying
+the trigger phrase otherwise mints a role session first.
+
+Two things about `claude_args` cost a run before they were understood, and neither
+is visible in the workflow file:
+
+- **`--allowedTools` replaces the action's default tool set, it does not extend
+  it.** A mention-triggered run gets a curated default — the read tools, the
+  comment and CI tools, and scoped `git` writes — but naming a single tool
+  discards all of it. `claude-code-review.yml` therefore has to list `Read` and
+  friends itself; without them the review can only see the diff and cannot open a
+  file to check what it suspects.
+- **Overshooting `--max-turns` fails the job even when the review succeeded.** The
+  action compares the turn count afterwards, so a finished, posted review still
+  ends in a red check and a comment reading "Claude encountered an error". A real
+  review of five files took 31 turns. `timeout-minutes` is the honest runaway
+  guard; the turn cap is only a backstop and belongs well above what a review
+  costs.
+
+Neither workflow installs the repository's dependencies, so Claude reviews
+statically and cannot run `npm test` to check a suspicion. Granting that would
+mean executing a contributor's code inside a job holding the Bedrock role.
+
+### Bedrock trust setup
+
+One IAM role serves both workflows, dedicated to this purpose so its policy stays
+scoped to model invocation and its CloudTrail history is only GitHub Actions.
+
+1. Grant the account access to the Anthropic models in the Bedrock console under
+   **Model catalog**. A `global.` inference profile routes across regions, so
+   confirm what the account can actually invoke:
+
+   ```bash
+   aws bedrock list-inference-profiles --region us-west-2 \
+     --query "inferenceProfileSummaries[?starts_with(inferenceProfileId,'global.anthropic')].inferenceProfileId"
+   ```
+
+2. Add a GitHub OIDC identity provider, once per account, with provider URL
+   `https://token.actions.githubusercontent.com` and audience `sts.amazonaws.com`.
+
+3. Create a role named `pizza-bot-github-actions-bedrock` with the two policies
+   below, substituting the account ID.
+
+4. Add its ARN as the repository Actions secret `AWS_ROLE_TO_ASSUME`. The account
+   ID appears only in the trust policy and inside that secret, keeping it out of
+   this public repository.
+
+The subject wildcard is load-bearing: an automatic review presents
+`repo:pizza-bot-app/pizza-bot:pull_request` while a comment-triggered run presents
+`repo:pizza-bot-app/pizza-bot:ref:refs/heads/main`. Narrowing it to either one
+alone breaks the other workflow.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:pizza-bot-app/pizza-bot:*"
+        }
+      }
+    }
+  ]
+}
+```
+
+The invocation policy grants only what Claude Code needs. `aws-marketplace` is
+conditioned on being called via Bedrock, so the role cannot subscribe to anything
+on its own:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowModelAndInferenceProfileAccess",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:ListInferenceProfiles",
+        "bedrock:GetInferenceProfile"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:*:*:inference-profile/*",
+        "arn:aws:bedrock:*:*:application-inference-profile/*",
+        "arn:aws:bedrock:*:*:foundation-model/*"
+      ]
+    },
+    {
+      "Sid": "AllowMarketplaceSubscription",
+      "Effect": "Allow",
+      "Action": ["aws-marketplace:ViewSubscriptions", "aws-marketplace:Subscribe"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:CalledViaLast": "bedrock.amazonaws.com" }
+      }
+    }
+  ]
+}
+```
 
 ## Releases
 
@@ -361,4 +511,10 @@ dependencies before typechecking it.
 ## License
 
 By contributing, you agree that your contributions are licensed under the
-project's [Apache-2.0](LICENSE) license.
+project's [Apache-2.0](LICENSE) license. The pull request template asks you to
+confirm this on each contribution.
+
+You keep the copyright in what you write — that statement licenses it, it does
+not transfer ownership. If you want a copyright notice on your work, put a
+`Portions Copyright <year> <you>` line in [NOTICE](NOTICE) so downstream
+redistributors have one place to look.

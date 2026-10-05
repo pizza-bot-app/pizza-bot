@@ -445,6 +445,7 @@ export function App() {
                 onReconnect={mcpAdmin.reconnect}
                 onDelete={mcpAdmin.remove}
                 onGetDoc={mcpAdmin.getDoc}
+                onGetTools={mcpAdmin.getTools}
               />
             </div>
           ) : view === "plugins" ? (

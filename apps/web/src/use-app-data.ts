@@ -183,6 +183,7 @@ export function useMcpServersAdmin(client: ApiClient, intervalMs = 5_000, enable
   );
   const remove = refreshAfter((id: string) => client.deleteMcpServer(id), refresh);
   const getDoc = useCallback((id: string) => client.getMcpServer(id), [client]);
+  const getTools = useCallback((id: string) => client.listMcpServerTools(id), [client]);
 
   return {
     servers,
@@ -194,6 +195,7 @@ export function useMcpServersAdmin(client: ApiClient, intervalMs = 5_000, enable
     reconnect,
     remove,
     getDoc,
+    getTools,
   };
 }
 
@@ -279,7 +281,7 @@ export function useModels(
       forceRefresh.current = false;
       return client.listModels(includeDisabled, force);
     }, [client, includeDisabled]),
-    { models: [], providers: [], default: "" } as ModelsInfo,
+    { models: [], providers: [], default: "", automatic: null } as ModelsInfo,
   );
   const retry = useCallback(() => {
     forceRefresh.current = true;

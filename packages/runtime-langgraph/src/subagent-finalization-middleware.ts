@@ -8,11 +8,19 @@ import {
 import { createMiddleware } from "langchain";
 import { z } from "zod";
 
-export const SUBAGENT_FINALIZATION_INSTRUCTION =
-  "This is the final model call available for this delegated task. " +
-  "Do not call tools. Return the most useful answer supported by results already " +
+const FINALIZATION_GUIDANCE =
+  "Return the most useful answer supported by results already " +
   "in the conversation. Clearly disclose unavailable sources, failed searches, " +
   "uncertainty, and incomplete coverage. Do not return only a call-limit notice.";
+
+export const SUBAGENT_FINALIZATION_INSTRUCTION =
+  "This is the final model call available for this delegated task. " +
+  `Do not call tools. ${FINALIZATION_GUIDANCE}`;
+
+// A response format can still need its response tool on this call.
+export const SUBAGENT_STRUCTURED_FINALIZATION_INSTRUCTION =
+  "This is the final model call available for this delegated task. " +
+  `Do not call tools to gather more information. ${FINALIZATION_GUIDANCE}`;
 
 export const SUBAGENT_MODEL_CALL_COUNT = "runSubagentModelCallCount";
 
@@ -36,7 +44,11 @@ export function subagentFinalizationMiddleware(runLimit: number) {
         ...request,
         messages: toolHistoryAsText(request.messages),
         tools: [],
-        systemMessage: request.systemMessage.concat(SUBAGENT_FINALIZATION_INSTRUCTION),
+        systemMessage: request.systemMessage.concat(
+          request.responseFormat
+            ? SUBAGENT_STRUCTURED_FINALIZATION_INSTRUCTION
+            : SUBAGENT_FINALIZATION_INSTRUCTION,
+        ),
       });
     },
     afterModel: (state) => ({

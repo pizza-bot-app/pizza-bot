@@ -1,15 +1,41 @@
-# Pizza Bot OSS
+<p align="center">
+  <img src="assets/icons/icon.png" alt="Pizza Bot" width="160" />
+</p>
 
-Pizza Bot is an inbox for long-running AI work. Start or schedule a task, return
-to your day, and let completed work collect in **Unread** while runs waiting for
-your decision collect in **Action**. Agents keep working when you navigate away
-or disconnect; the api-server process must remain running.
+<h1 align="center">Pizza Bot</h1>
+
+<p align="center">
+  <strong>An inbox for long-running AI work.</strong><br />
+  Start or schedule a task, walk away, and come back to finished work in <b>Unread</b>
+  and decisions waiting for you in <b>Action</b>.
+</p>
+
+<p align="center">
+  <a href="https://github.com/pizza-bot-app/pizza-bot/actions/workflows/ci.yml"><img src="https://github.com/pizza-bot-app/pizza-bot/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
+  <a href="https://github.com/pizza-bot-app/pizza-bot/releases/latest"><img src="https://img.shields.io/github/v/release/pizza-bot-app/pizza-bot" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/pizza-bot-app/pizza-bot" alt="Apache 2.0 license" /></a>
+  <a href="https://github.com/pizza-bot-app/pizza-bot/releases/latest"><img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Runs on macOS, Windows, and Linux" /></a>
+  <a href="docs/RUNNING.md"><img src="https://img.shields.io/badge/node-%3E%3D%2024-339933?logo=node.js&logoColor=white" alt="Requires Node.js 24 or newer" /></a>
+  <a href="https://github.com/pizza-bot-app/pizza-bot/discussions"><img src="https://img.shields.io/badge/GitHub-Discussions-8250df?logo=github" alt="GitHub Discussions" /></a>
+</p>
+
+<p align="center">
+  <a href="#download">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#why-pizza-bot">Why Pizza Bot</a> ·
+  <a href="#extend-it">Extend</a> ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="ROADMAP.md">Roadmap</a> ·
+  <a href="https://github.com/pizza-bot-app/pizza-bot/discussions">Discussions</a>
+</p>
 
 ![Pizza Bot inbox showing unread work, an approval request, a completed launch brief, and delegated agent activity](docs/assets/pizza-bot-inbox.png)
 
-Pizza Bot uses a stateful DeepAgents/LangGraph runtime with the same React
-experience in Electron and the browser. The desktop app, web app, and terminal
-CLI all communicate with the api-server over HTTP/SSE.
+Agents keep working when you navigate away or disconnect; only the api-server
+process must remain running. A stateful DeepAgents/LangGraph runtime serves the
+same React experience in Electron and the browser, and the desktop app, web app,
+and terminal CLI all talk to the api-server over HTTP/SSE.
 
 Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 
@@ -25,7 +51,7 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 - **Delegate to specialists.** Skills become tool-scoped subagents whose progress
   appears in the Activity panel.
 - **Bring your model provider.** Amazon Bedrock, Anthropic, Google Gemini,
-  OpenAI, OpenRouter, and Ollama are supported.
+  OpenAI, OpenRouter, Requesty, and Ollama are supported.
 - **Keep control of consequential actions.** Human-in-the-loop approvals,
   long-term memory, file attachments, and desktop notifications are built into
   the workflow.
@@ -34,10 +60,15 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 
 ## Download
 
-Installers for macOS (Intel and Apple silicon), Windows, and Linux (x64 and
-arm64) are attached to every [release](../../releases), with a `SHA256SUMS` to
-check a download against. The macOS builds are signed and notarized; the Linux
-packages are not signed, so verify them against the checksums.
+Installers are attached to every
+[release](https://github.com/pizza-bot-app/pizza-bot/releases/latest), with a
+`SHA256SUMS` to check a download against.
+
+| Platform | Packages | Notes |
+| --- | --- | --- |
+| macOS (Apple silicon, Intel) | `.dmg`, `.zip` | Signed and notarized |
+| Windows (x64) | `-setup.exe` | |
+| Linux (x64, arm64) | `.deb`, `.rpm` | Not signed; verify against `SHA256SUMS` |
 
 ## Quick start
 
@@ -68,18 +99,19 @@ CLI development, desktop packages, and remote backends.
 
 A running api-server needs access to at least one model provider; HTTP clients
 do not. Configure Amazon Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter,
-or Ollama in **Settings > Providers**. Bedrock accepts an AWS profile, AWS
-access keys, or a Bedrock API key, with an optional region override; otherwise
-`AWS_REGION` or `us-west-2` is used. Bedrock combines its native catalog with
-the regional Mantle catalog and routes models through Converse, OpenAI
-Responses or Chat Completions, or Anthropic Messages according to their
-advertised API family.
+Requesty, or Ollama in **Settings > Providers**. Bedrock accepts an AWS
+profile, AWS access keys, or a Bedrock API key, with an optional region
+override; otherwise `AWS_REGION` or `us-west-2` is used. Bedrock combines its
+native catalog with the regional Mantle catalog and routes models through
+Converse, OpenAI Responses or Chat Completions, or Anthropic Messages according
+to their advertised API family.
 OpenAI and Anthropic also accept custom base URLs for compatible endpoints;
 OpenAI can explicitly select Responses or Chat Completions, and Anthropic
-supports `x-api-key` or bearer authentication. Select a model with
-`PIZZA_MODEL=<provider>:<id>`. The desktop protects entered secrets with
-Electron `safeStorage`; server configuration persists only environment-variable
-references.
+supports `x-api-key` or bearer authentication. Requesty accepts a base URL
+override such as `https://router.eu.requesty.ai/v1` for its EU region. Select
+a model with `PIZZA_MODEL=<provider>:<id>`. The desktop protects entered
+secrets with Electron `safeStorage`; server configuration persists only
+environment-variable references.
 
 ## Extend it
 

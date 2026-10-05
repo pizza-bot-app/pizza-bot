@@ -3,7 +3,7 @@ import type { SkillCatalog } from "@pizza-bot/core";
 
 const mocks = vi.hoisted(() => ({
   createDeepAgent: vi.fn(),
-  createSubAgent: vi.fn(),
+  createSubAgentMiddleware: vi.fn(),
   createCodeInterpreterMiddleware: vi.fn(),
   modelCallLimitMiddleware: vi.fn(),
   toolCallLimitMiddleware: vi.fn(),
@@ -14,12 +14,16 @@ vi.mock("deepagents", async () => {
   return {
     ...actual,
     createDeepAgent: mocks.createDeepAgent,
-    createSubAgent: mocks.createSubAgent,
+    createSubAgentMiddleware: mocks.createSubAgentMiddleware,
   };
 });
 
 vi.mock("@langchain/quickjs", () => ({
   createCodeInterpreterMiddleware: mocks.createCodeInterpreterMiddleware,
+  validateResponseSchema: vi.fn(),
+  DEFAULT_MAX_PTC_CALLS: 256,
+  DEFAULT_MEMORY_LIMIT: 1024,
+  DEFAULT_MAX_STACK_SIZE: 512,
 }));
 
 vi.mock("langchain", async () => {
@@ -53,16 +57,42 @@ function mailSkill(interrupt = false): SkillCatalog {
   ]]);
 }
 
+interface RosterSpec {
+  tools?: unknown[];
+  interruptOn?: unknown;
+  middleware: Array<{ name?: string }>;
+}
+
+function dispatchedRoster(): RosterSpec[] {
+  const options = mocks.createSubAgentMiddleware.mock.calls.at(-1)![0] as {
+    subagents: RosterSpec[];
+  };
+  return options.subagents;
+}
+
 describe("Pizza Bot graph assembly", () => {
   beforeEach(() => {
     mocks.createDeepAgent.mockReset();
     mocks.createDeepAgent.mockResolvedValue({});
-    mocks.createSubAgent.mockReset();
-    mocks.createSubAgent.mockReturnValue({ compiled: true });
+    mocks.createSubAgentMiddleware.mockReset();
+    mocks.createSubAgentMiddleware.mockReturnValue({ name: "subAgentMiddleware" });
     mocks.createCodeInterpreterMiddleware.mockReset();
     mocks.createCodeInterpreterMiddleware.mockImplementation((options) => ({
       name: "CodeInterpreterMiddleware",
       options,
+      // The worker wrapper rebuilds the eval tool from upstream's own instance.
+      tools: [
+        {
+          name: "eval",
+          description: "Runs code.",
+          schema: {
+            type: "object",
+            properties: { code: { type: "string" } },
+            required: ["code"],
+          },
+        },
+      ],
+      wrapModelCall: (request: unknown, handler: (r: unknown) => unknown) => handler(request),
     }));
     mocks.modelCallLimitMiddleware.mockReset();
     mocks.modelCallLimitMiddleware.mockReturnValue({ name: "ModelCallLimitMiddleware" });
@@ -151,9 +181,7 @@ describe("Pizza Bot graph assembly", () => {
     const rootParams = mocks.createDeepAgent.mock.calls.at(-1)![0] as {
       middleware: Array<{ name?: string }>;
     };
-    const workerParams = mocks.createSubAgent.mock.calls.at(-1)![0] as {
-      middleware: Array<{ name?: string }>;
-    };
+    const workerParams = dispatchedRoster()[0]!;
     expect(mocks.toolCallLimitMiddleware).not.toHaveBeenCalled();
     expect(rootParams.middleware.map((middleware) => middleware.name))
       .not.toContain("ToolCallLimitMiddleware");
@@ -161,7 +189,7 @@ describe("Pizza Bot graph assembly", () => {
       .not.toContain("ToolCallLimitMiddleware");
   });
 
-  it("compiles each skill behind its declared tools and HITL policy", async () => {
+  it("dispatches each skill as a declarative spec behind its declared tools and HITL policy", async () => {
     const send = { name: "outlook__send" };
     await createPizzaBotAgent("prompt", {
       model: { modelId: "test" } as never,
@@ -171,7 +199,8 @@ describe("Pizza Bot graph assembly", () => {
       catalog: { outlook: ["send"] },
     });
 
-    expect(mocks.createSubAgent).toHaveBeenCalledWith(
+    const subagentParams = dispatchedRoster()[0]!;
+    expect(subagentParams).toEqual(
       expect.objectContaining({
         tools: [send],
         interruptOn: {
@@ -179,10 +208,7 @@ describe("Pizza Bot graph assembly", () => {
         },
       }),
     );
-    const subagentParams = mocks.createSubAgent.mock.calls[0]![0] as {
-      middleware: Array<{ name?: string }>;
-      skills?: string[];
-    };
+    expect(subagentParams).not.toHaveProperty("runnable");
     expect(subagentParams).not.toHaveProperty("skills");
     expect(subagentParams.middleware.map((middleware) => middleware.name))
       .not.toContain("SkillsMiddleware");
@@ -195,10 +221,10 @@ describe("Pizza Bot graph assembly", () => {
       [{ runLimit: 150, exitBehavior: "continue" }],
     ]);
     const params = mocks.createDeepAgent.mock.calls[0]![0] as {
-      subagents: Array<{ runnable: unknown }>;
+      subagents?: unknown[];
       skills?: string[];
     };
-    expect(typeof (params.subagents[0]!.runnable as { invoke?: unknown }).invoke).toBe("function");
+    expect(params.subagents).toBeUndefined();
     expect(params.skills).toBeUndefined();
     expect(mocks.createCodeInterpreterMiddleware).toHaveBeenCalledWith(
       expect.objectContaining({ subagents: true }),
@@ -224,9 +250,7 @@ describe("Pizza Bot graph assembly", () => {
       ]),
     );
 
-    const subagentParams = mocks.createSubAgent.mock.calls[0]![0] as {
-      middleware: Array<{ name?: string }>;
-    };
+    const subagentParams = dispatchedRoster()[0]!;
     expect(subagentParams.middleware.map((middleware) => middleware.name)).toEqual(
       expect.arrayContaining([
         "DynamicSystemPromptMiddleware",

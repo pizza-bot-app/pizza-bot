@@ -1,6 +1,6 @@
 {
   "name": "@pizza-bot/plugin-playwright-mcp",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Shipped Playwright MCP browser automation plugin.",
   "license": "Apache-2.0",
@@ -8,7 +8,7 @@
     "test": "node --test browser-selection.test.mjs"
   },
   "dependencies": {
-    "@playwright/mcp": "0.0.79",
-    "playwright": "1.63.0-alpha-2026-08-05"
+    "@playwright/mcp": "0.0.82",
+    "playwright": "1.64.0-alpha-1789764292000"
   }
 }

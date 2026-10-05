@@ -6,6 +6,7 @@ import {
   hasBrowserSelection,
   installedBrowser,
   needsHeadlessMode,
+  needsSandboxOptOut,
 } from "./browser-selection.mjs";
 
 const require = createRequire(import.meta.url);
@@ -31,6 +32,7 @@ if (!hasBrowserSelection(process.argv)) {
     if (browser.channel) process.argv.push("--browser", browser.channel);
     if (browser.executablePath) process.argv.push("--executable-path", browser.executablePath);
     if (needsHeadlessMode()) process.argv.push("--headless");
+    if (needsSandboxOptOut()) process.argv.push("--no-sandbox");
 
     const packageJson = require.resolve("@playwright/mcp/package.json");
     await import(pathToFileURL(join(dirname(packageJson), "cli.js")).href);

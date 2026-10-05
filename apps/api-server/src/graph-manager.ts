@@ -28,6 +28,14 @@ export interface GraphManagerOptions {
   getMaxSubagentToolCalls?: () => number;
 }
 
+/** Every field here forces a graph rebuild when it changes between runs. */
+interface RuntimeSettingsSnapshot {
+  addendum: string;
+  memoriesEnabled: boolean;
+  maxToolCalls: number;
+  maxSubagentToolCalls: number;
+}
+
 export interface CapabilityReplacement {
   skills?: SkillCatalog;
   tools?: Record<string, unknown>;
@@ -51,12 +59,12 @@ function withSkillAvailability(
     const state = skill.status === "loading" ? "still loading" : "unavailable";
     return `- ${skill.name}: ${state}${skill.detail ? ` (${skill.detail})` : ""}`;
   });
-  return [
-    systemPrompt,
+  const notice = [
     "These specialists are not currently callable:",
     ...statuses,
     "Do not delegate to them. If a request depends on one, state its current availability instead of pretending the task can be completed.",
   ].join("\n");
+  return `${systemPrompt}\n\n${notice}`;
 }
 
 /** Owns the model-specific compiled Pizza Bot graphs and capability reloads. */
@@ -71,12 +79,7 @@ export class GraphManager {
   private agentImpl?: LangGraphAgent;
   private readonly cache = new Map<string, Promise<LangGraphAgent>>();
   private updates: Promise<void> = Promise.resolve();
-  private appliedRuntimeSettings?: {
-    addendum: string;
-    memoriesEnabled: boolean;
-    maxToolCalls: number;
-    maxSubagentToolCalls: number;
-  };
+  private appliedRuntimeSettings?: RuntimeSettingsSnapshot;
 
   constructor(opts: GraphManagerOptions) {
     this.modelId = opts.modelId;
@@ -285,12 +288,7 @@ export class GraphManager {
     this.cache.set(this.modelId, Promise.resolve(agent));
   }
 
-  private readRuntimeSettings(dependencies: RuntimeDeps): {
-    addendum: string;
-    memoriesEnabled: boolean;
-    maxToolCalls: number;
-    maxSubagentToolCalls: number;
-  } {
+  private readRuntimeSettings(dependencies: RuntimeDeps): RuntimeSettingsSnapshot {
     return {
       addendum: this.getPersonaAddendum(),
       memoriesEnabled: dependencies.memoriesDir
@@ -316,7 +314,10 @@ export class GraphManager {
     const settings = this.readRuntimeSettings(dependencies);
     return withPersona(
       withSkillAvailability(
-        pizzaBotSystemPrompt(settings.memoriesEnabled),
+        pizzaBotSystemPrompt({
+          memories: settings.memoriesEnabled,
+          subagents: (dependencies.skills?.size ?? 0) > 0,
+        }),
         dependencies.skillAvailability,
       ),
       settings.addendum,

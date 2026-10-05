@@ -362,6 +362,16 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
     expect((await app.request("/mcp-servers/mcp-status")).status).toBe(404);
   }, 20_000);
 
+  it("GET /mcp-servers/:id/tools lists the connected server's tools with descriptions", async () => {
+    const res = await app.request("/mcp-servers/mcp-status/tools");
+    expect(res.status).toBe(200);
+    const { tools } = (await res.json()) as { tools: Array<{ name: string; description?: string }> };
+    expect(tools).toEqual([
+      { name: "get_mcp_status", description: "Return deterministic MCP server status." },
+    ]);
+    expect((await app.request("/mcp-servers/nope/tools")).status).toBe(404);
+  }, 20_000);
+
   it("rejects an unsafe id (400) and an invalid entry (400) without writing", async () => {
     expect((await post({ id: "../escape", command: "node" })).status).toBe(400);
     const bad = await post({ id: "nonsense", foo: "bar" });

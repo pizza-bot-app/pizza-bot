@@ -51,4 +51,9 @@ export interface ThreadSlice {
    * under exactOptionalPropertyTypes.
    */
   usage?: UsageInfo | undefined;
+  /**
+   * The orchestrator's own turn ended at the token limit with no visible text.
+   * The run still completes with `success`, so this is not an `errorText`.
+   */
+  truncated: boolean;
 }

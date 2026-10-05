@@ -140,5 +140,11 @@ export function mcpRoutes(host: AgentHost): Hono {
     return c.json({ id: c.req.param("id"), source: "user" as const, entry });
   });
 
+  app.get("/mcp-servers/:id/tools", async (c) => {
+    const tools = await host.mcpServerTools(c.req.param("id"));
+    if (!tools) return c.json({ error: "not_found" }, 404);
+    return c.json({ tools });
+  });
+
   return app;
 }

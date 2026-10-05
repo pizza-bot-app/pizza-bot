@@ -19,8 +19,8 @@ npm run dev
 ## Model providers
 
 Pizza Bot supports Amazon Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter,
-and Ollama. Configure providers under **Settings > Providers**, then select a
-model suited to the task.
+Requesty, and Ollama. Configure providers under **Settings > Providers**, then
+select a model suited to the task.
 
 Provider configuration can also use environment-variable references. The
 standalone backend must have access to the referenced variables.

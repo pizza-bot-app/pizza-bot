@@ -67,6 +67,11 @@ describe("supportedToolChoiceValues", () => {
     ]);
   });
 
+  it("allows only auto for Claude 5.5 models, which reject forced tool choice", () => {
+    expect(supportedToolChoiceValues("global.anthropic.claude-sonnet-5-5")).toEqual(["auto"]);
+    expect(supportedToolChoiceValues("us.anthropic.claude-opus-5-5")).toEqual(["auto"]);
+  });
+
   it("defers to @langchain/aws (undefined) for a non-Claude model so its own guard applies", () => {
     expect(supportedToolChoiceValues("mistral.mistral-large-2407-v1:0")).toBeUndefined();
   });

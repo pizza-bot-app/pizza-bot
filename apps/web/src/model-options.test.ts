@@ -10,6 +10,7 @@ import {
 
 const models: ModelsInfo = {
   default: "anthropic:sonnet",
+  automatic: "bedrock:sonnet",
   models: [
     { id: "bedrock:sonnet", displayName: "Sonnet (Bedrock)", provider: "bedrock" },
     { id: "anthropic:sonnet", displayName: "Sonnet (Anthropic)", provider: "anthropic" },
@@ -45,6 +46,7 @@ describe("configuredModels", () => {
 
     expect(result.models.map((model) => model.id)).toEqual(["anthropic:sonnet"]);
     expect(result.default).toBe("anthropic:sonnet");
+    expect(result.automatic).toBe("bedrock:sonnet");
   });
 
   it("includes providers that require no Settings configuration", () => {
@@ -99,7 +101,7 @@ describe("availableModels", () => {
       { name: "openai", status: "unavailable", modelCount: 0 },
     ]);
 
-    expect(result).toEqual({ models: [], default: "" });
+    expect(result).toEqual({ models: [], default: "", automatic: "bedrock:sonnet" });
   });
 });
 
@@ -136,6 +138,6 @@ describe("reconcileSelectedModel", () => {
   });
 
   it("clears the selection when no providers are available", () => {
-    expect(reconcileSelectedModel("anthropic:sonnet", { models: [], default: "" })).toBe("");
+    expect(reconcileSelectedModel("anthropic:sonnet", { models: [], default: "", automatic: null })).toBe("");
   });
 });

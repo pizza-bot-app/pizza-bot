@@ -1,7 +1,7 @@
 /** Pins the real createDeepAgent -> streamEvents(v3) shapes consumed by the SDK. */
 import { describe, it, expect } from "vitest";
 import { createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
-import { PIZZA_BOT_AGENT } from "@pizza-bot/core";
+import { BUILTIN_EVAL_TOOL_REF, PIZZA_BOT_AGENT } from "@pizza-bot/core";
 import type { RunInput, RunOptions, SkillCatalog, SkillInterruptOn } from "@pizza-bot/core";
 import type { ProtocolEvent } from "@langchain/langgraph";
 import { MemorySaver } from "@langchain/langgraph";
@@ -391,5 +391,130 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
         e.params.namespace.length === 0 &&
         (e.params.data as { event?: string }).event === "failed",
     )).toBe(false);
+  });
+
+  it("the eval sandbox bridges only the builtin filesystem tools, never a bound MCP tool", async () => {
+    // `ptc` names tools by string, and an MCP server whose own tool is also called
+    // read_file binds as filesystem-mcp-server__read_file. If upstream ever resolved
+    // those names loosely, generated code could reach an MCP tool and bypass the HITL
+    // approval a skill declares through `interruptOn`.
+    const externalReadFile = tool(() => "external file", {
+      name: "filesystem-mcp-server__read_file",
+      description: "read an external file",
+      schema: z.object({}),
+    });
+    const model = new ScriptedModel([
+      new AIMessage({
+        content: "",
+        tool_calls: [{
+          id: "task-bridge-1",
+          name: "task",
+          args: { description: "list the bridge", subagent_type: "specialist" },
+          type: "tool_call",
+        }],
+      }),
+      new AIMessage({
+        content: "",
+        tool_calls: [{
+          id: "eval-bridge-1",
+          name: "eval",
+          args: { code: "Object.keys(tools).sort().join(',')" },
+          type: "tool_call",
+        }],
+      }),
+      new AIMessage({ content: "Listed the bridge." }),
+      new AIMessage({ content: "Delegation completed." }),
+    ]);
+    const agent = await createPizzaBotAgent(PIZZA_BOT_AGENT.systemPrompt, {
+      model,
+      tools: { "mcp:filesystem-mcp-server:read_file": externalReadFile },
+      catalog: { "filesystem-mcp-server": ["read_file"] },
+      skills: skillCatalog(
+        "specialist",
+        "Handles delegated checks.",
+        "Complete the delegated check.",
+        [BUILTIN_EVAL_TOOL_REF, "mcp:filesystem-mcp-server:read_file"],
+      ),
+    });
+
+    const events: ProtocolEvent[] = [];
+    for await (const ev of agent.streamProtocol(
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "delegate" }] }] },
+      { threadId: `proto_eval_bridge_${Math.random().toString(36).slice(2)}` },
+    )) {
+      events.push(ev);
+    }
+
+    // The worker really was handed both colliding names, so the filter had a choice.
+    expect(model.boundToolSets.some((tools) =>
+      tools.includes("filesystem-mcp-server__read_file") && tools.includes("read_file")
+    )).toBe(true);
+
+    const evalResult = events
+      .filter((e) => channelOf(e) === "tools")
+      .map((e) => e.params.data as { event?: string; tool_call_id?: string })
+      .filter((d) => d.tool_call_id === "eval-bridge-1" && d.event === "tool-finished")
+      .map((d) => JSON.stringify(d))
+      .join("");
+    // The exact sorted set, so an extra reachable tool fails too. Asserting the
+    // names one by one would let "ls" pass on the word "tools" alone.
+    expect(evalResult).toContain("editFile,glob,grep,ls,readFile,writeFile");
+    expect(evalResult).not.toContain("filesystem-mcp-server");
+    expect(evalResult).not.toContain("filesystemMcpServer");
+  });
+
+  it("a bridged write from inside the sandbox reaches values.files", async () => {
+    // The guest runs on a worker thread, so its tool calls are satisfied back on
+    // this one, outside the eval call's async context. If that hop ever lost the
+    // run config, the write would succeed in the sandbox and vanish from state.
+    const events = await collectProtocol(
+      new ScriptedModel([
+        new AIMessage({
+          content: "",
+          tool_calls: [{
+            id: "eval-write-1",
+            name: "eval",
+            args: {
+              code: "await tools.writeFile({ file_path: '/guest.txt', content: 'from the guest' })",
+            },
+            type: "tool_call",
+          }],
+        }),
+        new AIMessage({ content: "Wrote it." }),
+      ]),
+    );
+
+    const sawFile = events.some((e) => {
+      if (channelOf(e) !== "values") return false;
+      const files = (e.params.data as { files?: Record<string, unknown> })?.files;
+      return files !== undefined && "/guest.txt" in files;
+    });
+    expect(sawFile).toBe(true);
+  });
+
+  it("parallel evals in one turn both finish and land their bridged writes", async () => {
+    const write = (id: string, path: string) => ({
+      id,
+      name: "eval",
+      args: { code: `await tools.writeFile({ file_path: '${path}', content: '${id}' })` },
+      type: "tool_call" as const,
+    });
+    const events = await collectProtocol(
+      new ScriptedModel([
+        new AIMessage({
+          content: "",
+          tool_calls: [write("eval-par-1", "/first.txt"), write("eval-par-2", "/second.txt")],
+        }),
+        new AIMessage({ content: "Wrote both." }),
+      ]),
+    );
+
+    const finalFiles = events
+      .filter((e) => channelOf(e) === "values")
+      .map((e) => (e.params.data as { files?: Record<string, unknown> })?.files ?? {})
+      .at(-1);
+    expect(Object.keys(finalFiles ?? {})).toEqual(
+      expect.arrayContaining(["/first.txt", "/second.txt"]),
+    );
   });
 });

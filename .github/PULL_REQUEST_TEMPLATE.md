@@ -30,3 +30,8 @@ change, say what you actually ran.
 - [ ] Only `packages/runtime-langgraph` imports the graph engine
 - [ ] `apps/web` imports no runtime and no model binding
 - [ ] Docs touched by this change were updated (README / AGENTS.md / docs/ARCHITECTURE.md)
+
+## License
+
+By submitting this pull request, I confirm that my contribution is made under
+the terms of the Apache-2.0 license.

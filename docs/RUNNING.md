@@ -9,7 +9,7 @@ npm run build
 ```
 
 A running backend needs access to at least one model provider. Configure Amazon
-Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter, or Ollama under
+Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter, Requesty, or Ollama under
 **Settings > Providers**. Desktop-managed secrets are protected with Electron
 `safeStorage`; a standalone server stores environment-variable references
 rather than secret values.

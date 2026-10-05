@@ -1,6 +1,6 @@
 {
   "name": "@pizza-bot/core",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Pizza Bot's thread, skill, model, and protocol domain types.",
@@ -20,7 +20,7 @@
     "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@langchain/core": "^1.2.9",
+    "@langchain/core": "^1.2.13",
     "zod": "^4.0.0"
   }
 }

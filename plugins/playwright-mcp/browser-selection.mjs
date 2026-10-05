@@ -99,6 +99,15 @@ export function needsHeadlessMode({
   return platform === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY;
 }
 
+/**
+ * Playwright MCP enables Chromium's sandbox for every channel except its own
+ * bundled build, and a distro Chromium — including the browser container image's
+ * — ships no setuid sandbox helper, so the launch fails outright.
+ */
+export function needsSandboxOptOut({ platform = process.platform } = {}) {
+  return platform === "linux";
+}
+
 function findOnPath(names, pathValue, exists) {
   for (const directory of (pathValue ?? "").split(delimiter)) {
     if (!directory) continue;

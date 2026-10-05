@@ -48,7 +48,7 @@ export function configuredModels(models: ModelsInfo, providers: ProviderView[]):
     ? models.default
     : available[0]?.id ?? "";
 
-  return { models: available, default: defaultModel };
+  return { ...models, models: available, default: defaultModel };
 }
 
 export function availableModels(
@@ -67,7 +67,7 @@ export function availableModels(
     ? models.default
     : available[0]?.id ?? "";
 
-  return { models: available, default: defaultModel };
+  return { ...models, models: available, default: defaultModel };
 }
 
 export function reconcileSelectedModel(selected: string, models: ModelsInfo): string {
