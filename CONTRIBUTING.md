@@ -88,7 +88,10 @@ CUT A RELEASE ──────────────────────
                ▼
          draft-release       SHA256SUMS + a DRAFT release
                ▼
-         image               ghcr.io :latest :1.1.0 :1.1 :sha-<sha>
+         image               amd64 · arm64 runners, push by digest
+               ▼
+         publish             ghcr.io :latest :1.1.0 :1.1 :sha-<sha>
+                               one index for linux/amd64 · linux/arm64
                ▼
   ④ publish the draft
 
@@ -358,10 +361,13 @@ order:
    an Authenticode certificate exists. Linux packages are never signed here.
 2. `draft-release` — SHA-256 checksums and a **draft** GitHub Release for a
    maintainer to inspect and publish.
-3. the [`backend-image`](.github/actions/backend-image/action.yml) action again,
-   then a push of `ghcr.io/pizza-bot-app/pizza-bot` as `latest`, `1.1.0`, `1.1`,
-   and `sha-<sha>`. The package is public and needs no credentials to pull, but it
-   is `linux/amd64` only; see
+3. the [`backend-image`](.github/actions/backend-image/action.yml) action again
+   on an amd64 and an arm64 runner, each pushing its smoked image by digest, then
+   `publish`, which tags one multi-architecture index of
+   `ghcr.io/pizza-bot-app/pizza-bot` as `latest`, `1.1.0`, `1.1`, and `sha-<sha>`.
+   Nothing is tagged unless both architectures pass. CI builds amd64 only, so an
+   arm64 regression surfaces here rather than on the pull request. The package is
+   public and needs no credentials to pull; `1.0.0` is `linux/amd64` only, see
    [STANDALONE_BACKEND.md](docs/STANDALONE_BACKEND.md#registry-images).
 
 The registry push is last because it is the one step that cannot be undone:
