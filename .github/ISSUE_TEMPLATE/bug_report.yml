@@ -51,6 +51,7 @@ body:
         - OpenAI
         - OpenRouter
         - Requesty
+        - Opper
         - Ollama
         - Not reached / not applicable
     validations:
