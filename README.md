@@ -148,6 +148,8 @@ bindings.
   persistence, transports, and design decisions.
 - **[Standalone backend](docs/STANDALONE_BACKEND.md)** - authentication, remote
   Electron, static browser deployment, Docker, Compose, and Kubernetes.
+- **[Google Workspace](docs/GOOGLE_WORKSPACE.md)** - connect Gmail and Google
+  Calendar with the bundled plugin.
 - **[Contributing](CONTRIBUTING.md)** - development setup, CI checks, worktrees,
   releases, and layering rules.
 - **[Security](SECURITY.md)** - network defaults, credentials, local data, and

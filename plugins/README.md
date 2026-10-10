@@ -77,6 +77,35 @@ zipped as-is when starting a plugin.
 
 ## Bundled Plugins
 
+`google-workspace` gives Pizza Bot Gmail and Google Calendar access through a
+local stdio MCP server built on the official `@googleapis/gmail` and
+`@googleapis/calendar` clients, with `email` and `calendar` skills. Gmail is
+search, read, and draft-only: the server has no send, delete, or modify tools,
+though the `gmail.compose` scope Google grants would permit sending. Use
+`--read-only` to withhold it.
+Calendar can list, find free time, and create events (attendees are not
+notified unless `sendUpdates: "all"`).
+
+Setup needs a Google Cloud project, a Desktop-app OAuth client, and a one-time
+consent flow. [Google Workspace plugin setup](../docs/GOOGLE_WORKSPACE.md)
+walks through it with screenshots. In short:
+
+```bash
+npm run auth -w @pizza-bot/plugin-google-workspace -- --client-file ~/Downloads/client_secret.json
+```
+
+The command opens a loopback browser flow with PKCE and stores the client and
+refresh token in the OS keychain (macOS Keychain, Windows Credential Manager, or
+libsecret) under the service `pizza-bot-google-workspace`. Pass `--read-only` to
+request only the `gmail.readonly` and `calendar.readonly` scopes, and `--logout`
+to delete the stored credentials. While the OAuth app is in Testing, Google
+expires the refresh token after 7 days; publishing it to production avoids that.
+
+The keychain is read by the MCP subprocess itself, so this works with the
+desktop app and a standalone api-server on a host with a keychain. It does not
+use the desktop `safeStorage` secret store and is not configurable from
+Settings.
+
 `playwright-mcp` provides browser automation through a locked
 `@playwright/mcp` dependency and a matching `browser-automation` Agent Skill.
 The skill uses accessibility snapshots for interaction and omits Playwright
