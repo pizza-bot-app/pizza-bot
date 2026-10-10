@@ -6,7 +6,7 @@
 This document describes the system as it is. It is the source of truth for
 package boundaries and interface contracts. When an external library's shape
 matters (DeepAgents or native LangGraph protocol events), a conformance test
-pins it (§12) — so an upstream change breaks a test, not production. The
+pins it (§13) — so an upstream change breaks a test, not production. The
 AI Elements-derived components are vendored UI code rather than a conformance
 target.
 
@@ -748,7 +748,144 @@ sidecar's environment over its private child-process IPC channel.
 
 ---
 
-## 12. Staying current — the conformance suite
+## 12. Grounded approval gates
+
+An approval gate that shows a tool name and its arguments asks the reviewer to
+certify content they cannot check: in a drafted email reading "your plan includes
+two free swaps and I've waived the $12 fee", nothing distinguishes the clause that
+came from a contract lookup from the one the model produced unprompted. Grounding
+makes the draft carry its sources and checks the ones it claims, so the tiers below
+are drawn over the arguments that are about to be dispatched.
+
+The pipeline has five stages. Only the last uses a model, and its answer is
+checked against the cited lines before it is believed:
+
+1. **Evidence ledger.** `runtime-langgraph/src/evidence-ledger-middleware.ts` is a
+   `wrapToolCall` middleware bound to any skill-subagent whose tools carry the
+   citation argument. Each successful non-gated MCP result is split into numbered
+   lines (`core/src/evidence-lines.ts`: one line per JSON field, with each nested
+   object whose fields are all scalars — a row — kept on one line; one per sentence
+   of prose) and handed back as `[evidence ev_…]` followed by `[n] …` lines. That
+   numbered text is what the ledger stores, so a cited line number means the same
+   bytes to the model, the judge and the reviewer. Gated tools are skipped, because
+   the action under review is not its own evidence, and a thrown error passes
+   through to `toolErrorRecovery` (which wraps this middleware from outside) so
+   failures are never recorded as sources. `instrumentMcpTool` is the right shape
+   for this and the wrong layer: it cannot see `thread_id` / `run_id`.
+2. **Storage.** `storage/src/evidence.ts` keeps metadata in SQLite and bodies at
+   `evidence/<id>`, reaching the runtime as an `EvidenceRecorder` on `RuntimeDeps`.
+   `api-server/src/routes-evidence.ts` exposes read-only routes; there is
+   deliberately no write route, and deleting a thread drops its bodies with its rows.
+3. **Citation contract.** A skill declares which arguments of a gated tool carry
+   verifiable prose (`verifiedArgs: [body]` beside `allowedDecisions` in
+   `interruptOn`, parsed in `core/src/skill.ts`). For a declared tool,
+   `plugin-sdk/src/mcp-grounding.ts` injects one optional
+   `_grounding?: Array<{arg, text, cites: Array<{evidenceId, lines}>}>` into the
+   *adapted* schema bound to the model, and `instrumentMcpTool` strips it at
+   `args[0].args` before dispatch, so the MCP server never sees it. `text` quotes the
+   draft; `cites` names the evidence lines the claim rests on, across as many entries
+   as the sentence joins (up to `MAX_CITED_SOURCES`). `runtime-langgraph/src/skill-grounding.ts`
+   appends the contract to the **tool's own description** — a directive injected
+   into a tool *result* reads as prompt injection.
+4. **Deterministic checks** (`core/src/grounding.ts`, pure). Resolve each quoted span
+   to a unique position in the argument, then settle what needs no opinion: any
+   missing entry (`no-entry`), cited lines an entry does not have (`bad-lines`), and an
+   exact figure — an amount, rate, year or identifier — none of the cited lines, across
+   all cited entries, states (`figures`) are `asserted`; a span citing more than
+   `MAX_CITED_LINES` lines or `MAX_CITED_SOURCES` entries is `inconclusive`
+   (`broad-citation`). These checks only ever find reasons to doubt a
+   claim; none of them can mark one green.
+5. **Judge** (`api-server/src/grounding-judge.ts`, contract in
+   `core/src/grounding-judge.ts`). The claims left open go to the model chosen in
+   Settings → Claim checking (`groundingJudge`: `off` by default, `auto`, or a
+   qualified model id). The judge sees each claim beside only the lines it cites,
+   labelled by source and line (`[A3]`, `[B1]`), and answers through structured
+   output with a verdict and, for `supported`, the labels of the lines that establish
+   it. A `supported` verdict counts only if those lines are among the cited ones and,
+   together, state every number the claim does; otherwise the span
+   is `inconclusive` (`unverified-support`). Grading starts when a run pauses on an
+   interrupt, the card reads it from
+   `GET /threads/:id/interrupts/:interrupt_id/grounding`, and the approval record
+   (`approval-audit.ts`) reuses the same cached judgement for the text that ships.
+
+| Tier | Means | Reviewer reads it as |
+| :--- | :--- | :--- |
+| `verifiable` | The judge found support in cited lines that state the claim's numbers | Checked. Click to open the source at those lines. |
+| `inconclusive` | Not settled: checking is off, the judge failed or abstained, its support did not check out, or the citation was too broad to judge | Unchecked. Read the source. |
+| `asserted` | The cited entry or lines do not exist, an exact figure is not in the cited lines, or the judge found they do not support the claim | The draft claims a source that does not hold it. |
+| `uncited` | The span carries no citation | Unsourced. May be discourse, may be a claim. |
+| `unresolved` | The quote addresses no unique position in the text that was sent | Never checked; listed beside the record, not drawn on it. |
+
+No percentage is displayed, because none is calibrated. The decisions behind it:
+
+- **A judge, because matching is not checking.** Requiring a claim's words to
+  co-occur in the source passes the cases that matter most: a JSON `"waived": false`
+  beside "the fee has been waived", a price bound to the wrong plan, "delivered"
+  for a record that says shipped. Measured on pizza-bot-shaped cases, word matching
+  marked 12 of 30 unsupported claims green; a small judge model reading the cited
+  lines marked none. The judge is still an opinion, so it must point at its
+  evidence, and the reviewer is taken to the same lines.
+- **Cite lines, not passages.** A judge handed a whole tool output has to find the
+  claim in it, and misses what is buried in a long one; a judge asked to quote its
+  support paraphrases, and the quote then fails to match. Naming numbered lines
+  fixes both: the judge reads exactly what the draft relied on, a line number is
+  checked with a lookup, and the reviewer reads a few lines instead of a payload.
+  On the evaluation cases a 4B local judge went from 16 to 25 of 26 true claims
+  checked with no false greens added.
+- **A sentence may join several lookups.** "Your order shipped, and the refund went
+  out" draws on two tool results; a citation format with one source per span forces
+  the model to cite half of it, and stitching facts across sources is exactly where a
+  draft goes wrong. A span cites every entry it uses, the judge sees their lines
+  together under per-source labels, and is told not to combine facts that belong to
+  different records.
+- **A small model, off by default.** The judge reads a few cited lines and answers
+  per claim, which a small model does about as well as the orchestrating one.
+  `auto` picks the newest small tier from the default model's provider
+  (`pickJudgeModel`), skipping nano-class and sub-4B local models, which grade
+  false claims with near-certain confidence. Nothing is graded green until a user
+  turns checking on, since it sends cited sources to the judge's provider.
+- **Every failure is unsettled, never green.** No judge configured, a timeout, a
+  malformed or missing answer, or a model that cannot be built all yield
+  `inconclusive`; a failed judgement is not cached, so the next read asks again.
+- **The model quotes its own text; the code computes the offsets.** Models cannot
+  address text numerically — Sonnet 5 produced an exactly correct offset pair in 0
+  of 32 measured spans and Sonnet 4.5 in 0 of 31, every one of them still *in
+  bounds*, which is the dangerous shape. Verbatim quotes resolved
+  present-and-unique 115/115 over the same spans, so `indexOf` addresses the
+  draft's spans and a quote that is absent or repeated degrades rather than
+  guessing. Evidence lines need no counting: the model copies numbers it was shown.
+- **Citations ride in the tool call's own arguments,** so they are checkpointed,
+  streamed, rendered and edited by machinery that already exists. Evidence *bodies*
+  stay out of checkpoints, because raw MCP payloads reach hundreds of KB and every
+  checkpoint would rewrite the ledger.
+- **The body cap is applied to the tool output, not just to the stored copy.**
+  Clipping only the record would let the model cite lines the reviewer's copy
+  lacks; clipping once, before numbering, keeps the two identical, with the pre-clip
+  size and a `truncated` flag on the entry. A citation can only name lines that
+  were kept, so a line beyond the clip is `bad-lines`.
+- **One computation, on the server.** The card and the record both read the
+  server's judgement, so they cannot report different tiers for the same span,
+  and the browser never grades a claim.
+
+Two limits are structural. **Coverage is bounded by MCP** — `qualifyInterruptOn`
+accepts only `mcp:` refs, so built-ins (`write_file`, `task`, the eval sandbox)
+cannot be gated and therefore cannot be grounded; absence of warnings is not
+absence of risk. And **grounding only exists where a gate does**, which is inside
+skill-subagents (§4): Pizza Bot itself gets no `interruptOn`, and a subagent's pause
+bubbles up so the card renders in the main feed.
+
+The UI vocabulary for all of this is **grounding**; `ProvenanceBadge.tsx` already
+means a skill's origin (`user | plugin | builtin`).
+`ApprovalArguments.tsx` marks spans inside the existing `TextArgumentField`,
+`use-grounding-view.ts` fetches the server's grading for a card, and
+`ActivityRail.tsx` renders the evidence cards (cited first, collapsed — a run with
+forty tool calls must not open forty cards; clicking a span opens every card it cites
+with the cited lines picked out) and replays each stored verdict over the arguments that were
+sent, through the same renderer as the live card.
+
+---
+
+## 13. Staying current — the conformance suite
 
 `tests/langgraph-compat` pins the **DeepAgents** exports and native LangGraph
 protocol-event shapes the product actually consumes. It does not compare routes

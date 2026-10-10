@@ -172,6 +172,41 @@ describe("connectMcpServers", () => {
     }
   }, 20_000);
 
+  /**
+   * The instrumenting proxy intercepts only `invoke`/`call`, and the graph hands it a
+   * wrapped ToolCall, so the citation argument is one level down from where it looks.
+   */
+  it("strips the citation argument before it reaches the server", async () => {
+    const r = await connectMcpServers(
+      { union: { command: "node", args: [UNION_SCHEMA_SERVER] } },
+      undefined,
+    );
+    try {
+      const tool = r.tools["mcp:union:search_records"]!;
+      const spans = [{ arg: "queryTerm", text: "aster", cites: [{ evidenceId: "ev-1", lines: [1] }] }];
+
+      // The server echoes the arguments it actually received.
+      const bare = await tool.invoke({ queryTerm: "aster", _grounding: spans });
+      expect(bare).toContain("aster");
+      expect(bare).not.toContain("_grounding");
+
+      const call = {
+        type: "tool_call",
+        id: "call_1",
+        name: "union__search_records",
+        args: { queryTerm: "aster", _grounding: spans },
+      };
+      // A full ToolCall comes back as a ToolMessage rather than a bare string.
+      const wrapped = JSON.stringify(await tool.invoke(call as never));
+      expect(wrapped).toContain("aster");
+      expect(wrapped).not.toContain("_grounding");
+      // The citations stay on the caller's tool call — that is the reviewer's record.
+      expect(call.args._grounding).toBe(spans);
+    } finally {
+      await r.client?.close().catch(() => {});
+    }
+  }, 20_000);
+
   it("publishes cumulative progress while respecting the startup concurrency limit", async () => {
     let active = 0;
     let maxActive = 0;

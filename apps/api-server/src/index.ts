@@ -25,6 +25,7 @@ import { statusRoutes } from "./routes-status.js";
 import { toolsRoutes } from "./routes-tools.js";
 import { protocolRoutes } from "./routes-protocol.js";
 import { attachmentRoutes } from "./routes-attachments.js";
+import { evidenceRoutes } from "./routes-evidence.js";
 import { folderRoutes } from "./routes-folders.js";
 import { logRoutes } from "./routes-logs.js";
 import { localFolderRoutes } from "./routes-local-folders.js";
@@ -243,6 +244,7 @@ export function buildApp(
   app.route("/", lifecycleRoutes(host));
   app.route("/", providerRoutes(host));
   app.route("/", attachmentRoutes(host));
+  app.route("/", evidenceRoutes(host));
   if (logging.dataRoot) app.route("/", logRoutes(logging.dataRoot));
   return app;
 }

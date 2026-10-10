@@ -12,6 +12,7 @@ export interface DataRootLayout {
   storeDb: string;
   appDb: string;
   attachmentsDir: string;
+  evidenceDir: string;
   logsDir: string;
 }
 
@@ -27,6 +28,7 @@ export function resolveLayout(root: string): DataRootLayout {
     storeDb: path.join(root, "store.sqlite"),
     appDb: path.join(root, "app.sqlite"),
     attachmentsDir: path.join(root, "attachments"),
+    evidenceDir: path.join(root, "evidence"),
     logsDir: path.join(root, "logs"),
   };
 }

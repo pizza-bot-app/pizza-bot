@@ -14,6 +14,7 @@ import {
   useRunningThreadIds,
   useThreadSliceReadOnly,
 } from "./use-thread-slice.js";
+import { EvidenceProvider } from "./use-evidence.js";
 import { protocolStreamStore } from "./protocol-stream-store.js";
 import { resolveApiBase, resolveApiHeaders } from "./api-config.js";
 import { useSkillsAdmin, useMcpServersAdmin, useMemoriesAdmin, useModels, usePluginsAdmin, useProvidersAdmin, useStatus, useTriggers } from "./use-app-data.js";
@@ -486,6 +487,8 @@ export function App() {
                 maxToolCalls={agentSettings.maxToolCalls}
                 maxSubagentToolCalls={agentSettings.maxSubagentToolCalls}
                 onToolCallLimitChange={agentSettings.setToolCallLimit}
+                groundingJudge={agentSettings.groundingJudge}
+                onGroundingJudgeChange={agentSettings.setGroundingJudge}
                 notificationsAvailable={desktopNotifications !== undefined}
                 notifyOnRunCompletion={
                   desktopNotifications?.notifyOnRunCompletion ?? true
@@ -539,6 +542,12 @@ export function App() {
                   onFocusComposer={focusComposer}
                 />
 
+                <EvidenceProvider
+                  threadId={activeThreadId}
+                  client={client}
+                  revision={status}
+                  onSelect={() => setShowRail(true)}
+                >
                 <main className="content">
                   <div className={panesClass(showRail)}>
                     <section className="chat-pane">
@@ -604,12 +613,15 @@ export function App() {
                           delegations={delegations}
                           isRunning={isRunning}
                           threadId={activeThreadId}
+                          client={client}
+                          revision={status}
                           onClose={() => setShowRail(false)}
                         />
                       </aside>
                     )}
                   </div>
                 </main>
+                </EvidenceProvider>
               </div>
             </div>
           )}

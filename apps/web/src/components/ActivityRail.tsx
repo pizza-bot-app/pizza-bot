@@ -1,23 +1,52 @@
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, Clock, Loader2, X, XCircle } from "lucide-react";
-import type { DelegationInfo, UIMessageLike, UIPartLike } from "@/projection";
+import {
+  MAX_EVIDENCE_BODY_BYTES,
+  type ApprovalDecision,
+  type ApprovalVerdict,
+  type ApprovalVerdictSpan,
+  type EvidenceEntry,
+  type GroundingTier,
+} from "@pizza-bot/core";
+import {
+  segmentAuditedText,
+  type DelegationInfo,
+  type GroundingSegment,
+  type UIMessageLike,
+  type UIPartLike,
+} from "@/projection";
+import type { ApiClient } from "@/api-client";
 import { Avatar } from "./Avatar.js";
+import {
+  formatArgumentLabel,
+  groundingTitle,
+  GroundedSegments,
+  type GroundingLinks,
+} from "./ApprovalArguments.js";
 import { useSubagentTranscript } from "../use-thread-slice.js";
+import { useApprovalVerdicts } from "../use-approval-verdicts.js";
+import { useEvidence, type EvidenceLedger } from "../use-evidence.js";
 
 export function ActivityRail({
   delegations,
   isRunning,
   threadId,
+  client,
+  revision,
   onClose,
 }: {
   delegations?: Record<string, DelegationInfo>;
   isRunning: boolean;
   threadId?: string | null;
+  client?: ApiClient;
+  revision?: string;
   onClose?: () => void;
 }) {
   const groups = Object.values(delegations ?? {});
   const batches = groupIntoBatches(groups);
   const baseDepth = groups.reduce((m, g) => Math.min(m, g.depth ?? 0), Infinity);
+  const ledger = useEvidence();
+  const verdicts = useApprovalVerdicts(client, threadId, revision);
 
   return (
     <div className="activity-rail">
@@ -40,37 +69,343 @@ export function ActivityRail({
         )}
       </div>
 
-      {groups.length > 0 ? (
+      {groups.length > 0 || ledger.entries.length > 0 || verdicts.length > 0 ? (
         <div className="activity-rail-body">
-          <section className="rail-section">
-            <div className="rail-section-head">Delegations</div>
-            <ul className="delegation-groups">
-              {batches.map((b) =>
-                b.items.length > 1 ? (
-                  <DelegationBatch
-                    key={b.key}
-                    batch={b}
-                    threadId={threadId}
-                    baseDepth={baseDepth}
-                    runSettled={!isRunning}
-                  />
-                ) : (
-                  <DelegationGroup
-                    key={b.key}
-                    g={b.items[0]!}
-                    threadId={threadId}
-                    baseDepth={baseDepth}
-                    runSettled={!isRunning}
-                  />
-                ),
-              )}
-            </ul>
-          </section>
+          {groups.length > 0 && (
+            <section className="rail-section">
+              <div className="rail-section-head">Delegations</div>
+              <ul className="delegation-groups">
+                {batches.map((b) =>
+                  b.items.length > 1 ? (
+                    <DelegationBatch
+                      key={b.key}
+                      batch={b}
+                      threadId={threadId}
+                      baseDepth={baseDepth}
+                      runSettled={!isRunning}
+                    />
+                  ) : (
+                    <DelegationGroup
+                      key={b.key}
+                      g={b.items[0]!}
+                      threadId={threadId}
+                      baseDepth={baseDepth}
+                      runSettled={!isRunning}
+                    />
+                  ),
+                )}
+              </ul>
+            </section>
+          )}
+          {verdicts.length > 0 && <ApprovalsSection verdicts={verdicts} ledger={ledger} />}
+          {ledger.entries.length > 0 && <EvidenceSection ledger={ledger} />}
         </div>
       ) : (
         <div className="activity-rail-empty">No delegated work yet.</div>
       )}
     </div>
+  );
+}
+
+const DECISION_LABEL: Record<ApprovalDecision, string> = {
+  approve: "sent as drafted",
+  edit: "sent with edits",
+};
+
+/**
+ * What a reviewer let out of the building, and how well each claim in it stood up. This
+ * is the stored record rather than the live card, so it survives a reload and an edit.
+ */
+export function ApprovalsSection({
+  verdicts,
+  ledger,
+}: {
+  verdicts: readonly ApprovalVerdict[];
+  ledger: EvidenceLedger;
+}) {
+  return (
+    <section className="rail-section">
+      <div className="rail-section-head">Approved actions</div>
+      <ul className="verdict-cards">
+        {verdicts.map((verdict) => (
+          <VerdictCard key={verdict.verdictId} verdict={verdict} ledger={ledger} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** A stored verdict is never redrawn by what this browser can load, so nothing is pending. */
+
+function VerdictCard({
+  verdict,
+  ledger,
+}: {
+  verdict: ApprovalVerdict;
+  ledger: EvidenceLedger;
+}) {
+  const label = formatArgumentLabel(verdict.toolName);
+  const fields = sentFields(verdict);
+  // Without the sent text there is nowhere to underline, so every quote stands alone; with
+  // it, only the quotes that address no place in it are still left to list.
+  const quotes =
+    fields.length === 0
+      ? verdict.spans
+      : verdict.spans.filter((span) => span.tier === "unresolved");
+  const links: GroundingLinks = {
+    status: "ready",
+    hoveredId: ledger.hoveredId,
+    onHover: ledger.hover,
+    onSelect: ledger.select,
+  };
+  return (
+    <li className="verdict-card" title={verdict.createdAt}>
+      <div className="verdict-head">
+        <span className="verdict-tool" title={verdict.toolName}>
+          {label}
+        </span>
+        <span className={`verdict-decision verdict-decision-${verdict.decision}`}>
+          {DECISION_LABEL[verdict.decision]}
+        </span>
+      </div>
+      {verdict.spans.length === 0 && (
+        <div className="verdict-note">Nothing in it was cited, so nothing was checked.</div>
+      )}
+      {fields.map(({ arg, segments }) => (
+        <div className="verdict-field" key={arg}>
+          <span className="verdict-field-label">{formatArgumentLabel(arg)}</span>
+          <span className="verdict-field-text">
+            <GroundedSegments segments={segments} links={links} />
+          </span>
+        </div>
+      ))}
+      {quotes.length > 0 && fields.length > 0 && (
+        <span className="verdict-field-label">Cited, but not in what was sent</span>
+      )}
+      {quotes.length > 0 && (
+        <ul className="verdict-spans">
+          {quotes.map((span, index) => (
+            <li className="verdict-span" key={index}>
+              <VerdictQuote span={span} links={links} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <VerdictSources spans={verdict.spans} />
+    </li>
+  );
+}
+
+/**
+ * The text that went out, split at the tiers the audit reached for it. Rendering it rather
+ * than the span list alone is what makes an uncited claim visible in the record at all.
+ */
+function sentFields(
+  verdict: ApprovalVerdict,
+): Array<{ arg: string; segments: GroundingSegment[] }> {
+  const args = verdict.args;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return [];
+  return Object.entries(args).flatMap(([arg, value]) =>
+    typeof value === "string" && value !== ""
+      ? [{ arg, segments: segmentAuditedText(value, verdict.spans.filter((s) => s.arg === arg)) }]
+      : [],
+  );
+}
+
+/** The breadcrumb is stored with the verdict, so it still names the source once the
+ *  ledger entry is gone. */
+function sourcesOf(span: ApprovalVerdictSpan): string[] {
+  return span.cites.map((cite) => cite.breadcrumb ?? cite.evidenceId);
+}
+
+function VerdictSources({ spans }: { spans: readonly ApprovalVerdictSpan[] }) {
+  const sources = [...new Set(spans.flatMap(sourcesOf))];
+  if (sources.length === 0) return null;
+  return (
+    <div className="verdict-sources">
+      {sources.map((source) => (
+        <span className="verdict-span-source" key={source} title={source}>
+          {source}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * An underline is too quiet to carry "nobody checked this" at the rail's text size, so the
+ * words say it. The absence of a verdict is not an accusation, so the chip stays neutral.
+ */
+function NotCheckedChip({ tier }: { tier: GroundingTier }) {
+  if (tier !== "unresolved") return null;
+  return <span className="grounding-chip">not checked</span>;
+}
+
+function VerdictQuote({ span, links }: { span: ApprovalVerdictSpan; links: GroundingLinks }) {
+  const id = span.cites[0]?.evidenceId ?? null;
+  const hovered = span.cites.some((cite) => cite.evidenceId === links.hoveredId);
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className={`grounding-span grounding-${span.tier}${hovered ? " hovered" : ""}`}
+      title={groundingTitle(span.tier, span.gap, span.support)}
+      onMouseEnter={() => links.onHover(id)}
+      onMouseLeave={() => links.onHover(null)}
+      onFocus={() => links.onHover(id)}
+      onBlur={() => links.onHover(null)}
+      onClick={() => links.onSelect(span.cites)}
+      onKeyDown={(e: KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          links.onSelect(span.cites);
+        }
+      }}
+    >
+      <NotCheckedChip tier={span.tier} />
+      {span.text}
+    </span>
+  );
+}
+
+export function EvidenceSection({ ledger }: { ledger: EvidenceLedger }) {
+  const cited = ledger.entries.filter((entry) => ledger.citedIds.has(entry.id));
+  const rest = ledger.entries.filter((entry) => !ledger.citedIds.has(entry.id));
+  return (
+    <section className="rail-section">
+      <div className="rail-section-head">
+        Evidence
+        {cited.length > 0 && <span className="rail-section-count">{cited.length} cited</span>}
+      </div>
+      <ul className="evidence-cards">
+        {[...cited, ...rest].map((entry) => (
+          <EvidenceCard
+            key={entry.id}
+            entry={entry}
+            ledger={ledger}
+            cited={ledger.citedIds.has(entry.id)}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function EvidenceCard({
+  entry,
+  ledger,
+  cited,
+}: {
+  entry: EvidenceEntry;
+  ledger: EvidenceLedger;
+  cited: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLLIElement>(null);
+  const { loadBodies } = ledger;
+  const selected = ledger.selection.has(entry.id);
+
+  useEffect(() => {
+    if (!selected) return;
+    setOpen(true);
+    loadBodies([entry.id]);
+    ref.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [selected, entry.id, loadBodies]);
+
+  const toggle = () => {
+    if (!open) loadBodies([entry.id]);
+    setOpen((v) => !v);
+  };
+  const body = ledger.bodies.get(entry.id);
+
+  return (
+    <li
+      ref={ref}
+      className={`evidence-card${selected ? " selected" : ""}${
+        ledger.hoveredId === entry.id ? " hovered" : ""
+      }`}
+      onMouseEnter={() => ledger.hover(entry.id)}
+      onMouseLeave={() => ledger.hover(null)}
+    >
+      <div
+        className="evidence-head expandable"
+        role="button"
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={(e: KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+      >
+        {open ? (
+          <ChevronDown className="delegation-caret" size={12} />
+        ) : (
+          <ChevronRight className="delegation-caret" size={12} />
+        )}
+        <span className="evidence-breadcrumb" title={entry.toolRef}>
+          {entry.breadcrumb}
+        </span>
+        {cited && <span className="evidence-cited">cited</span>}
+      </div>
+      {open ? (
+        <>
+          {body ? (
+            <EvidenceBody text={body.text} cited={ledger.selection.get(entry.id) ?? NO_LINES} />
+          ) : (
+            <pre className="evidence-body">{entry.excerpt}</pre>
+          )}
+          {entry.truncated && (
+            <div className="evidence-note">
+              Clipped — the model read {formatSize(MAX_EVIDENCE_BODY_BYTES)} of this{" "}
+              {formatSize(entry.bytes)} source.
+            </div>
+          )}
+          {ledger.unavailable.has(entry.id) && (
+            <div className="evidence-note">
+              The stored source could not be loaded; this is the recorded excerpt.
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="evidence-excerpt">{entry.excerpt}</div>
+      )}
+    </li>
+  );
+}
+
+const NO_LINES: readonly number[] = [];
+const NUMBERED_LINE = /^\[(\d+)\] /;
+
+/** The stored lines, with the ones a clicked citation named picked out and scrolled to. */
+export function EvidenceBody({ text, cited }: { text: string; cited: readonly number[] }) {
+  const first = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    first.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [cited]);
+  let marked = false;
+  return (
+    <pre className="evidence-body">
+      {text.split("\n").map((line, index) => {
+        const number = Number(NUMBERED_LINE.exec(line)?.[1]);
+        const isCited = cited.includes(number);
+        const ref = isCited && !marked ? first : undefined;
+        if (isCited) marked = true;
+        return (
+          <span key={index} ref={ref} className={isCited ? "evidence-line cited" : "evidence-line"}>
+            {line}
+            {"\n"}
+          </span>
+        );
+      })}
+    </pre>
   );
 }
 

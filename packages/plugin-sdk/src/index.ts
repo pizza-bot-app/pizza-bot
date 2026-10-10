@@ -2,6 +2,7 @@ export * from "./registry.js";
 export * from "./wildcard.js";
 export * from "./loader.js";
 export * from "./plugin-host.js";
+export * from "./mcp-grounding.js";
 export * from "./skill-catalog.js";
 export * from "./runtime-resolver.js";
 export * from "./mcp-servers-config.js";

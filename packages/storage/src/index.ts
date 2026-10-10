@@ -5,6 +5,7 @@ export * from "./triggers.js";
 export * from "./threads.js";
 export * from "./folders.js";
 export * from "./attachments.js";
+export * from "./evidence.js";
 export * from "./search.js";
 export * from "./settings.js";
 export * from "./provider-configs.js";

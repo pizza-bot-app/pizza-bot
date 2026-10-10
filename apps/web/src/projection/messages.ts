@@ -1,6 +1,8 @@
 /** Pure checkpoint and stream projections into UI message parts. */
-import type { HitlDecision, ResumeCommand } from "@pizza-bot/core";
+import type { HitlDecision, InterruptAction, ResumeCommand } from "@pizza-bot/core";
 import type { UIMessageLike, UIPartLike } from "./adapter.js";
+
+export { parseInterruptActions, type InterruptAction } from "@pizza-bot/core";
 
 export function buildResumeCommand(
   interruptId: string,
@@ -22,48 +24,6 @@ export function buildResumeCommand(
           { decision, ...(message ? { message } : {}) },
     ],
   };
-}
-
-export interface InterruptAction {
-  toolName: string;
-  args: unknown;
-}
-
-/**
- * Normalizes DeepAgents' batched `actionRequests` shape. Batched actions share
- * the first review config and resume atomically.
- */
-export function parseInterruptActions(value: unknown): {
-  actions: InterruptAction[];
-  allowedDecisions: HitlDecision[];
-} {
-  const v = (value ?? {}) as Record<string, unknown>;
-  const rawActions = Array.isArray(v.actionRequests) ? v.actionRequests : [];
-  const reviewConfigs = Array.isArray(v.reviewConfigs) ? v.reviewConfigs : [];
-  const review = (reviewConfigs[0] ?? {}) as { allowedDecisions?: unknown };
-  const fallback = (v.action ?? v) as Record<string, unknown>;
-
-  const actions: InterruptAction[] =
-    rawActions.length > 0
-      ? rawActions.map((a) => {
-          const action = (a ?? {}) as { name?: string; args?: unknown };
-          return { toolName: String(action.name ?? "unknown"), args: action.args ?? {} };
-        })
-      : // Also accept a direct single-action interrupt payload.
-        [
-          {
-            toolName: String(fallback.name ?? fallback.tool ?? "unknown"),
-            args: fallback.args ?? fallback.input ?? {},
-          },
-        ];
-
-  const allowedDecisions: HitlDecision[] = Array.isArray(review.allowedDecisions)
-    ? (review.allowedDecisions as HitlDecision[])
-    : Array.isArray(v.allowedDecisions)
-      ? (v.allowedDecisions as HitlDecision[])
-      : ["approve", "edit", "reject"];
-
-  return { actions, allowedDecisions };
 }
 
 /**

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "@/api-client";
-import type { AppSettings, ThemePreference } from "@pizza-bot/core";
+import type { AppSettings, GroundingJudgeSetting, ThemePreference } from "@pizza-bot/core";
 import { DEFAULT_SETTINGS } from "@pizza-bot/core";
 import { useAppToast } from "./components/AppToast.js";
 import {
@@ -40,6 +40,8 @@ export interface UseSettingsResult {
     maxToolCalls: number;
     maxSubagentToolCalls: number;
     setToolCallLimit: (key: ToolCallLimitKey, value: number) => void;
+    groundingJudge: GroundingJudgeSetting;
+    setGroundingJudge: (value: GroundingJudgeSetting) => void;
   };
 }
 
@@ -172,6 +174,21 @@ export function useSettings(client: ApiClient): UseSettingsResult {
     [client, settings, toast],
   );
 
+  const setGroundingJudge = useCallback(
+    (value: GroundingJudgeSetting) => {
+      const previous = settings.groundingJudge;
+      setSettings((s) => ({ ...s, groundingJudge: value }));
+      void client
+        .updateSettings({ groundingJudge: value })
+        .then((saved) => setSettings(saved))
+        .catch((err) => {
+          setSettings((s) => ({ ...s, groundingJudge: previous }));
+          toast({ title: "Couldn't save claim checking", description: errorMessage(err), tone: "error" });
+        });
+    },
+    [client, settings.groundingJudge, toast],
+  );
+
   const savedPersonaRef = useRef(settings.customPromptAddendum);
   savedPersonaRef.current = settings.customPromptAddendum;
   const savePersona = useCallback(() => {
@@ -204,6 +221,8 @@ export function useSettings(client: ApiClient): UseSettingsResult {
         maxToolCalls: settings.maxToolCalls,
         maxSubagentToolCalls: settings.maxSubagentToolCalls,
         setToolCallLimit,
+        groundingJudge: settings.groundingJudge,
+        setGroundingJudge,
       },
     }),
     [
@@ -212,6 +231,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       settings.enableAutomations,
       settings.maxToolCalls,
       settings.maxSubagentToolCalls,
+      settings.groundingJudge,
       resolved,
       setPreference,
       personaDraft,
@@ -220,6 +240,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       savePersona,
       setFlag,
       setToolCallLimit,
+      setGroundingJudge,
     ],
   );
 }

@@ -1,6 +1,7 @@
 import { toRunInput } from "./input.js";
 import type { RunOptions, ThreadState } from "@pizza-bot/core";
 import type { ProtocolRunManager } from "./protocol-run-manager.js";
+import { dispatchesAction, type ApprovalAuditor } from "./approval-audit.js";
 
 export interface ProtocolCommand {
   id: number;
@@ -33,8 +34,10 @@ export async function dispatchProtocolCommand(opts: {
   stateReader: StateReader;
   threadId: string;
   command: ProtocolCommand;
+  /** Absence leaves approvals unrecorded; it never blocks the decision. */
+  approvalAuditor?: ApprovalAuditor | undefined;
 }): Promise<ProtocolCommandOutcome> {
-  const { runs, stateReader, threadId, command } = opts;
+  const { runs, stateReader, threadId, command, approvalAuditor } = opts;
   assertThreadAuthority(command.params, threadId);
 
   switch (command.method) {
@@ -47,11 +50,26 @@ export async function dispatchProtocolCommand(opts: {
       return { kind: "success", id: command.id, result: { run_id: handle.runId } };
     }
     case "input.respond": {
+      const resume = resumeFromParams(command.params);
+      const audit =
+        approvalAuditor && dispatchesAction(resume)
+          ? { record: approvalAuditor, resume }
+          : undefined;
+      // The resume consumes the interrupt, so the drafted args must be read first.
+      const paused = audit ? await stateReader.getState(threadId) : undefined;
       const handle = runs.start(
         threadId,
         inputRespondInput(command.params),
         runOptsFromCommand(command.params),
       );
+      if (audit && paused) {
+        void audit.record({
+          threadId,
+          runId: handle.runId,
+          state: paused,
+          resume: audit.resume,
+        });
+      }
       return { kind: "success", id: command.id, result: { run_id: handle.runId } };
     }
     case "run.stop": {
@@ -98,10 +116,15 @@ export function runStartInput(params: Record<string, unknown> | undefined) {
   return toRunInput({ input: params?.input, ...params });
 }
 
+/** SDK respond() places the resume command in response; bare commands remain supported. */
+export function resumeFromParams(
+  params: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  return (params?.response ?? params) as Record<string, unknown> | undefined;
+}
+
 export function inputRespondInput(params: Record<string, unknown> | undefined) {
-  // SDK respond() places the resume command in response; bare commands remain supported.
-  const resume = (params?.response ?? params) as Record<string, unknown>;
-  return toRunInput({ command: resume });
+  return toRunInput({ command: resumeFromParams(params) });
 }
 
 function serializedMessageType(message: Record<string, unknown>): string | undefined {

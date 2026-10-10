@@ -22,6 +22,7 @@ import {
   type SkillAvailability,
   type SkillInfo,
   type ThreadActivityOutcome,
+  pickJudgeModel,
 } from "@pizza-bot/core";
 import { registerBuiltinProviders, UnavailableChatModel } from "@pizza-bot/inference-providers";
 import type { LangGraphAgent } from "@pizza-bot/runtime-langgraph";
@@ -37,6 +38,7 @@ import {
   SettingsStore,
   ProviderConfigStore,
   ThreadActivityStore,
+  ApprovalVerdictStore,
   CapabilityPreferencesStore,
   LocalFolderStore,
   RunMaintenance,
@@ -45,6 +47,7 @@ import {
   isDefaultTitle,
   type AppDatabase,
   type AttachmentStore,
+  type EvidenceStore,
   type IndexableMessage,
   type Persistence,
   type CapabilityPreferenceKey,
@@ -89,6 +92,7 @@ import { TriggerService } from "./trigger-service.js";
 import { SystemMessage, HumanMessage, type AIMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { GraphManager } from "./graph-manager.js";
+import { GroundingJudge, type JudgeModel } from "./grounding-judge.js";
 import {
   buildSkillGeneratorPrompt,
   normalizeSkillDraft,
@@ -340,10 +344,13 @@ export class AgentHost {
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
   readonly threadActivity: ThreadActivityStore;
+  readonly approvalVerdicts: ApprovalVerdictStore;
+  readonly groundingJudge: GroundingJudge;
   readonly capabilityPreferences: CapabilityPreferencesStore;
   readonly localFolders: LocalFolderStore;
   modelId: string;
   readonly attachments?: AttachmentStore;
+  readonly evidence?: EvidenceStore;
 
   private readonly appDb: AppDatabase;
   private readonly explicitModelId: string | null;
@@ -389,11 +396,12 @@ export class AgentHost {
     explicitModelId: string | undefined,
     appDbPath: string,
     attachmentsDir: string | false,
+    evidenceDir: string | false,
     warm: (host: AgentHost) => Promise<GraphManager>,
   ) {
     this.protocolRuns = new ProtocolRunManager((input, opts) => this.streamProtocolReady(input, opts));
     // All app stores share one SQLite handle and one close owner.
-    this.appDb = openAppDatabase(appDbPath, attachmentsDir || undefined);
+    this.appDb = openAppDatabase(appDbPath, attachmentsDir || undefined, evidenceDir || undefined);
     this.triggers = this.appDb.triggers;
     this.threadStore = this.appDb.threadStore;
     this.folderStore = this.appDb.folders;
@@ -401,11 +409,17 @@ export class AgentHost {
     this.settings = this.appDb.settings;
     this.providerConfigs = this.appDb.providerConfigs;
     this.threadActivity = this.appDb.threadActivity;
+    this.approvalVerdicts = this.appDb.approvalVerdicts;
     this.capabilityPreferences = this.appDb.capabilityPreferences;
     this.localFolders = this.appDb.localFolders;
     this.explicitModelId = explicitModelId ?? process.env.PIZZA_MODEL ?? null;
     this.modelId = this.selectDefaultModel();
     if (this.appDb.attachments) this.attachments = this.appDb.attachments;
+    if (this.appDb.evidence) this.evidence = this.appDb.evidence;
+    this.groundingJudge = new GroundingJudge({
+      evidence: this.evidence,
+      resolveJudge: () => this.resolveJudgeModel(),
+    });
     this.triggerService = new TriggerService(protocolRunLauncher(this.protocolRuns), this.triggers, {
       isEnabled: () => this.settings.get().enableAutomations,
     });
@@ -439,6 +453,7 @@ export class AgentHost {
           // persists sidebar metadata, making the paused thread discoverable again.
           if (status === "interrupted") {
             interruptIds = await this.readThreadInterruptIds(threadId);
+            void this.prewarmGrounding(threadId);
             this.threadStore.ensure({ threadId });
             this.threadStore.update(threadId, { unread: true, awaitingAction: true });
             await this.runMaintenance.reindexThread(threadId);
@@ -517,7 +532,9 @@ export class AgentHost {
     try {
       await this.waitForThreadMaintenance(threadId);
       this.attachments?.deleteByThread(threadId);
+      this.evidence?.deleteByThread(threadId);
       this.threadActivity.deleteByThread(threadId);
+      this.approvalVerdicts.deleteByThread(threadId);
       const deleted = this.threadStore.delete(threadId);
       this.search.deleteThread(threadId);
       // SqliteSaver.deleteThread skips its lazy schema setup on an unopened database.
@@ -589,6 +606,28 @@ export class AgentHost {
     } catch {
       return resumeFallback || (this.threadStore.get(threadId)?.awaitingAction ?? false);
     }
+  }
+
+  /** A paused action is graded while it waits, so the reviewer's card opens already judged. */
+  private async prewarmGrounding(threadId: string): Promise<void> {
+    try {
+      this.groundingJudge.prewarm(threadId, await this.agent.getState(threadId));
+    } catch (err) {
+      console.error("[grounding] could not read the paused thread to grade it:", err);
+    }
+  }
+
+  private async resolveJudgeModel(): Promise<JudgeModel | undefined> {
+    await this.warmup;
+    const graphs = this.graphs;
+    if (!graphs) return undefined;
+    const setting = this.settings.get().groundingJudge;
+    if (setting === "off") return undefined;
+    const available = setting === "auto" ? (await graphs.listModels()).map((m) => m.id) : [];
+    const id = pickJudgeModel(setting, graphs.defaultModelId(), available);
+    if (!id) return undefined;
+    // Built per read so a reconfigured provider's credentials take effect at once.
+    return { id, model: await graphs.buildModel(id) };
   }
 
   private async readThreadInterruptIds(threadId: string): Promise<string[]> {
@@ -1825,6 +1864,7 @@ export class AgentHost {
           : {}),
         localFolders: () => host.localFolders.list(),
         ...(host.attachments ? { attachmentResolver: host.attachments.resolver } : {}),
+        ...(host.evidence ? { evidenceRecorder: host.evidence.recorder } : {}),
         ...(Object.keys(tools).length > 0 ? { tools } : {}),
         ...(Object.keys(catalog).length > 0 ? { catalog } : {}),
         ...(skillProjection.ready.size > 0 ? { skills: skillProjection.ready } : {}),
@@ -1857,6 +1897,7 @@ export class AgentHost {
     const isMemory = opts.dataRoot === ":memory:" || opts.dataRoot.startsWith("file::memory:");
     const appDbPath = isMemory ? ":memory:" : resolveLayout(opts.dataRoot).appDb;
     const attachmentsDir = isMemory ? false : resolveLayout(opts.dataRoot).attachmentsDir;
+    const evidenceDir = isMemory ? false : resolveLayout(opts.dataRoot).evidenceDir;
 
     return new AgentHost(
       lazyPersistence,
@@ -1864,6 +1905,7 @@ export class AgentHost {
       explicitModelId,
       appDbPath,
       attachmentsDir,
+      evidenceDir,
       warm,
     );
   }

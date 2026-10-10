@@ -99,7 +99,12 @@ export async function* streamProtocolEvents(
 ): AsyncIterable<ProtocolEvent> {
   const options = {
     version: "v3" as const,
-    configurable: { thread_id: opts.threadId, ...opts.configurable },
+    // `run_id` is what scopes a run's evidence ledger inside tool middleware.
+    configurable: {
+      thread_id: opts.threadId,
+      ...(opts.runId ? { run_id: opts.runId } : {}),
+      ...opts.configurable,
+    },
     ...(opts.signal ? { signal: opts.signal } : {}),
   };
   const stream = await graph.streamEvents(input, options);

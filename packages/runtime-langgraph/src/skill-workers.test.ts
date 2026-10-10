@@ -141,6 +141,48 @@ describe("resolveSkillSubagents", () => {
     expect(warnings).toHaveLength(2);
   });
 
+  it("gives a citing skill an evidence ledger, and only a citing skill", async () => {
+    const send = {
+      name: "outlook__send",
+      schema: { type: "object", properties: { body: { type: "string" } }, required: ["body"] },
+    };
+    const deps = {
+      tools: { "mcp:outlook:send": send, "mcp:outlook:search": { name: "outlook__search" } },
+      catalog: { outlook: ["send", "search"] },
+      evidenceRecorder: async () => undefined,
+    };
+    const grounded = skill("citer", ["mcp:outlook:send", "mcp:outlook:search"], {
+      "mcp:outlook:send": { allowedDecisions: ["approve"], verifiedArgs: ["body"] },
+    });
+    const ungrounded = skill("gater", ["mcp:outlook:send"], {
+      "mcp:outlook:send": { allowedDecisions: ["approve"] },
+    });
+
+    const resolved = await resolveSkillSubagents(catalog(grounded, ungrounded), deps);
+    const names = (index: number) =>
+      resolved![index]!.middleware?.map((middleware) => middleware.name);
+    expect(names(0)).toContain("evidenceLedger");
+    expect(names(1)).not.toContain("evidenceLedger");
+  });
+
+  it("omits the ledger when the server wired no recorder", async () => {
+    const resolved = await resolveSkillSubagents(
+      catalog(skill("citer", ["mcp:outlook:send"], {
+        "mcp:outlook:send": { allowedDecisions: ["approve"], verifiedArgs: ["body"] },
+      })),
+      {
+        tools: {
+          "mcp:outlook:send": {
+            name: "outlook__send",
+            schema: { type: "object", properties: { body: { type: "string" } } },
+          },
+        },
+        catalog: { outlook: ["send"] },
+      },
+    );
+    expect(resolved![0]!.middleware?.map((m) => m.name)).not.toContain("evidenceLedger");
+  });
+
   it("returns no workers without skills", async () => {
     await expect(resolveSkillSubagents(undefined, {})).resolves.toBeUndefined();
   });
