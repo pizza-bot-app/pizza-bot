@@ -103,6 +103,16 @@ describe("settings routes: GET/PUT /settings", () => {
       .toMatchObject({ maxToolCalls: -1, maxSubagentToolCalls: -1 });
   });
 
+  it("persists favorite models without rebuilding the warm graph and ignores invalid lists", async () => {
+    const firstAgent = host.agent;
+    const res = await put({ favoriteModels: ["bedrock:sonnet"] });
+    expect(((await res.json()) as { favoriteModels: string[] }).favoriteModels).toEqual(["bedrock:sonnet"]);
+    expect(host.agent).toBe(firstAgent);
+
+    const invalid = await put({ favoriteModels: ["a", "a"] });
+    expect(((await invalid.json()) as { favoriteModels: string[] }).favoriteModels).toEqual(["bedrock:sonnet"]);
+  });
+
   it("refreshes scheduler state when the automations setting changes", async () => {
     const reload = vi.spyOn(host.triggerService, "reload");
 

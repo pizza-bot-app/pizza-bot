@@ -13,7 +13,7 @@ import type { ModelsInfo, ApiClient } from "@/api-client";
 import type { AttachmentMeta } from "@pizza-bot/core";
 import { ATTACHMENT_ACCEPT, isImageAttachmentType, resolveAttachmentMediaType } from "@pizza-bot/core";
 import type { PromptHistoryCycler } from "../use-prompt-history.js";
-import { reconcileSelectedModel } from "../model-options.js";
+import { reconcileSelectedModel, type ModelFavorites } from "../model-options.js";
 import { ModelCombobox } from "./ModelCombobox.js";
 import { useAttachmentSrc } from "../attachment-src.js";
 import { composerDraftStore } from "../composer-draft-store.js";
@@ -30,6 +30,7 @@ export function Composer({
   models,
   initialModel,
   onModelChange,
+  favoriteModels,
   client,
   prefill,
   prefillToken,
@@ -47,6 +48,7 @@ export function Composer({
   models: ModelsInfo;
   initialModel?: string;
   onModelChange?: (modelId: string) => void;
+  favoriteModels?: ModelFavorites;
   client: ApiClient;
   prefill?: string;
   prefillToken?: number;
@@ -355,6 +357,7 @@ export function Composer({
               models={models.models}
               value={model}
               onChange={setModel}
+              favorites={favoriteModels}
               formatModelLabel={(option) => shortModelName(option.displayName)}
             />
 

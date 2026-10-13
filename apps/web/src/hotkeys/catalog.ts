@@ -26,6 +26,7 @@ export const HOTKEY_CATEGORIES: HotkeyCategory[] = [
   { id: "navigation", label: "Navigation" },
   { id: "conversation", label: "Conversation" },
   { id: "view", label: "View" },
+  { id: "models", label: "Model picker" },
   { id: "help", label: "Help" },
 ];
 
@@ -108,6 +109,14 @@ export const HOTKEY_CATALOG: HotkeyActionDef[] = [
     defaultChord: "Delete",
     scope: "zone:selectable-list",
     hint: "Delete or Backspace removes the selected conversation (with confirmation)",
+  },
+
+  {
+    id: "modelPicker.toggleFavorite",
+    label: "Favorite highlighted model",
+    category: "models",
+    defaultChord: "CmdOrCtrl+F",
+    scope: "layer",
   },
 
   {

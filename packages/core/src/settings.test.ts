@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_SETTINGS,
+  isFavoriteModels,
   isMaxToolCalls,
+  MAX_FAVORITE_MODELS,
   MAX_PROMPT_ADDENDUM_LENGTH,
   isPromptAddendum,
   isThemePreference,
@@ -49,6 +51,21 @@ describe("isMaxToolCalls", () => {
   });
 });
 
+describe("isFavoriteModels", () => {
+  it("accepts unique non-empty model ids, including none", () => {
+    expect(isFavoriteModels([])).toBe(true);
+    expect(isFavoriteModels(["bedrock:sonnet", "openai:gpt-5"])).toBe(true);
+  });
+
+  it("rejects duplicates, empty ids, non-strings, oversized lists, and non-arrays", () => {
+    expect(isFavoriteModels(["bedrock:sonnet", "bedrock:sonnet"])).toBe(false);
+    expect(isFavoriteModels([""])).toBe(false);
+    expect(isFavoriteModels([42])).toBe(false);
+    expect(isFavoriteModels(Array.from({ length: MAX_FAVORITE_MODELS + 1 }, (_, i) => `p:${i}`))).toBe(false);
+    expect(isFavoriteModels("bedrock:sonnet")).toBe(false);
+  });
+});
+
 describe("DEFAULT_SETTINGS", () => {
   it("defaults the persona addendum to an empty string", () => {
     expect(DEFAULT_SETTINGS.customPromptAddendum).toBe("");
@@ -62,5 +79,9 @@ describe("DEFAULT_SETTINGS", () => {
   it("defaults the orchestrator and subagent tool-call limits", () => {
     expect(DEFAULT_SETTINGS.maxToolCalls).toBe(100);
     expect(DEFAULT_SETTINGS.maxSubagentToolCalls).toBe(150);
+  });
+
+  it("defaults to no favorite models", () => {
+    expect(DEFAULT_SETTINGS.favoriteModels).toEqual([]);
   });
 });

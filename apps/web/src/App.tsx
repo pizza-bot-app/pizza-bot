@@ -133,7 +133,7 @@ export function App() {
 
   const triggers = useTriggers(client, 5_000, visibleAdmin.triggers);
 
-  const { theme, persona, features, agent: agentSettings } = useSettings(client);
+  const { theme, persona, features, agent: agentSettings, favoriteModels } = useSettings(client);
 
   const [threadTitles, setThreadTitles] = useState<Map<string, string>>(() => new Map());
   const [threadModels, setThreadModels] = useState<Map<string, string>>(() => new Map());
@@ -479,6 +479,7 @@ export function App() {
                 onProviderRemove={providersAdmin.remove}
                 onRetryModels={retryModelCatalogs}
                 onSetDefaultModel={providersAdmin.setDefault}
+                favoriteModels={favoriteModels}
                 providerStatuses={serverStatus?.inference.providers}
                 enableMemories={features.enableMemories}
                 enableAutomations={features.enableAutomations}
@@ -553,6 +554,7 @@ export function App() {
                             onRename={(title) => onRename(activeThreadId, title)}
                             models={selectableModels}
                             initialModel={activeModelId}
+                            favoriteModels={favoriteModels}
                             onModelChange={(modelId) => {
                               setSelectedThreadModels((prev) => {
                                 if (prev.get(activeThreadId) === modelId) return prev;

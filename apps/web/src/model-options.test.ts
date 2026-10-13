@@ -6,6 +6,8 @@ import {
   groupModelsByProvider,
   providerLabel,
   reconcileSelectedModel,
+  sectionModels,
+  toggleFavorite,
 } from "./model-options.js";
 
 const models: ModelsInfo = {
@@ -119,6 +121,44 @@ describe("model provider presentation", () => {
     expect(providerLabel("openrouter")).toBe("OpenRouter");
     expect(providerLabel("bedrock")).toBe("Amazon Bedrock");
     expect(providerLabel("google-vertex_ai")).toBe("Google Vertex Ai");
+  });
+});
+
+describe("sectionModels", () => {
+  const catalog = [
+    { id: "bedrock:sonnet", displayName: "Sonnet", provider: "bedrock" },
+    { id: "openai:gpt", displayName: "GPT", provider: "openai" },
+    { id: "bedrock:haiku", displayName: "Haiku", provider: "bedrock" },
+  ];
+  const layout = (favoriteIds: string[]) =>
+    sectionModels(catalog, favoriteIds).map((section) => [
+      section.label,
+      section.models.map(({ model, index }) => [model.id, index]),
+    ]);
+
+  it("lists provider groups with indexes in render order when nothing is a favorite", () => {
+    expect(layout([])).toEqual([
+      ["Amazon Bedrock", [["bedrock:sonnet", 0], ["bedrock:haiku", 1]]],
+      ["Open AI", [["openai:gpt", 2]]],
+    ]);
+  });
+
+  it("moves favorites into a leading section and out of their provider group", () => {
+    expect(layout(["bedrock:haiku", "openai:gpt"])).toEqual([
+      ["Favorites", [["openai:gpt", 0], ["bedrock:haiku", 1]]],
+      ["Amazon Bedrock", [["bedrock:sonnet", 2]]],
+    ]);
+  });
+
+  it("ignores favorites that are not in the offered models", () => {
+    expect(layout(["anthropic:opus"])).toEqual(layout([]));
+  });
+});
+
+describe("toggleFavorite", () => {
+  it("adds a missing id and removes a present one", () => {
+    expect(toggleFavorite(["a"], "b")).toEqual(["a", "b"]);
+    expect(toggleFavorite(["a", "b"], "a")).toEqual(["b"]);
   });
 });
 

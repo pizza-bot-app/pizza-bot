@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import {
+  isFavoriteModels,
   isMaxToolCalls,
   isPromptAddendum,
   isThemePreference,
@@ -21,6 +22,7 @@ export function settingsRoutes(host: AgentHost): Hono {
     if (typeof raw.enableAutomations === "boolean") patch.enableAutomations = raw.enableAutomations;
     if (isMaxToolCalls(raw.maxToolCalls)) patch.maxToolCalls = raw.maxToolCalls;
     if (isMaxToolCalls(raw.maxSubagentToolCalls)) patch.maxSubagentToolCalls = raw.maxSubagentToolCalls;
+    if (isFavoriteModels(raw.favoriteModels)) patch.favoriteModels = raw.favoriteModels;
 
     const before = host.settings.get();
     const settings = host.settings.patch(patch);

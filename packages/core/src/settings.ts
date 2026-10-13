@@ -15,6 +15,8 @@ export interface AppSettings {
   maxToolCalls: number;
   /** Per-run subagent tool-call limit; -1 disables the limit. */
   maxSubagentToolCalls: number;
+  /** Qualified model ids (`provider:rawId`) pinned to the top of model pickers. */
+  favoriteModels: string[];
 }
 
 export type AppSettingsPatch = Partial<AppSettings>;
@@ -26,10 +28,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableAutomations: false,
   maxToolCalls: 100,
   maxSubagentToolCalls: 150,
+  favoriteModels: [],
 };
 
 /** Bounds the persona addendum so it cannot bloat every prompt unboundedly. */
 export const MAX_PROMPT_ADDENDUM_LENGTH = 8000;
+
+export const MAX_FAVORITE_MODELS = 200;
 
 export function isThemePreference(value: unknown): value is ThemePreference {
   return value === "light" || value === "dark" || value === "system";
@@ -41,4 +46,13 @@ export function isPromptAddendum(value: unknown): value is string {
 
 export function isMaxToolCalls(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && (value === -1 || value > 0);
+}
+
+export function isFavoriteModels(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_FAVORITE_MODELS &&
+    value.every((id) => typeof id === "string" && id.length > 0) &&
+    new Set(value).size === value.length
+  );
 }

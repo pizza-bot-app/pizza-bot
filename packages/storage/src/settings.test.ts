@@ -81,6 +81,25 @@ describe("SettingsStore", () => {
     app.close();
   });
 
+  it("persists favorite models independently", () => {
+    const app = openAppDatabase(":memory:");
+    app.settings.patch({ favoriteModels: ["bedrock:sonnet", "openai:gpt-5"] });
+    app.settings.patch({ theme: "light" });
+    expect(app.settings.get().favoriteModels).toEqual(["bedrock:sonnet", "openai:gpt-5"]);
+    app.settings.patch({ favoriteModels: [] });
+    expect(app.settings.get().favoriteModels).toEqual([]);
+    app.close();
+  });
+
+  it("falls back to no favorites for an invalid stored list", () => {
+    const app = openAppDatabase(":memory:");
+    app.db
+      .prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('favoriteModels', '[1,2]', 'now')")
+      .run();
+    expect(app.settings.get().favoriteModels).toEqual(DEFAULT_SETTINGS.favoriteModels);
+    app.close();
+  });
+
   it("falls back to the default persona for an over-long stored value", () => {
     const app = openAppDatabase(":memory:");
     const tooLong = "x".repeat(8001);

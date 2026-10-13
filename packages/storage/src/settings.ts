@@ -2,6 +2,7 @@
 import Database from "better-sqlite3";
 import {
   DEFAULT_SETTINGS,
+  isFavoriteModels,
   isMaxToolCalls,
   isPromptAddendum,
   isThemePreference,
@@ -61,6 +62,9 @@ export class SettingsStore {
       maxSubagentToolCalls: isMaxToolCalls(stored.maxSubagentToolCalls)
         ? stored.maxSubagentToolCalls
         : DEFAULT_SETTINGS.maxSubagentToolCalls,
+      favoriteModels: isFavoriteModels(stored.favoriteModels)
+        ? stored.favoriteModels
+        : DEFAULT_SETTINGS.favoriteModels,
     };
   }
 
@@ -92,6 +96,9 @@ export class SettingsStore {
     }
     if (patch.maxSubagentToolCalls !== undefined) {
       entries.push({ key: "maxSubagentToolCalls", value: JSON.stringify(patch.maxSubagentToolCalls) });
+    }
+    if (patch.favoriteModels !== undefined) {
+      entries.push({ key: "favoriteModels", value: JSON.stringify(patch.favoriteModels) });
     }
     if (entries.length > 0) writeAll(entries);
     return this.get();

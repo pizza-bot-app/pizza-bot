@@ -1,5 +1,6 @@
 import { useCallback, useState, type PointerEvent, type ReactNode } from "react";
 import type { AgentInfo, ModelsInfo, ApiClient } from "@/api-client";
+import type { ModelFavorites } from "../model-options.js";
 import { useThreadSlice } from "../use-thread-slice.js";
 import type { PromptHistoryCycler } from "../use-prompt-history.js";
 import { ChatFeed } from "./ChatFeed.js";
@@ -22,6 +23,7 @@ export interface ChatPaneProps {
   models: ModelsInfo;
   initialModel?: string;
   onModelChange?: (modelId: string) => void;
+  favoriteModels?: ModelFavorites;
   client: ApiClient;
   title?: string;
   composerRef?: React.RefObject<HTMLTextAreaElement | null>;
@@ -42,6 +44,7 @@ export function ChatPane({
   models,
   initialModel,
   onModelChange,
+  favoriteModels,
   client,
   title,
   composerRef,
@@ -117,6 +120,7 @@ export function ChatPane({
         models={models}
         initialModel={initialModel}
         onModelChange={onModelChange}
+        favoriteModels={favoriteModels}
         client={client}
         prefill={prefill}
         prefillToken={prefillToken}

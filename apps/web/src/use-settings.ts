@@ -3,6 +3,7 @@ import type { ApiClient } from "@/api-client";
 import type { AppSettings, ThemePreference } from "@pizza-bot/core";
 import { DEFAULT_SETTINGS } from "@pizza-bot/core";
 import { useAppToast } from "./components/AppToast.js";
+import { toggleFavorite, type ModelFavorites } from "./model-options.js";
 import {
   applyTheme,
   commitTheme,
@@ -41,6 +42,7 @@ export interface UseSettingsResult {
     maxSubagentToolCalls: number;
     setToolCallLimit: (key: ToolCallLimitKey, value: number) => void;
   };
+  favoriteModels: ModelFavorites;
 }
 
 export type ToolCallLimitKey = "maxToolCalls" | "maxSubagentToolCalls";
@@ -172,6 +174,22 @@ export function useSettings(client: ApiClient): UseSettingsResult {
     [client, settings, toast],
   );
 
+  const toggleFavoriteModel = useCallback(
+    (modelId: string) => {
+      const previous = settings.favoriteModels;
+      const next = toggleFavorite(previous, modelId);
+      setSettings((s) => ({ ...s, favoriteModels: next }));
+      void client
+        .updateSettings({ favoriteModels: next })
+        .then((saved) => setSettings(saved))
+        .catch((err) => {
+          setSettings((s) => ({ ...s, favoriteModels: previous }));
+          toast({ title: "Couldn't save favorite models", description: errorMessage(err), tone: "error" });
+        });
+    },
+    [client, settings.favoriteModels, toast],
+  );
+
   const savedPersonaRef = useRef(settings.customPromptAddendum);
   savedPersonaRef.current = settings.customPromptAddendum;
   const savePersona = useCallback(() => {
@@ -205,6 +223,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
         maxSubagentToolCalls: settings.maxSubagentToolCalls,
         setToolCallLimit,
       },
+      favoriteModels: { ids: settings.favoriteModels, toggle: toggleFavoriteModel },
     }),
     [
       settings.theme,
@@ -212,6 +231,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       settings.enableAutomations,
       settings.maxToolCalls,
       settings.maxSubagentToolCalls,
+      settings.favoriteModels,
       resolved,
       setPreference,
       personaDraft,
@@ -220,6 +240,7 @@ export function useSettings(client: ApiClient): UseSettingsResult {
       savePersona,
       setFlag,
       setToolCallLimit,
+      toggleFavoriteModel,
     ],
   );
 }

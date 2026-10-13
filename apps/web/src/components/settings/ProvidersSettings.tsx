@@ -15,7 +15,7 @@ import type {
 } from "@pizza-bot/core";
 import { isEnvReference } from "@pizza-bot/core";
 import { L } from "../../lexicon.js";
-import { providerLabel } from "../../model-options.js";
+import { providerLabel, type ModelFavorites } from "../../model-options.js";
 import { ModelCombobox } from "../ModelCombobox.js";
 import { useAppToast } from "../AppToast.js";
 
@@ -34,6 +34,7 @@ export interface ProvidersSettingsProps {
   onRemove: (id: string) => Promise<unknown>;
   onRetryModels: () => Promise<unknown>;
   onSetDefault: (model: string | null) => Promise<unknown>;
+  favoriteModels?: ModelFavorites;
   selectedProviderId: string | null;
   onSelectProvider: (id: string | null) => void;
   providerStatuses?: StatusInfo["inference"]["providers"];
@@ -75,6 +76,7 @@ export function ProvidersSettings({
   onRemove,
   onRetryModels,
   onSetDefault,
+  favoriteModels,
   selectedProviderId,
   onSelectProvider,
   providerStatuses,
@@ -84,7 +86,12 @@ export function ProvidersSettings({
       <h2 className="settings-group-title">{L.providersTitle}</h2>
 
       <div className="settings-provider-overview-panel" hidden={selectedProviderId !== null}>
-        <DefaultModelRow models={models} defaultModel={defaultModel} onSetDefault={onSetDefault} />
+        <DefaultModelRow
+          models={models}
+          defaultModel={defaultModel}
+          onSetDefault={onSetDefault}
+          favoriteModels={favoriteModels}
+        />
         <div className="settings-provider-overview">
           {providers.map((provider) => (
             <ProviderSummary
@@ -160,10 +167,12 @@ function DefaultModelRow({
   models,
   defaultModel,
   onSetDefault,
+  favoriteModels,
 }: {
   models: ModelsInfo;
   defaultModel: string | null;
   onSetDefault: (model: string | null) => Promise<unknown>;
+  favoriteModels?: ModelFavorites;
 }) {
   const notify = useAppToast();
   const [busy, setBusy] = useState(false);
@@ -204,6 +213,7 @@ function DefaultModelRow({
             : undefined
         }
         disabled={busy}
+        favorites={favoriteModels}
         onChange={(value) => void change(value)}
       />
     </div>

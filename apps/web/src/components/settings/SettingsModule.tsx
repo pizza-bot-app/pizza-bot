@@ -14,7 +14,7 @@ import type { ProviderView, ModelsInfo, StatusInfo } from "@/api-client";
 import { ModuleHeader } from "../ModuleHeader.js";
 import { getProviderStatus, ProvidersSettings } from "./ProvidersSettings.js";
 import { L } from "../../lexicon.js";
-import { providerLabel } from "../../model-options.js";
+import { providerLabel, type ModelFavorites } from "../../model-options.js";
 import type { ThemePreference } from "../../theme-storage.js";
 import type { DesktopConnection } from "../../use-desktop-connection.js";
 import type { ToolCallLimitKey } from "../../use-settings.js";
@@ -44,6 +44,7 @@ export interface SettingsModuleProps {
   onProviderRemove: (id: string) => Promise<unknown>;
   onRetryModels: () => Promise<unknown>;
   onSetDefaultModel: (model: string | null) => Promise<unknown>;
+  favoriteModels?: ModelFavorites;
   enableMemories: boolean;
   enableAutomations: boolean;
   onFeatureToggle: (key: "enableMemories" | "enableAutomations", value: boolean) => void;
@@ -160,6 +161,7 @@ export function SettingsModule({
   onProviderRemove,
   onRetryModels,
   onSetDefaultModel,
+  favoriteModels,
   enableMemories,
   enableAutomations,
   onFeatureToggle,
@@ -395,6 +397,7 @@ export function SettingsModule({
               onRemove={onProviderRemove}
               onRetryModels={onRetryModels}
               onSetDefault={onSetDefaultModel}
+              favoriteModels={favoriteModels}
               selectedProviderId={selectedProviderId}
               onSelectProvider={setProviderId}
             />

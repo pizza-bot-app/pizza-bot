@@ -1,8 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
-import { ChevronDown, Cloud, Search, X } from "lucide-react";
+import { ChevronDown, Cloud, Search, Star, X } from "lucide-react";
 import type { ModelsInfo } from "@/api-client";
-import { groupModelsByProvider, providerLabel } from "../model-options.js";
-import { useLayer } from "../hotkeys/index.js";
+import { sectionModels, type ModelFavorites } from "../model-options.js";
+import { findAction, useHotkey, useHotkeyContext, useLayer } from "../hotkeys/index.js";
 
 type ModelOption = ModelsInfo["models"][number];
 type Row = { value: string; disabled?: boolean };
@@ -16,6 +16,7 @@ export function ModelCombobox({
   disabled = false,
   className = "",
   formatModelLabel = (model) => model.displayName,
+  favorites,
 }: {
   models: ModelOption[];
   value: string;
@@ -25,8 +26,12 @@ export function ModelCombobox({
   disabled?: boolean;
   className?: string;
   formatModelLabel?: (model: ModelOption) => string;
+  favorites?: ModelFavorites;
 }) {
   const [open, setOpen] = useState(false);
+  // Ordering is fixed for the life of the open menu so starring never moves rows under the pointer.
+  const [orderedFavoriteIds, setOrderedFavoriteIds] = useState<readonly string[]>(favorites?.ids ?? []);
+  const { formatSpec, platform } = useHotkeyContext();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -42,7 +47,7 @@ export function ModelCombobox({
       ),
     [models, normalized],
   );
-  const groups = groupModelsByProvider(filteredModels);
+  const sections = sectionModels(filteredModels, orderedFavoriteIds);
   const selected = models.find((model) => model.id === value);
   const triggerLabel = selected
     ? formatModelLabel(selected)
@@ -54,9 +59,17 @@ export function ModelCombobox({
   if (emptyOption) leadingRows.push({ value: emptyValue });
   if (unavailableOption) leadingRows.push({ value: unavailableOption.value, disabled: true });
   const modelOffset = leadingRows.length;
-  const rows: Row[] = [...leadingRows, ...filteredModels.map((model) => ({ value: model.id }))];
+  const rows: Row[] = [
+    ...leadingRows,
+    ...sections.flatMap((section) => section.models.map(({ model }) => ({ value: model.id }))),
+  ];
   const firstEnabled = Math.max(rows.findIndex((row) => !row.disabled), 0);
   const optionId = (index: number) => `${listId}-option-${index}`;
+
+  const openMenu = () => {
+    setOrderedFavoriteIds(favorites?.ids ?? []);
+    setOpen(true);
+  };
 
   const refocusOnEnable = useRef(false);
   const close = (restoreFocus: boolean) => {
@@ -75,7 +88,18 @@ export function ModelCombobox({
   }, [disabled, open]);
 
   // Popover layers consume Escape before the chat-zone binding returns focus.
-  useLayer("model-combobox", { active: open, onEscape: () => close(true) });
+  const layerId = useLayer("model-combobox", { active: open, onEscape: () => close(true) });
+
+  const favoriteChord = findAction("modelPicker.toggleFavorite")?.defaultChord;
+  const favoriteShortcut = favoriteChord ? formatSpec(favoriteChord) : "";
+  useHotkey(
+    "modelPicker.toggleFavorite",
+    () => {
+      const row = rows[cursor];
+      if (cursor >= modelOffset && row) favorites?.toggle(row.value);
+    },
+    { enabled: open && !!favorites, layerId },
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -125,7 +149,7 @@ export function ModelCombobox({
     if (open) return;
     if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
       event.preventDefault();
-      if (!disabled) setOpen(true);
+      if (!disabled) openMenu();
     }
   };
 
@@ -162,7 +186,7 @@ export function ModelCombobox({
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled || (models.length === 0 && !emptyOption && !unavailableOption)}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >
         <Cloud size={15} aria-hidden="true" />
@@ -182,6 +206,7 @@ export function ModelCombobox({
               aria-activedescendant={rows[cursor] ? optionId(cursor) : undefined}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={onSearchKeyDown}
+              aria-keyshortcuts={favorites ? (platform === "mac" ? "Meta+F" : "Control+F") : undefined}
             />
             {query && (
               <button type="button" aria-label="Clear model search" onClick={() => setQuery("")}>
@@ -220,26 +245,45 @@ export function ModelCombobox({
                 </button>
               </li>
             )}
-            {groups.map((group) => (
-              <li className="model-picker-group" role="presentation" key={group.provider}>
-                <div className="model-picker-group-label">{providerLabel(group.provider)}</div>
-                <ul className="model-picker-group-items" role="group" aria-label={providerLabel(group.provider)}>
-                  {group.models.map(({ model, index }) => (
-                    <li key={model.id}>
-                      <button
-                        type="button"
-                        role="option"
-                        id={optionId(modelOffset + index)}
-                        tabIndex={-1}
-                        aria-selected={model.id === value}
-                        className={optionClass(modelOffset + index, model.id === value)}
-                        onClick={() => pick(model.id)}
-                      >
-                        <Cloud size={14} aria-hidden="true" />
-                        {formatModelLabel(model)}
-                      </button>
-                    </li>
-                  ))}
+            {sections.map((section) => (
+              <li className="model-picker-group" role="presentation" key={section.key}>
+                <div className="model-picker-group-label">{section.label}</div>
+                <ul className="model-picker-group-items" role="group" aria-label={section.label}>
+                  {section.models.map(({ model, index }) => {
+                    const favorite = favorites?.ids.includes(model.id) ?? false;
+                    const starLabel = `${favorite ? "Remove" : "Add"} ${model.displayName} ${favorite ? "from" : "to"} favorites`;
+                    return (
+                      <li key={model.id} className="model-picker-row">
+                        <button
+                          type="button"
+                          role="option"
+                          id={optionId(modelOffset + index)}
+                          tabIndex={-1}
+                          aria-selected={model.id === value}
+                          className={optionClass(modelOffset + index, model.id === value)}
+                          onClick={() => pick(model.id)}
+                        >
+                          <Cloud size={14} aria-hidden="true" />
+                          {formatModelLabel(model)}
+                        </button>
+                        {favorites && (
+                          <button
+                            type="button"
+                            tabIndex={-1}
+                            className={`model-picker-star${favorite ? " favorite" : ""}`}
+                            aria-label={starLabel}
+                            aria-pressed={favorite}
+                            title={`${favorite ? "Remove from" : "Add to"} favorites (${favoriteShortcut})`}
+                            // Keep focus in the search input so arrow keys and Enter keep working.
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => favorites.toggle(model.id)}
+                          >
+                            <Star size={13} aria-hidden="true" fill={favorite ? "currentColor" : "none"} />
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </li>
             ))}
@@ -247,6 +291,14 @@ export function ModelCombobox({
               <li className="provider-model-empty">No models found.</li>
             )}
           </ul>
+          {favorites && filteredModels.length > 0 && (
+            <div className="model-picker-footer" aria-hidden="true">
+              <kbd>{favoriteShortcut}</kbd>
+              {cursor >= modelOffset && favorites.ids.includes(rows[cursor]?.value ?? "")
+                ? "to remove from favorites"
+                : "to add to favorites"}
+            </div>
+          )}
         </div>
       )}
     </div>

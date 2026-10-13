@@ -17,6 +17,45 @@ export function groupModelsByProvider(models: ModelOption[]): ModelGroup[] {
   return Array.from(groups, ([provider, group]) => ({ provider, models: group }));
 }
 
+export interface ModelFavorites {
+  ids: readonly string[];
+  toggle: (modelId: string) => void;
+}
+
+export interface ModelSection {
+  key: string;
+  label: string;
+  models: Array<{ model: ModelOption; index: number }>;
+}
+
+/** Favorites first, then provider groups; `index` is the row's position in render order. */
+export function sectionModels(models: ModelOption[], favoriteIds: readonly string[]): ModelSection[] {
+  const favorites = new Set(favoriteIds);
+  const favoriteSection = {
+    key: "favorites",
+    label: "Favorites",
+    models: models.filter((model) => favorites.has(model.id)),
+  };
+  const providerSections = groupModelsByProvider(models.filter((model) => !favorites.has(model.id)))
+    .map((group) => ({
+      key: `provider:${group.provider}`,
+      label: providerLabel(group.provider),
+      models: group.models.map(({ model }) => model),
+    }));
+  return [favoriteSection, ...providerSections]
+    .filter((section) => section.models.length > 0)
+    .reduce<ModelSection[]>((sections, section) => {
+      const start = sections.reduce((count, s) => count + s.models.length, 0);
+      return [...sections, { ...section, models: section.models.map((model, i) => ({ model, index: start + i })) }];
+    }, []);
+}
+
+export function toggleFavorite(favoriteIds: readonly string[], modelId: string): string[] {
+  return favoriteIds.includes(modelId)
+    ? favoriteIds.filter((id) => id !== modelId)
+    : [...favoriteIds, modelId];
+}
+
 export function providerLabel(provider: string): string {
   if (provider.toLowerCase() === "openai") return "Open AI";
   if (provider.toLowerCase() === "openrouter") return "OpenRouter";
