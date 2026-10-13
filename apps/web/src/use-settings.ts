@@ -174,20 +174,41 @@ export function useSettings(client: ApiClient): UseSettingsResult {
     [client, settings, toast],
   );
 
+  const favoriteSaves = useRef({
+    ids: settings.favoriteModels,
+    saved: settings.favoriteModels,
+    pending: 0,
+    queue: Promise.resolve(),
+  });
+  if (favoriteSaves.current.pending === 0) {
+    favoriteSaves.current.ids = settings.favoriteModels;
+    favoriteSaves.current.saved = settings.favoriteModels;
+  }
+
   const toggleFavoriteModel = useCallback(
     (modelId: string) => {
-      const previous = settings.favoriteModels;
-      const next = toggleFavorite(previous, modelId);
+      const saves = favoriteSaves.current;
+      const next = toggleFavorite(saves.ids, modelId);
+      saves.ids = next;
+      saves.pending += 1;
       setSettings((s) => ({ ...s, favoriteModels: next }));
-      void client
-        .updateSettings({ favoriteModels: next })
-        .then((saved) => setSettings(saved))
-        .catch((err) => {
-          setSettings((s) => ({ ...s, favoriteModels: previous }));
+      saves.queue = saves.queue.then(async () => {
+        try {
+          const saved = await client.updateSettings({ favoriteModels: next });
+          saves.saved = saved.favoriteModels;
+        } catch (err) {
           toast({ title: "Couldn't save favorite models", description: errorMessage(err), tone: "error" });
-        });
+        } finally {
+          saves.pending -= 1;
+          if (saves.pending === 0) {
+            saves.ids = saves.saved;
+            const favoriteModels = saves.saved;
+            setSettings((s) => ({ ...s, favoriteModels }));
+          }
+        }
+      });
     },
-    [client, settings.favoriteModels, toast],
+    [client, toast],
   );
 
   const savedPersonaRef = useRef(settings.customPromptAddendum);
