@@ -16,7 +16,7 @@
   "devDependencies": {
     "@langchain/core": "^1.2.14",
     "@langchain/langgraph": "^1.4.18",
-    "deepagents": "^1.14.2",
+    "deepagents": "^1.15.0",
     "vitest": "^4.1.11"
   }
 }
