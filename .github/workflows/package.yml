@@ -131,6 +131,10 @@ jobs:
         if: inputs.stamp-version
         run: node scripts/build-version.mjs --set "${{ inputs.version }}"
 
+      # smolvm has no Intel macOS build; the x64 job logs that and ships without it.
+      - name: Stage smolvm
+        run: npm run smolvm:fetch -- --arch "${{ matrix.arch }}"
+
       - name: Build installers
         run: npm run desktop:make -- --arch "${{ matrix.arch }}"
 
@@ -226,6 +230,9 @@ jobs:
       - name: Stamp version
         if: inputs.stamp-version
         run: node scripts/build-version.mjs --set "${{ inputs.version }}"
+
+      - name: Stage smolvm
+        run: npm run smolvm:fetch -- --arch x64
 
       # forge.config.ts enables signing only when both variables are present, so
       # leaving them empty is what produces the unsigned installer.
@@ -336,6 +343,9 @@ jobs:
       - name: Stamp version
         if: inputs.stamp-version
         run: node scripts/build-version.mjs --set "${{ inputs.version }}"
+
+      - name: Stage smolvm
+        run: npm run smolvm:fetch -- --arch "${{ matrix.arch }}"
 
       - name: Build packages
         run: npm run desktop:make -- --arch "${{ matrix.arch }}"

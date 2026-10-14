@@ -232,6 +232,25 @@ connection succeeded but no usable model provider is configured on the server.
 An unavailable skill usually means its required MCP server or tools are not
 configured there.
 
+### Shell sandbox
+
+`PIZZA_SANDBOX=smolvm` gives the agent an `execute` tool that runs commands in
+a [smolvm](https://github.com/smol-machines/smolvm) microVM, one per
+conversation, with files shared at `/workspace/`. The backend artifact does not
+bundle smolvm: install a release on the host and point `PIZZA_SMOLVM_DIR` at
+the unpacked directory, or `PIZZA_SMOLVM_BIN` at a `smolvm` on another path.
+Linux hosts need read/write access to `/dev/kvm`. smolvm keeps VM disks under
+the service user's `~/.cache/smolvm`; on tmpfs (a `HOME` under `/tmp`, for
+example) every VM start fails with `krun_start_enter returned: -22 (EINVAL)`.
+
+| Variable | Effect |
+| --- | --- |
+| `PIZZA_SANDBOX` | `smolvm` turns the sandbox on; unset or `off` leaves it off. |
+| `PIZZA_SMOLVM_DIR` | Unpacked smolvm release directory. |
+| `PIZZA_SMOLVM_BIN` | smolvm executable, when no release directory is set. Defaults to `smolvm` on `PATH`. |
+| `PIZZA_SANDBOX_NETWORK` | `1` gives the VMs outbound network access, which also lets a prompt-injected command upload anything under `/workspace/`. |
+| `PIZZA_SANDBOX_IMAGE` | OCI image for the VMs, such as `python:3.12-alpine`. Needs `PIZZA_SANDBOX_NETWORK=1` to pull; without an image the VMs run smolvm's bundled Alpine rootfs. |
+
 ## Deploy on Linux
 
 Every example puts a TLS endpoint in front of a listener that is not otherwise
