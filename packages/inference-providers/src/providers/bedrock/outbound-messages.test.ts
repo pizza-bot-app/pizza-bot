@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { describe, it, expect, vi } from "vitest";
+import { ChatBedrockConverse } from "@langchain/aws";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import {
   endsWithCacheIncompatibleDocument,
   sanitizeBedrockDocumentName,
@@ -8,6 +9,87 @@ import {
 } from "./outbound-messages.js";
 
 describe("stripReasoningForBedrock", () => {
+  const invalidToolCall = {
+    type: "invalid_tool_call" as const,
+    id: "truncated-edit",
+    name: "edit_file",
+    args: '{"file_path":"/report.md","old_string":"unfinished',
+    error: "Failed to parse tool call arguments as JSON",
+  };
+
+  it.each([
+    ["v1, with reasoning", { output_version: "v1" }, true],
+    ["v1, without reasoning", { output_version: "v1" }, false],
+    ["legacy, without reasoning", {}, false],
+  ])(
+    "omits an incomplete tool-only turn from the real Converse payload (%s)",
+    async (_label, outputVersion, withReasoning) => {
+      const content = [
+        ...(withReasoning ? [{ type: "reasoning", reasoning: "" }] : []),
+        invalidToolCall,
+      ];
+      const truncated = new AIMessage({
+        content: content as unknown as string,
+        response_metadata: { ...outputVersion, model_provider: "bedrock-converse", finish_reason: "length" },
+      });
+      const model = new ChatBedrockConverse({
+        model: "global.anthropic.claude-sonnet-5",
+        region: "us-west-2",
+        credentials: { accessKeyId: "test", secretAccessKey: "test" },
+      });
+      let request: unknown;
+      vi.spyOn(model.client, "send").mockImplementation(async (command) => {
+        request = command.input;
+        return { output: { message: { role: "assistant", content: [{ text: "Resuming." }] } } };
+      });
+
+      await model.invoke(stripReasoningForBedrock([
+        new HumanMessage("Edit the report."),
+        truncated,
+        new HumanMessage("retry"),
+      ]));
+
+      expect(request).toMatchObject({
+        messages: [
+          { role: "user", content: [{ text: "Edit the report." }] },
+          { role: "user", content: [{ text: "retry" }] },
+        ],
+      });
+      expect(truncated.content).toEqual(content);
+      expect(truncated.response_metadata.finish_reason).toBe("length");
+    },
+  );
+
+  it("preserves visible text beside an invalid tool call without mutating history", () => {
+    const content = [
+      { type: "text", text: "Editing the report." },
+      invalidToolCall,
+    ];
+    const message = new AIMessage({ content, response_metadata: { output_version: "v1" } });
+
+    const [output] = stripReasoningForBedrock([message]);
+
+    expect(output!.content).toEqual([{ type: "text", text: "Editing the report." }]);
+    expect(message.content).toEqual(content);
+  });
+
+  it("preserves valid tool calls and their results beside an invalid tool call", () => {
+    const toolCall = { type: "tool_call" as const, id: "read-1", name: "read_file", args: { file_path: "/report.md" } };
+    const message = new AIMessage({
+      content: [invalidToolCall, toolCall],
+      response_metadata: { output_version: "v1" },
+      tool_calls: [toolCall],
+    });
+    const result = new ToolMessage({ tool_call_id: "read-1", content: "Report contents" });
+
+    const output = stripReasoningForBedrock([message, result]);
+
+    expect(output[0]!.content).toEqual([toolCall]);
+    expect((output[0] as AIMessage).tool_calls).toEqual([toolCall]);
+    expect(output[1]).toBe(result);
+    expect(message.content).toEqual([invalidToolCall, toolCall]);
+  });
+
   it("removes a v1 `reasoning` block (the shape the createAgent path emits)", () => {
     const msg = new AIMessage({
       content: [
