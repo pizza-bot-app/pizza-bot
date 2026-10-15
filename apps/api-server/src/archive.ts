@@ -43,13 +43,6 @@ export async function readZipArchive(
   }
 
   const zip = await openZip(Buffer.from(bytes));
-  if (zip.entryCount > limits.maxFiles) {
-    zip.close();
-    throw new ArchiveError(
-      "too_many_files",
-      `The archive contains more than ${limits.maxFiles} entries.`,
-    );
-  }
 
   return new Promise<ArchiveFile[]>((resolve, reject) => {
     const files: ArchiveFile[] = [];
@@ -78,6 +71,13 @@ export async function readZipArchive(
         }
         if (path.endsWith("/") || isMetadataNoise(path)) {
           zip.readEntry();
+          return;
+        }
+        if (files.length >= limits.maxFiles) {
+          fail(new ArchiveError(
+            "too_many_files",
+            `The archive contains more than ${limits.maxFiles} files.`,
+          ));
           return;
         }
         const collisionKey = path.toLowerCase();

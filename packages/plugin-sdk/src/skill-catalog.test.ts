@@ -261,6 +261,36 @@ describe("loadUserSkills", () => {
     expect(logs.some((l) => l.includes("nodesc"))).toBe(true);
   });
 
+  it.each(["interruptOn", "tools"])("skips malformed %s YAML in every catalog source", async (field) => {
+    const dir = await seedUserSkills([
+      {
+        id: "hitl-probe",
+        frontmatter: [
+          "name: hitl-probe",
+          "description: Probe.",
+          field === "interruptOn"
+            ? "tools: [mcp:mcp-status:get_mcp_status]\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true\n  note: a: b"
+            : "tools: [mcp:mcp-status:get_mcp_status\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true",
+        ].join("\n"),
+        body: "# Probe",
+      },
+      { id: "valid", frontmatter: "name: valid\ndescription: Valid skill." },
+    ]);
+    const reg = new ContributionRegistry();
+    reg.registerSkill("test", dir, "hitl-probe", join(dir, "hitl-probe"));
+    reg.registerSkill("test", dir, "valid", join(dir, "valid"));
+
+    const catalogs = await Promise.all([
+      loadUserSkills(dir),
+      loadBuiltinSkills(dir),
+      loadSkillCatalog(reg),
+    ]);
+
+    catalogs.forEach((catalog) => {
+      expect([...catalog.keys()]).toEqual(["valid"]);
+    });
+  });
+
   it("falls back to the directory basename when name is absent", async () => {
     const dir = await seedUserSkills([{ id: "unnamed", frontmatter: "description: has no name" }]);
     expect((await loadUserSkills(dir)).get("unnamed")?.name).toBe("unnamed");

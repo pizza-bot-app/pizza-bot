@@ -129,7 +129,10 @@ describe("ApiClient", () => {
     expect(captured.body).toEqual({ prompt: "summarize my open tickets" });
   });
 
-  it("importSkill uploads multipart ZIP data and returns the imported bundle", async () => {
+  it.each([
+    { filename: "review-change.zip", type: "application/zip" },
+    { filename: "SKILL.md", type: "text/markdown" },
+  ])("importSkill uploads $filename and returns the imported bundle", async ({ filename, type }) => {
     const captured: { url?: string; method?: string | undefined; body?: unknown } = {};
     const imported = {
       id: "review-change",
@@ -150,7 +153,7 @@ describe("ApiClient", () => {
         return new Response(JSON.stringify(imported), { status: 201 });
       }) as unknown as typeof fetch,
     });
-    const file = new File(["zip"], "review-change.zip", { type: "application/zip" });
+    const file = new File(["skill"], filename, { type });
 
     await expect(client.importSkill(file)).resolves.toEqual(imported);
     expect(captured.url).toBe("http://x/skills/import");

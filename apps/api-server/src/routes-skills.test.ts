@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,7 @@ import {
 import type { AgentHost } from "./agent-host.js";
 import { skillRoutes } from "./routes-skills.js";
 import { storedZip } from "./test-utils/stored-zip.js";
-import { MAX_SKILL_ARCHIVE_BYTES } from "./skill-import.js";
+import { MAX_SKILL_UPLOAD_BYTES } from "./skill-import.js";
 import { multipartRequestLimit } from "./request-limits.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -80,7 +80,7 @@ describe("skill routes", () => {
     const response = await app.request("/skills/import", {
       method: "POST",
       headers: {
-        "content-length": String(multipartRequestLimit(MAX_SKILL_ARCHIVE_BYTES) + 1),
+        "content-length": String(multipartRequestLimit(MAX_SKILL_UPLOAD_BYTES) + 1),
         "content-type": "multipart/form-data; boundary=test",
       },
       body: "--test--",
@@ -126,24 +126,178 @@ describe("skill routes", () => {
       .toEqual(png);
   });
 
-  it("does not overwrite an existing custom skill during import", async () => {
+  it.each(["zip", "md"])("does not overwrite an existing custom skill during %s import", async (extension) => {
     const { app, skillsDir } = await fixture();
     const dir = join(skillsDir, "review-change");
     await mkdir(dir);
     await writeFile(join(dir, "SKILL.md"), "original", "utf8");
     const form = new FormData();
+    const content = "---\nname: review-change\ndescription: Review a change.\n---\n\n# Review\n";
     form.set("file", new File([
-      storedZip([{
-        path: "review-change/SKILL.md",
-        content: "---\nname: review-change\ndescription: Review a change.\n---\n\n# Review\n",
-      }]),
-    ], "review-change.zip", { type: "application/zip" }));
+      extension === "zip" ? storedZip([{ path: "review-change/SKILL.md", content }]) : content,
+    ], `review-change.${extension}`));
 
     const response = await app.request("/skills/import", { method: "POST", body: form });
 
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: "already_exists" });
     expect(await readFile(join(dir, "SKILL.md"), "utf8")).toBe("original");
+  });
+
+  it.each([
+    { filename: "SKILL.md", type: "text/markdown" },
+    { filename: "different-name.md", type: "" },
+    { filename: "REVIEW.MD", type: "application/octet-stream" },
+    { filename: "review.markdown", type: "text/markdown" },
+    { filename: "REVIEW.MARKDOWN", type: "" },
+  ])("imports $filename and reloads it into the catalog", async ({ filename, type }) => {
+    const { app, skillsDir } = await realPluginFixture();
+    await rm(skillsDir, { recursive: true });
+    const content = "---\nname: imported-review\ndescription: Review a change.\nlicense: MIT\n---\n\n# Review\n";
+    const form = new FormData();
+    form.set("file", new File([content], filename, { type }));
+
+    const response = await app.request("/skills/import", { method: "POST", body: form });
+
+    expect(response.status).toBe(201);
+    const imported = await response.json();
+    expect(imported).toMatchObject({
+      id: "imported-review",
+      name: "imported-review",
+      description: "Review a change.",
+      body: "# Review\n",
+      files: [],
+      source: "user",
+    });
+    expect(await readFile(join(skillsDir, "imported-review", "SKILL.md"), "utf8")).toBe(content);
+    const loaded = await app.request("/skills/imported-review");
+    expect(loaded.status).toBe(200);
+    expect(await loaded.json()).toEqual(imported);
+  });
+
+  it.each([
+    { extension: "md", newline: "\n" },
+    { extension: "md", newline: "\r\n" },
+    { extension: "zip", newline: "\n" },
+    { extension: "zip", newline: "\r\n" },
+  ])("loads a BOM-prefixed skill from $extension with newline $newline", async ({ extension, newline }) => {
+    const { app, skillsDir } = await realPluginFixture();
+    const body = `# Review${newline}${newline}Inspect the diff.${newline}`;
+    const content = "\uFEFF" + [
+      "---",
+      "name: bom-review",
+      "description: Review a change.",
+      "license: MIT",
+      "tools: [mcp:mcp-status:get_mcp_status]",
+      "interruptOn:",
+      "  mcp:mcp-status:get_mcp_status: true",
+      "---",
+      "",
+      body,
+    ].join(newline);
+    const form = new FormData();
+    form.set("file", new File([
+      extension === "zip" ? storedZip([{ path: "bom-review/SKILL.md", content }]) : content,
+    ], `review.${extension}`));
+
+    const response = await app.request("/skills/import", { method: "POST", body: form });
+
+    expect(response.status).toBe(201);
+    const imported = await response.json();
+    const loaded = await app.request("/skills/bom-review");
+    expect(loaded.status).toBe(200);
+    expect(await loaded.json()).toEqual(imported);
+    expect(imported).toMatchObject({
+      id: "bom-review",
+      description: "Review a change.",
+      body,
+      declaredTools: ["mcp:mcp-status:get_mcp_status"],
+      interruptOn: { "mcp:mcp-status:get_mcp_status": true },
+    });
+    expect(await readFile(join(skillsDir, "bom-review", "SKILL.md"))).toEqual(Buffer.from(content));
+  });
+
+  it("returns Markdown validation details", async () => {
+    const { app } = await fixture();
+    const form = new FormData();
+    form.set("file", new File(["# No frontmatter"], "skill.md"));
+
+    const response = await app.request("/skills/import", { method: "POST", body: form });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "invalid_skill_md",
+      detail: "SKILL.md frontmatter must include a name.",
+    });
+  });
+
+  it.each(["md", "zip"])("imports malformed YAML from %s and reloads it without rewriting", async (extension) => {
+    const { app, skillsDir } = await realPluginFixture();
+    const content = [
+      "---",
+      "name: imported-review",
+      "description: Review changes: report actionable findings.",
+      "tools:",
+      "  - mcp:mcp-status:get_mcp_status",
+      "interruptOn:",
+      "  mcp:mcp-status:get_mcp_status: true",
+      "---",
+      "# Review",
+    ].join("\n");
+    const form = new FormData();
+    form.set("file", new File([
+      extension === "zip" ? storedZip([{ path: "8a14e7/SKILL.md", content }]) : content,
+    ], `review.${extension}`));
+
+    const response = await app.request("/skills/import", { method: "POST", body: form });
+
+    expect(response.status).toBe(201);
+    const imported = await response.json();
+    expect(imported).toMatchObject({
+      id: "imported-review",
+      description: "Review changes: report actionable findings.",
+      body: "# Review",
+      declaredTools: ["mcp:mcp-status:get_mcp_status"],
+      interruptOn: { "mcp:mcp-status:get_mcp_status": true },
+    });
+    expect(await readFile(join(skillsDir, "imported-review", "SKILL.md"), "utf8")).toBe(content);
+    const loaded = await app.request("/skills/imported-review");
+    expect(loaded.status).toBe(200);
+    expect(await loaded.json()).toEqual(imported);
+  });
+
+  it.each([
+    { extension: "md", field: "interruptOn" },
+    { extension: "zip", field: "interruptOn" },
+    { extension: "md", field: "tools" },
+    { extension: "zip", field: "tools" },
+  ])("rejects $extension imports with malformed $field YAML before writing files", async ({ extension, field }) => {
+    const { app, skillsDir } = await realPluginFixture();
+    const content = [
+      "---",
+      "name: hitl-probe",
+      "description: Probe.",
+      field === "interruptOn"
+        ? "tools: [mcp:mcp-status:get_mcp_status]\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true\n  note: a: b"
+        : "tools: [mcp:mcp-status:get_mcp_status\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true",
+      "---",
+      "",
+      "# Probe",
+    ].join("\n");
+    const form = new FormData();
+    form.set("file", new File([
+      extension === "zip" ? storedZip([{ path: "hitl-probe/SKILL.md", content }]) : content,
+    ], `probe.${extension}`));
+
+    const response = await app.request("/skills/import", { method: "POST", body: form });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "invalid_skill_md",
+      detail: expect.stringContaining("frontmatter contains invalid YAML:"),
+    });
+    expect(await readdir(skillsDir)).toEqual([]);
+    expect((await app.request("/skills/hitl-probe")).status).toBe(404);
   });
 
   it("creates recursive bundle files without flattening their paths", async () => {

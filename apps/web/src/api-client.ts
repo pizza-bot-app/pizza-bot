@@ -257,7 +257,7 @@ export class ApiClient {
     return this.json("create skill", "/skills", { method: "POST", body: bundle });
   }
 
-  /** Imports an Agent Skills bundle from ZIP as a custom skill. */
+  /** Imports a Markdown or ZIP skill file as a custom skill. */
   async importSkill(file: File): Promise<SkillBundle> {
     const form = new FormData();
     form.set("file", file);

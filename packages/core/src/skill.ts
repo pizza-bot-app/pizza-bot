@@ -74,7 +74,7 @@ const BINARY_SKILL_MIME_TYPES: Readonly<Record<string, string>> = {
  * This must stay aligned with the catalog loader's frontmatter parsing.
  */
 export function splitSkillMd(raw: string): { frontmatter: string; body: string } {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
+  const match = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
   if (!match) return { frontmatter: "", body: raw };
   return { frontmatter: match[1]!, body: raw.slice(match[0].length).replace(/^\r?\n/, "") };
 }

@@ -139,8 +139,8 @@ describe("skillMcpServerIds", () => {
 });
 
 describe("splitSkillMd / composeSkillMd", () => {
-  it("splits frontmatter from body", () => {
-    const raw = "---\nname: x\ndescription: does x\n---\n\n# Body\n\nstep 1\n";
+  it.each(["", "\uFEFF"])("splits frontmatter from body with prefix %j", (prefix) => {
+    const raw = `${prefix}---\nname: x\ndescription: does x\n---\n\n# Body\n\nstep 1\n`;
     const { frontmatter, body } = splitSkillMd(raw);
     expect(frontmatter).toBe("name: x\ndescription: does x");
     expect(body).toBe("# Body\n\nstep 1\n");
