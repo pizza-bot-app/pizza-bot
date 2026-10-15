@@ -7,10 +7,10 @@ function withContent(msg: BaseMessage, content: unknown): BaseMessage {
   return clone;
 }
 
-function isReasoningBlock(block: unknown): boolean {
+function isUnreplayableBlock(block: unknown): boolean {
   if (typeof block !== "object" || block === null) return false;
   const t = (block as { type?: unknown }).type;
-  return t === "reasoning_content" || t === "reasoning";
+  return t === "reasoning_content" || t === "reasoning" || t === "invalid_tool_call";
 }
 
 function toolCallsOf(msg: BaseMessage): Array<{
@@ -35,21 +35,23 @@ function toolCallsOf(msg: BaseMessage): Array<{
 }
 
 /**
- * Bedrock validates `reasoning` signatures against the model that issued them, so
- * history from another provider (unsigned or foreign-signed) is rejected with a
- * 400. Strip from provider input only, preserving checkpoint display and tool calls.
+ * @langchain/aws@1.4.2 drops reasoning signatures while converting native v3
+ * streams to v1 history, so Bedrock rejects replayed `reasoning` and
+ * `reasoning_content` blocks (langchainjs#11164 and #11246). Invalid tool calls
+ * are also stripped before the empty-message check because Converse drops them.
+ * Checkpoint display and valid tool calls are preserved.
  */
 export function stripReasoningForBedrock(messages: BaseMessage[]): BaseMessage[] {
   let rewritten: BaseMessage[] | undefined;
   for (let index = 0; index < messages.length; index += 1) {
     const msg = messages[index]!;
-    if (!Array.isArray(msg.content) || !msg.content.some(isReasoningBlock)) {
+    if (!Array.isArray(msg.content) || !msg.content.some(isUnreplayableBlock)) {
       rewritten?.push(msg);
       continue;
     }
 
     rewritten ??= messages.slice(0, index);
-    let content = msg.content.filter((block) => !isReasoningBlock(block));
+    let content = msg.content.filter((block) => !isUnreplayableBlock(block));
     const type = typeof msg.getType === "function" ? msg.getType() : "";
     const toolCalls = type === "ai" ? toolCallsOf(msg) : [];
     if (
