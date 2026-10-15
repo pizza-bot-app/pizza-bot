@@ -52,7 +52,6 @@ export function ActivityRail({
                     batch={b}
                     threadId={threadId}
                     baseDepth={baseDepth}
-                    runSettled={!isRunning}
                   />
                 ) : (
                   <DelegationGroup
@@ -60,7 +59,6 @@ export function ActivityRail({
                     g={b.items[0]!}
                     threadId={threadId}
                     baseDepth={baseDepth}
-                    runSettled={!isRunning}
                   />
                 ),
               )}
@@ -103,12 +101,10 @@ function DelegationBatch({
   batch,
   threadId,
   baseDepth,
-  runSettled,
 }: {
   batch: Batch;
   threadId?: string | null;
   baseDepth: number;
-  runSettled: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const items = batch.items;
@@ -129,9 +125,8 @@ function DelegationBatch({
         : "completed";
   const starts = items.map((i) => i.startedAt).filter((n): n is number => n !== undefined);
   const ends = items.map((i) => i.completedAt).filter((n): n is number => n !== undefined);
-  // SDK completion timestamps can move until the parent run settles.
   const duration =
-    !runSettled || inFlight(status) || !starts.length || ends.length < items.length
+    inFlight(status) || !starts.length || ends.length < items.length
       ? undefined
       : formatDuration(Math.min(...starts), Math.max(...ends));
 
@@ -182,22 +177,20 @@ function DelegationGroup({
   threadId,
   baseDepth = 0,
   inBatch = false,
-  runSettled = false,
 }: {
   g: DelegationInfo;
   threadId?: string | null;
   baseDepth?: number;
   inBatch?: boolean;
-  runSettled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const transcript = useSubagentTranscript(threadId ?? "", g.delegationId, open && !!threadId);
   const detail = g.status === "error" ? g.errorText : outputText(g.output);
   const canExpand =
     inFlight(g.status) || (transcript?.length ?? 0) > 0 || (detail !== undefined && detail.length > 0);
-  // Batch rows own their shared duration; solo timestamps settle with the run.
+  // Batch rows own their shared duration.
   const duration =
-    inBatch || !runSettled || inFlight(g.status)
+    inBatch || inFlight(g.status)
       ? undefined
       : formatDuration(g.startedAt, g.completedAt);
   const rel = (g.depth ?? 0) - baseDepth;

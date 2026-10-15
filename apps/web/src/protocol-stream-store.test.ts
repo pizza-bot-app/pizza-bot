@@ -614,6 +614,35 @@ describe("ProtocolStreamStore steering-enqueue", () => {
     });
   });
 
+  it("keeps a delegation's first completion time when later frames re-stamp it", async () => {
+    await store.attach(TID, false);
+    const subagent = (completedAt: Date) => new Map([[
+      "task-1",
+      {
+        id: "task-1",
+        name: "mail-assistant",
+        status: "complete",
+        taskInput: "send the note",
+        namespace: [],
+        parentId: null,
+        depth: 0,
+        startedAt: new Date(1_000),
+        completedAt,
+      },
+    ]]);
+    last.isLoading = true;
+    last.subagents = subagent(new Date(4_000));
+    last.notify();
+
+    last.subagents = subagent(new Date(600_000));
+    last.notify();
+
+    expect(store.getSlice(TID).delegations["task-1"]).toMatchObject({
+      startedAt: 1_000,
+      completedAt: 4_000,
+    });
+  });
+
   it("marks an in-flight delegation as awaiting input while an approval is pending", async () => {
     await store.attach(TID, false);
     last.subagents = new Map([[
