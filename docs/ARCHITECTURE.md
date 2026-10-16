@@ -735,8 +735,11 @@ not that path. Its limitations are explicit:
 - the adapter overrides protected LangChain methods (`_generate`,
   `_streamResponseChunks`, `_streamChatModelEvents`), so provider upgrades must
   typecheck and exercise all three paths;
-- remove the subclass and `stripReasoningForBedrock` once native-v3 conversion
-  preserves and replays signatures correctly (track langchainjs#11164/#11246).
+- remove the reasoning stripping in `stripUnreplayableBlocksForBedrock` once
+  native-v3 conversion preserves and replays signatures correctly (track
+  langchainjs#11164/#11246). The same function also drops invalid tool calls,
+  which Converse cannot replay, and assistant turns left with no content; that
+  part does not depend on those issues.
 
 A provider-configuration UI ships in Settings (`ProvidersSettings.tsx`): a
 declarative auth-field schema per provider renders a generic config form, and
