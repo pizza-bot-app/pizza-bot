@@ -1,27 +1,50 @@
 name: Build backend image
 description: >-
-  Builds both backend container image targets and smokes them, leaving
-  pizza-bot-backend:candidate loaded locally for a caller that wants to push it.
+  Builds both backend container image targets for the runner's own architecture
+  and smokes them, then optionally pushes the backend image by digest for a
+  caller that merges the architectures into one tagged index.
 
 # A composite action rather than a reusable workflow: a job that calls a reusable
 # workflow reports its checks as `<caller> / <callee>`, which would not match the
 # branch protection contexts.
+#
+# Single-platform on purpose. A multi-platform build cannot be loaded into the
+# local daemon, and the smokes below need it loaded; running each architecture on
+# its own runner also means every published image was smoked on its own hardware
+# rather than built under emulation and never run.
 
 inputs:
   cache-to:
     description: >-
       Buildx cache export, empty to only read. A pull request's cache entry is
       scoped to its own ref and evicted with it, so only main and releases write.
+      The action appends a per-architecture `scope`, so pass a `type=gha` value.
     required: false
     default: ""
+  push-image:
+    description: >-
+      Registry image to push the backend image to by digest, untagged, after
+      every smoke has passed. Empty pushes nothing. The caller must be logged in.
+    required: false
+    default: ""
+  labels:
+    description: Labels for the pushed image, one per line.
+    required: false
+    default: ""
+
+outputs:
+  digest:
+    description: Digest of the pushed backend image, empty when nothing was pushed.
+    value: ${{ steps.push.outputs.digest }}
 
 runs:
   using: composite
   steps:
     - uses: docker/setup-buildx-action@v4
 
-    # Loading the candidate locally means the smokes below and anything the
-    # caller pushes resolve the same layers.
+    # Loading the candidate locally means the smokes below and the push at the
+    # end resolve the same layers. The cache is scoped per architecture because
+    # the legs run in parallel and would otherwise overwrite each other's entry.
     - name: Build backend image
       uses: docker/build-push-action@v7
       with:
@@ -29,8 +52,8 @@ runs:
         target: runtime
         load: true
         tags: pizza-bot-backend:candidate
-        cache-from: type=gha
-        cache-to: ${{ inputs.cache-to }}
+        cache-from: type=gha,scope=backend-image-${{ runner.arch }}
+        cache-to: ${{ inputs.cache-to != '' && format('{0},scope=backend-image-{1}', inputs.cache-to, runner.arch) || '' }}
 
     - name: Smoke backend image
       shell: bash
@@ -56,8 +79,8 @@ runs:
         target: runtime-with-browser
         load: true
         tags: pizza-bot-backend-browser:candidate
-        cache-from: type=gha
-        cache-to: ${{ inputs.cache-to }}
+        cache-from: type=gha,scope=backend-image-${{ runner.arch }}
+        cache-to: ${{ inputs.cache-to != '' && format('{0},scope=backend-image-{1}', inputs.cache-to, runner.arch) || '' }}
 
     - name: Smoke Playwright in browser-enabled image
       shell: bash
@@ -66,3 +89,17 @@ runs:
         --volume "$PWD/scripts:/smoke:ro"
         pizza-bot-backend-browser:candidate
         node /smoke/smoke-playwright-mcp.mjs /opt/pizza-bot
+
+    # Last, so nothing reaches the registry unless every smoke above passed. The
+    # builder still holds the layers the smokes ran, so this reuses them rather
+    # than rebuilding. Untagged: the caller's merge step names the index.
+    - name: Push backend image by digest
+      id: push
+      if: inputs.push-image != ''
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        target: runtime
+        labels: ${{ inputs.labels }}
+        outputs: type=image,name=${{ inputs.push-image }},push-by-digest=true,name-canonical=true,push=true
+        cache-from: type=gha,scope=backend-image-${{ runner.arch }}
