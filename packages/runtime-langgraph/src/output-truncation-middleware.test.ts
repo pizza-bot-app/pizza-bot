@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AIMessage,
   HumanMessage,
+  RemoveMessage,
+  SystemMessage,
   type AIMessageFields,
   type BaseMessage,
 } from "@langchain/core/messages";
@@ -11,8 +13,9 @@ import { TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
 import {
   OUTPUT_TRUNCATION_NOTICE,
   isTruncatedTurn,
+  MAX_CUT_OFF_RETRIES,
   outputTruncationMiddleware,
-  toolCallCutOffNotice,
+  toolCallCutOffInstruction,
   truncatedTurnMiddleware,
 } from "./output-truncation-middleware.js";
 
@@ -256,11 +259,21 @@ describe("isTruncatedTurn", () => {
 });
 
 describe("truncatedTurnMiddleware", () => {
+  interface HookState {
+    messages: BaseMessage[];
+    cutOffRetries?: number;
+  }
+  interface ModelRequestLike {
+    messages: BaseMessage[];
+    systemMessage: SystemMessage;
+    state: { cutOffToolCalls?: string[] };
+  }
   const middleware = truncatedTurnMiddleware() as unknown as {
     beforeAgent: () => Record<string, unknown>;
-    afterModel: (state: { messages: unknown[] }) => Record<string, unknown>;
-    wrapModelCall: (request: TestRequest, handler: Handler) => Promise<AIMessage>;
+    afterModel: { canJumpTo: string[]; hook: (state: HookState) => Record<string, unknown> };
+    wrapModelCall: (request: ModelRequestLike, handler: (r: ModelRequestLike) => Promise<AIMessage>) => Promise<AIMessage>;
   };
+  const afterModel = (state: HookState) => middleware.afterModel.hook(state);
   const cutOffEdit = {
     type: "invalid_tool_call",
     id: "call-1",
@@ -268,85 +281,109 @@ describe("truncatedTurnMiddleware", () => {
     args: '{"file_path":"/report.md","old_string":"unfinished',
     error: "Failed to parse tool call arguments as JSON",
   };
-  const callModel = (response: AIMessage) =>
-    middleware.wrapModelCall({ messages: [new HumanMessage("edit")] }, async () => response);
-
-  it("tells the agent which tool call was cut off and did not run", async () => {
-    const reasoning = { type: "reasoning", reasoning: "" };
-    const response = new AIMessage({
-      content: [reasoning, cutOffEdit],
+  const cutOffTurn = (fields: Partial<AIMessageFields> = {}) =>
+    new AIMessage({
+      id: "ai-1",
+      content: [{ type: "reasoning", reasoning: "" }, cutOffEdit],
       response_metadata: { finish_reason: "length", output_version: "v1" },
+      ...fields,
     } as unknown as AIMessageFields);
 
-    const result = await callModel(response);
+  it("removes a cut-off tool-call turn and sends the model back", () => {
+    const update = afterModel({ messages: [new HumanMessage("edit"), cutOffTurn()], cutOffRetries: 0 });
 
-    expect(result).toBeInstanceOf(AIMessage);
-    expect(result.content).toEqual([
-      reasoning,
-      cutOffEdit,
-      { type: "text", text: toolCallCutOffNotice(["edit_file"]) },
-    ]);
-    expect(toolCallCutOffNotice(["edit_file"])).toContain("`edit_file`");
-    expect(result.response_metadata).toBe(response.response_metadata);
-    expect(response.content).toEqual([reasoning, cutOffEdit]);
+    expect(middleware.afterModel.canJumpTo).toEqual(["model"]);
+    expect(update).toMatchObject({
+      jumpTo: "model",
+      cutOffRetries: 1,
+      cutOffToolCalls: ["edit_file"],
+      [TRUNCATED_TURN_CHANNEL]: false,
+    });
+    const [removal] = update.messages as BaseMessage[];
+    expect(RemoveMessage.isInstance(removal)).toBe(true);
+    expect(removal!.id).toBe("ai-1");
   });
 
-  it("recognizes a cut-off call carried only on invalid_tool_calls", async () => {
-    const response = new AIMessage({
+  it("recognizes a cut-off call carried only on invalid_tool_calls", () => {
+    const turn = new AIMessage({
+      id: "ai-1",
       content: "",
       response_metadata: { stop_reason: "max_tokens" },
       invalid_tool_calls: [{ id: "call-1", name: "write_file", args: '{"content":"', error: "bad json" }],
     });
 
-    const result = await callModel(response);
+    expect(afterModel({ messages: [turn] })).toMatchObject({ jumpTo: "model", cutOffToolCalls: ["write_file"] });
+  });
 
-    expect(result.content).toBe(toolCallCutOffNotice(["write_file"]));
+  it(`stops retrying after ${MAX_CUT_OFF_RETRIES} attempts and shows the banner`, () => {
+    const update = afterModel({ messages: [cutOffTurn()], cutOffRetries: MAX_CUT_OFF_RETRIES });
+
+    expect(update).not.toHaveProperty("jumpTo");
+    expect(update).not.toHaveProperty("messages");
+    expect(update[TRUNCATED_TURN_CHANNEL]).toBe(true);
+  });
+
+  it("shows the banner past the cap even when some text arrived with the cut-off call", () => {
+    const turn = cutOffTurn({ content: [{ type: "text", text: "Editing the report." }, cutOffEdit] } as Partial<AIMessageFields>);
+
+    expect(afterModel({ messages: [turn], cutOffRetries: MAX_CUT_OFF_RETRIES })[TRUNCATED_TURN_CHANNEL]).toBe(true);
   });
 
   it.each([
-    [
-      "a cut-off reply with no tool call",
-      new AIMessage({ content: "partial", response_metadata: { finish_reason: "length" } }),
-    ],
+    ["a cut-off reply with no tool call", new AIMessage({ id: "a", content: "partial", response_metadata: { finish_reason: "length" } })],
     [
       "an invalid tool call that did not hit the limit",
-      new AIMessage({
-        content: [cutOffEdit],
-        response_metadata: { finish_reason: "stop", output_version: "v1" },
-      } as unknown as AIMessageFields),
+      new AIMessage({ id: "a", content: [cutOffEdit], response_metadata: { finish_reason: "stop", output_version: "v1" } } as unknown as AIMessageFields),
     ],
     [
       "a length-limited turn that still has a valid tool call",
       new AIMessage({
+        id: "a",
         content: "",
         response_metadata: { finish_reason: "length" },
         tool_calls: [{ id: "call-2", name: "read_file", args: {} }],
         invalid_tool_calls: [{ id: "call-1", name: "edit_file", args: "{", error: "bad json" }],
       }),
     ],
-  ])("passes %s through unchanged", async (_label, response) => {
-    await expect(callModel(response)).resolves.toBe(response);
+  ])("does not retry %s", (_label, turn) => {
+    const update = afterModel({ messages: [turn] });
+
+    expect(update).not.toHaveProperty("jumpTo");
+    expect(update).not.toHaveProperty("messages");
   });
 
-  it("keeps the truncated-turn flag set after the notice is appended", async () => {
-    const response = await callModel(new AIMessage({
-      content: [{ type: "text", text: "Editing the report." }, cutOffEdit],
-      response_metadata: { finish_reason: "length", output_version: "v1" },
-    } as unknown as AIMessageFields));
+  it("adds the hidden instruction to the system prompt only while a retry is pending", async () => {
+    const seen: ModelRequestLike[] = [];
+    const handler = async (request: ModelRequestLike) => {
+      seen.push(request);
+      return new AIMessage("ok");
+    };
+    const base = { messages: [new HumanMessage("edit")], systemMessage: new SystemMessage("Base prompt.") };
 
-    expect(isTruncatedTurn(response)).toBe(true);
+    await middleware.wrapModelCall({ ...base, state: { cutOffToolCalls: ["edit_file"] } }, handler);
+    await middleware.wrapModelCall({ ...base, state: { cutOffToolCalls: [] } }, handler);
+
+    expect(seen[0]!.systemMessage.text).toContain("Base prompt.");
+    expect(seen[0]!.systemMessage.text).toContain(toolCallCutOffInstruction(["edit_file"]));
+    expect(seen[1]!.systemMessage.text).toBe("Base prompt.");
   });
 
-  it("clears the flag when a run starts", () => {
-    expect(middleware.beforeAgent()).toEqual({ [TRUNCATED_TURN_CHANNEL]: false });
+  it("clears the flag and the retry budget when a run starts", () => {
+    expect(middleware.beforeAgent()).toEqual({
+      [TRUNCATED_TURN_CHANNEL]: false,
+      cutOffRetries: 0,
+      cutOffToolCalls: [],
+    });
   });
 
   it("writes the flag from the latest model reply on every call, false included", () => {
-    expect(middleware.afterModel({ messages: [new HumanMessage("go"), reasoningOnly("length")] })).toEqual({
+    expect(afterModel({ messages: [new HumanMessage("go"), reasoningOnly("length")] })).toEqual({
       [TRUNCATED_TURN_CHANNEL]: true,
+      cutOffToolCalls: [],
     });
-    expect(middleware.afterModel({ messages: [new HumanMessage("go"), new AIMessage("done")] })).toEqual({
+    expect(afterModel({ messages: [new HumanMessage("go"), new AIMessage("done")] })).toEqual({
       [TRUNCATED_TURN_CHANNEL]: false,
+      cutOffToolCalls: [],
     });
   });
 });

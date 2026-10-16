@@ -722,6 +722,13 @@ notice in the task result so Pizza Bot can distinguish incomplete delegated work
 from a completed result. The subagent does not retry the model call, and this
 behavior is not installed on Pizza Bot itself.
 
+Pizza Bot handles one output-limit case silently: a reply cut off while writing
+a tool call leaves an invalid call that never ran. The cut-off turn is removed
+from state, and the model is asked again in the same run with a transient
+system-prompt instruction to use smaller calls. Nothing is shown to the user
+unless the retry is cut off too; after two retries the turn ends with the
+truncated-turn banner.
+
 The Bedrock Converse shim subclasses `ChatBedrockConverse` and strips prior
 reasoning blocks only at its three model-call entry points. This is intentionally below
 DeepAgents: Pizza Bot and all subagents use ordinary initialized LangChain
