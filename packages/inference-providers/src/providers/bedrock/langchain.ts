@@ -23,7 +23,7 @@ import {
   dropBlankTextBlocksForBedrock,
   endsWithCacheIncompatibleDocument,
   sanitizeDocumentNamesForBedrock,
-  stripReasoningForBedrock,
+  stripUnreplayableBlocksForBedrock,
 } from "./outbound-messages.js";
 import { repairEmptyToolCallEvent, repairEmptyToolCalls } from "./tool-call-fix.js";
 import { normalizeMultimodalToolResultsForBedrock } from "./multimodal-fix.js";
@@ -386,7 +386,9 @@ export class BedrockLangChainModelProvider implements ModelProvider {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       private outbound(messages: BaseMessage[], options: any): [BaseMessage[], any] {
         const rewritten = normalizeMultimodalToolResultsForBedrock(
-          sanitizeDocumentNamesForBedrock(stripReasoningForBedrock(dropBlankTextBlocksForBedrock(messages))),
+          sanitizeDocumentNamesForBedrock(
+            stripUnreplayableBlocksForBedrock(dropBlankTextBlocksForBedrock(messages)),
+          ),
         );
         if (options?.cache_control && endsWithCacheIncompatibleDocument(rewritten)) {
           const { cache_control: _dropped, ...rest } = options;

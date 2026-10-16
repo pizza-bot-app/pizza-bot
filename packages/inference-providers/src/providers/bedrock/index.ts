@@ -4,7 +4,7 @@ export { type BedrockProviderOptions } from "./models.js";
 export { discoverAwsProfiles } from "./aws-profiles.js";
 export {
   endsWithCacheIncompatibleDocument,
-  stripReasoningForBedrock,
+  stripUnreplayableBlocksForBedrock,
   sanitizeBedrockDocumentName,
   sanitizeDocumentNamesForBedrock,
 } from "./outbound-messages.js";
