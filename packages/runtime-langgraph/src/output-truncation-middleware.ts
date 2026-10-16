@@ -1,5 +1,5 @@
-/** Two policies for a model reply that stops at the output-token limit: a notice the agent reads (subagents), a state flag the human sees (orchestrator). */
-import { AIMessage, type BaseMessage } from "@langchain/core/messages";
+/** Two policies for a model reply that stops at the output-token limit: a notice the agent reads (subagents), and for the orchestrator a silent retry of a cut-off tool call plus a state flag the human sees. */
+import { AIMessage, RemoveMessage, type BaseMessage } from "@langchain/core/messages";
 import { createMiddleware } from "langchain";
 import { z } from "zod";
 import { TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
@@ -8,12 +8,15 @@ export const OUTPUT_TRUNCATION_NOTICE =
   "\n\n[OUTPUT_TRUNCATED: This task result is incomplete because the worker " +
   "reached its output-token limit. Continue with another task call.]";
 
-export function toolCallCutOffNotice(toolNames: readonly string[]): string {
+export const MAX_CUT_OFF_RETRIES = 2;
+
+export function toolCallCutOffInstruction(toolNames: readonly string[]): string {
   const calls = toolNames.map((name) => `\`${name}\``).join(", ");
   return (
-    `\n\n[TOOL_CALL_CUT_OFF: Your ${calls} call was cut off at the output-token ` +
-    "limit and did not run. Retry with smaller arguments, for example by " +
-    "splitting the change across several calls.]"
+    `Your previous reply was cut off at the output-token limit while writing a ${calls} ` +
+    "call, so that call was discarded and did not run. Make the same change with " +
+    "smaller tool calls, for example by splitting it across several calls. Do not " +
+    "mention the interruption to the user."
   );
 }
 
@@ -42,13 +45,13 @@ function reachedOutputLimit(message: AIMessage): boolean {
   return false;
 }
 
-function markTruncated(message: AIMessage, notice: string): AIMessage {
+function markTruncated(message: AIMessage): AIMessage {
   const content =
     typeof message.content === "string"
-      ? message.content + notice
+      ? message.content + OUTPUT_TRUNCATION_NOTICE
       : [
           ...message.content,
-          { type: "text" as const, text: notice },
+          { type: "text" as const, text: OUTPUT_TRUNCATION_NOTICE },
         ];
   const marked = Object.create(Object.getPrototypeOf(message)) as AIMessage;
   return Object.assign(marked, message, { content });
@@ -83,13 +86,15 @@ export function outputTruncationMiddleware() {
       if (!reachedOutputLimit(response) || response.tool_calls?.length) {
         return response;
       }
-      return markTruncated(response, OUTPUT_TRUNCATION_NOTICE);
+      return markTruncated(response);
     },
   });
 }
 
 const truncatedTurnState = z.object({
   [TRUNCATED_TURN_CHANNEL]: z.boolean().optional(),
+  cutOffRetries: z.number().optional(),
+  cutOffToolCalls: z.array(z.string()).optional(),
 });
 
 /**
@@ -97,24 +102,39 @@ const truncatedTurnState = z.object({
  * snapshot replaces the whole client state, erasing anything that is not
  * state. Reset at run start so a run that never completes a model call
  * (stopped, or the model-call ceiling already spent) cannot inherit the flag.
- * A cut-off tool call also gets an agent-facing notice: providers drop the
- * invalid call on replay, so without it the next turn cannot see why nothing ran.
+ * A cut-off tool call never ran, so the turn is removed and the model asked
+ * again with a hidden instruction; only past the retry cap does the human see it.
  */
 export function truncatedTurnMiddleware() {
   return createMiddleware({
     name: "truncatedTurn",
     stateSchema: truncatedTurnState,
-    beforeAgent: () => ({ [TRUNCATED_TURN_CHANNEL]: false }),
-    wrapModelCall: async (request, handler) => {
-      const response: unknown = await handler(request);
-      if (!AIMessage.isInstance(response) || !hasCutOffToolCall(response)) {
-        return response as AIMessage;
-      }
-      return markTruncated(response, toolCallCutOffNotice(cutOffToolCallNames(response)));
+    beforeAgent: () => ({ [TRUNCATED_TURN_CHANNEL]: false, cutOffRetries: 0, cutOffToolCalls: [] }),
+    wrapModelCall: (request, handler) => {
+      const names = request.state.cutOffToolCalls;
+      if (!names?.length) return handler(request);
+      return handler({
+        ...request,
+        systemMessage: request.systemMessage.concat(toolCallCutOffInstruction(names)),
+      });
     },
-    afterModel: (state) => ({
-      [TRUNCATED_TURN_CHANNEL]: isTruncatedTurn(state.messages.at(-1)),
-    }),
+    afterModel: {
+      canJumpTo: ["model"],
+      hook: (state) => {
+        const last = state.messages.at(-1);
+        const retries = state.cutOffRetries ?? 0;
+        if (AIMessage.isInstance(last) && last.id && hasCutOffToolCall(last) && retries < MAX_CUT_OFF_RETRIES) {
+          return {
+            messages: [new RemoveMessage({ id: last.id })],
+            cutOffRetries: retries + 1,
+            cutOffToolCalls: cutOffToolCallNames(last),
+            [TRUNCATED_TURN_CHANNEL]: false,
+            jumpTo: "model",
+          };
+        }
+        return { [TRUNCATED_TURN_CHANNEL]: isTruncatedTurn(last), cutOffToolCalls: [] };
+      },
+    },
   });
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ASSISTANT_ID, PIZZA_BOT_AGENT, TRUNCATED_TURN_CHANNEL, type RunInput, type RunOptions, type ThreadState, type ThreadStateValues } from "@pizza-bot/core";
 import { createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, type AIMessageFields } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { ChatModelStreamEvent } from "@langchain/core/language_models/event";
 import { Client } from "@langchain/langgraph-sdk";
@@ -127,4 +127,39 @@ describe("a truncated orchestrator turn reaches the real SDK rootStore", () => {
     const snapshot = await runThroughRealSdk(new NativeStreamModel([plainTextTurn("All done.")]), "t-normal");
     expect((snapshot.values as ThreadStateValues)[TRUNCATED_TURN_CHANNEL]).toBe(false);
   });
+
+  it("leaves no trace of a cut-off tool call that was silently retried", async () => {
+    const snapshot = await runThroughRealSdk(
+      new NativeStreamModel([cutOffToolCallTurn(), plainTextTurn("Report updated.")]),
+      "t-cut-off",
+    );
+
+    const rendered = JSON.stringify(snapshot.messages);
+    expect(rendered).not.toContain("edit_file");
+    expect(rendered).not.toContain("unfinished");
+    expect(rendered).toContain("Report updated.");
+    expect((snapshot.values as ThreadStateValues)[TRUNCATED_TURN_CHANNEL]).toBe(false);
+    expect(snapshot.error).toBeUndefined();
+  });
 });
+
+function cutOffToolCallTurn(): ScriptedTurn {
+  const args = '{"file_path":"/report.md","old_string":"unfinished';
+  const invalid = { type: "invalid_tool_call", id: "call-1", name: "edit_file", args, error: "bad json" } as const;
+  return {
+    events: [
+      { event: "message-start" },
+      { event: "content-block-start", index: 0, content: { type: "reasoning", reasoning: "" } },
+      { event: "content-block-delta", index: 0, delta: { type: "reasoning-delta", reasoning: "Planning the edit" } },
+      { event: "content-block-finish", index: 0, content: { type: "reasoning", reasoning: "Planning the edit" } },
+      { event: "content-block-start", index: 1, content: { type: "tool_call_chunk", id: "call-1", name: "edit_file", args: "" } },
+      { event: "content-block-delta", index: 1, delta: { type: "block-delta", fields: { type: "tool_call_chunk", args } } },
+      { event: "content-block-finish", index: 1, content: invalid },
+      { event: "message-finish", reason: "length" },
+    ],
+    message: new AIMessage({
+      content: [{ type: "reasoning", reasoning: "Planning the edit" }, invalid],
+      response_metadata: { finish_reason: "length", output_version: "v1" },
+    } as unknown as AIMessageFields),
+  };
+}
