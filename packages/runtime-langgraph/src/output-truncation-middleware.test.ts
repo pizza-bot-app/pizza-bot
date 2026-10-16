@@ -12,6 +12,7 @@ import {
   OUTPUT_TRUNCATION_NOTICE,
   isTruncatedTurn,
   outputTruncationMiddleware,
+  toolCallCutOffNotice,
   truncatedTurnMiddleware,
 } from "./output-truncation-middleware.js";
 
@@ -258,7 +259,83 @@ describe("truncatedTurnMiddleware", () => {
   const middleware = truncatedTurnMiddleware() as unknown as {
     beforeAgent: () => Record<string, unknown>;
     afterModel: (state: { messages: unknown[] }) => Record<string, unknown>;
+    wrapModelCall: (request: TestRequest, handler: Handler) => Promise<AIMessage>;
   };
+  const cutOffEdit = {
+    type: "invalid_tool_call",
+    id: "call-1",
+    name: "edit_file",
+    args: '{"file_path":"/report.md","old_string":"unfinished',
+    error: "Failed to parse tool call arguments as JSON",
+  };
+  const callModel = (response: AIMessage) =>
+    middleware.wrapModelCall({ messages: [new HumanMessage("edit")] }, async () => response);
+
+  it("tells the agent which tool call was cut off and did not run", async () => {
+    const reasoning = { type: "reasoning", reasoning: "" };
+    const response = new AIMessage({
+      content: [reasoning, cutOffEdit],
+      response_metadata: { finish_reason: "length", output_version: "v1" },
+    } as unknown as AIMessageFields);
+
+    const result = await callModel(response);
+
+    expect(result).toBeInstanceOf(AIMessage);
+    expect(result.content).toEqual([
+      reasoning,
+      cutOffEdit,
+      { type: "text", text: toolCallCutOffNotice(["edit_file"]) },
+    ]);
+    expect(toolCallCutOffNotice(["edit_file"])).toContain("`edit_file`");
+    expect(result.response_metadata).toBe(response.response_metadata);
+    expect(response.content).toEqual([reasoning, cutOffEdit]);
+  });
+
+  it("recognizes a cut-off call carried only on invalid_tool_calls", async () => {
+    const response = new AIMessage({
+      content: "",
+      response_metadata: { stop_reason: "max_tokens" },
+      invalid_tool_calls: [{ id: "call-1", name: "write_file", args: '{"content":"', error: "bad json" }],
+    });
+
+    const result = await callModel(response);
+
+    expect(result.content).toBe(toolCallCutOffNotice(["write_file"]));
+  });
+
+  it.each([
+    [
+      "a cut-off reply with no tool call",
+      new AIMessage({ content: "partial", response_metadata: { finish_reason: "length" } }),
+    ],
+    [
+      "an invalid tool call that did not hit the limit",
+      new AIMessage({
+        content: [cutOffEdit],
+        response_metadata: { finish_reason: "stop", output_version: "v1" },
+      } as unknown as AIMessageFields),
+    ],
+    [
+      "a length-limited turn that still has a valid tool call",
+      new AIMessage({
+        content: "",
+        response_metadata: { finish_reason: "length" },
+        tool_calls: [{ id: "call-2", name: "read_file", args: {} }],
+        invalid_tool_calls: [{ id: "call-1", name: "edit_file", args: "{", error: "bad json" }],
+      }),
+    ],
+  ])("passes %s through unchanged", async (_label, response) => {
+    await expect(callModel(response)).resolves.toBe(response);
+  });
+
+  it("keeps the truncated-turn flag set after the notice is appended", async () => {
+    const response = await callModel(new AIMessage({
+      content: [{ type: "text", text: "Editing the report." }, cutOffEdit],
+      response_metadata: { finish_reason: "length", output_version: "v1" },
+    } as unknown as AIMessageFields));
+
+    expect(isTruncatedTurn(response)).toBe(true);
+  });
 
   it("clears the flag when a run starts", () => {
     expect(middleware.beforeAgent()).toEqual({ [TRUNCATED_TURN_CHANNEL]: false });

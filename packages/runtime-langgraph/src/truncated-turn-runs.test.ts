@@ -1,15 +1,17 @@
 /** Drives the real graph to pin that the truncated-turn flag describes the run that just finished, not the last model call ever. */
 import { describe, expect, it } from "vitest";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, type AIMessageFields, type BaseMessage } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { MemorySaver } from "@langchain/langgraph";
 import { TRUNCATED_TURN_CHANNEL, type RunInput, type RunOptions } from "@pizza-bot/core";
 import { createPizzaBotAgent, type LangGraphAgent } from "./index.js";
+import { toolCallCutOffNotice } from "./output-truncation-middleware.js";
 
 type ScriptedTurn = { message: AIMessage } | { hangUntilAbort: { onEntered: () => void } };
 
 class ScriptedModel extends BaseChatModel<Record<string, never>> {
   private i = 0;
+  readonly inputs: BaseMessage[][] = [];
 
   constructor(private readonly script: ScriptedTurn[]) {
     super({});
@@ -24,9 +26,10 @@ class ScriptedModel extends BaseChatModel<Record<string, never>> {
   }
 
   async _generate(
-    _messages: unknown,
+    messages: BaseMessage[],
     options: { signal?: AbortSignal },
   ): Promise<{ generations: Array<{ message: AIMessage; text: string }> }> {
+    this.inputs.push(messages);
     const turn = this.script[this.i++];
     if (!turn) throw new Error("unexpected model call");
     if ("hangUntilAbort" in turn) {
@@ -96,5 +99,29 @@ describe("truncated-turn flag across runs", () => {
 
     await runTurn(agent, threadId);
     expect(await truncatedFlag(agent, threadId)).toBe(false);
+  }, 30_000);
+
+  it("tells the model on the next turn that its cut-off tool call did not run", async () => {
+    const model = new ScriptedModel([
+      {
+        message: new AIMessage({
+          content: [
+            { type: "reasoning", reasoning: "" },
+            { type: "invalid_tool_call", id: "call-1", name: "edit_file", args: '{"old_string":"unfin', error: "bad json" },
+          ],
+          response_metadata: { finish_reason: "length", output_version: "v1" },
+        } as unknown as AIMessageFields),
+      },
+      { message: new AIMessage("Retrying in smaller pieces.") },
+    ]);
+    const agent = await createPizzaBotAgent("Help the user.", { model, checkpointer: new MemorySaver() });
+    const threadId = `truncated_${Math.random().toString(36).slice(2)}`;
+
+    await runTurn(agent, threadId);
+    expect(await truncatedFlag(agent, threadId)).toBe(true);
+    await runTurn(agent, threadId);
+
+    const replayedTurn = model.inputs[1]!.find((m) => AIMessage.isInstance(m));
+    expect(replayedTurn?.text).toContain(toolCallCutOffNotice(["edit_file"]).trim());
   }, 30_000);
 });
