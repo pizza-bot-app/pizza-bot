@@ -119,7 +119,7 @@ try {
   assert.equal(plugins.status, 200);
   assert.deepEqual(
     (await plugins.json()).plugins.map((plugin) => plugin.name).sort(),
-    ["playwright-mcp"],
+    ["google-workspace", "playwright-mcp"],
   );
 
   const playwright = await waitForPlaywright(
