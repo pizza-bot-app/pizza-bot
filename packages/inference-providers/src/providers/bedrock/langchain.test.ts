@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AIMessage,
   HumanMessage,
   ToolMessage,
 } from "@langchain/core/messages";
@@ -170,6 +171,40 @@ describe("BedrockLangChainModelProvider authentication", () => {
       toolCalling: true,
     });
   });
+
+  it.each(["_generate", "_streamResponseChunks", "_streamChatModelEvents"] as const)(
+    "drops an incomplete tool-only turn before %s reaches Bedrock",
+    async (entryPoint) => {
+      const provider = new BedrockLangChainModelProvider();
+      const model = await provider.buildModel("global.anthropic.claude-sonnet-5");
+      const question = new HumanMessage("Edit the report.");
+      const retry = new HumanMessage("retry");
+      const truncated = new AIMessage({
+        content: [
+          { type: "reasoning", reasoning: "" },
+          {
+            type: "invalid_tool_call",
+            id: "truncated-edit",
+            name: "edit_file",
+            args: '{"file_path":"/report.md","old_string":"unfinished',
+            error: "Failed to parse tool call arguments as JSON",
+          },
+        ] as unknown as string,
+        response_metadata: { output_version: "v1", finish_reason: "length" },
+      });
+
+      const result = (model as unknown as Record<typeof entryPoint, (m: unknown[], o: object) => unknown>)[
+        entryPoint
+      ]([question, truncated, retry], {});
+      if (entryPoint === "_streamChatModelEvents") {
+        await (result as AsyncIterator<unknown>).next();
+      } else {
+        await result;
+      }
+
+      expect(sdk.outboundMessages).toEqual([question, retry]);
+    },
+  );
 
   it("normalizes DeepAgents image tool results before calling Bedrock", async () => {
     const provider = new BedrockLangChainModelProvider();

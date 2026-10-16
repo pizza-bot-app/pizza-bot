@@ -1,13 +1,95 @@
-import { describe, it, expect } from "vitest";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { describe, it, expect, vi } from "vitest";
+import { ChatBedrockConverse } from "@langchain/aws";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import {
   endsWithCacheIncompatibleDocument,
   sanitizeBedrockDocumentName,
   sanitizeDocumentNamesForBedrock,
-  stripReasoningForBedrock,
+  stripUnreplayableBlocksForBedrock,
 } from "./outbound-messages.js";
 
-describe("stripReasoningForBedrock", () => {
+describe("stripUnreplayableBlocksForBedrock", () => {
+  const invalidToolCall = {
+    type: "invalid_tool_call" as const,
+    id: "truncated-edit",
+    name: "edit_file",
+    args: '{"file_path":"/report.md","old_string":"unfinished',
+    error: "Failed to parse tool call arguments as JSON",
+  };
+
+  it.each([
+    ["v1, with reasoning", { output_version: "v1" }, true],
+    ["v1, without reasoning", { output_version: "v1" }, false],
+    ["legacy, without reasoning", {}, false],
+  ])(
+    "omits an incomplete tool-only turn from the real Converse payload (%s)",
+    async (_label, outputVersion, withReasoning) => {
+      const content = [
+        ...(withReasoning ? [{ type: "reasoning", reasoning: "" }] : []),
+        invalidToolCall,
+      ];
+      const truncated = new AIMessage({
+        content: content as unknown as string,
+        response_metadata: { ...outputVersion, model_provider: "bedrock-converse", finish_reason: "length" },
+      });
+      const model = new ChatBedrockConverse({
+        model: "global.anthropic.claude-sonnet-5",
+        region: "us-west-2",
+        credentials: { accessKeyId: "test", secretAccessKey: "test" },
+      });
+      let request: unknown;
+      vi.spyOn(model.client, "send").mockImplementation(async (command) => {
+        request = command.input;
+        return { output: { message: { role: "assistant", content: [{ text: "Resuming." }] } } };
+      });
+
+      await model.invoke(stripUnreplayableBlocksForBedrock([
+        new HumanMessage("Edit the report."),
+        truncated,
+        new HumanMessage("retry"),
+      ]));
+
+      expect(request).toMatchObject({
+        messages: [
+          { role: "user", content: [{ text: "Edit the report." }] },
+          { role: "user", content: [{ text: "retry" }] },
+        ],
+      });
+      expect(truncated.content).toEqual(content);
+      expect(truncated.response_metadata.finish_reason).toBe("length");
+    },
+  );
+
+  it("preserves visible text beside an invalid tool call without mutating history", () => {
+    const content = [
+      { type: "text", text: "Editing the report." },
+      invalidToolCall,
+    ];
+    const message = new AIMessage({ content, response_metadata: { output_version: "v1" } });
+
+    const [output] = stripUnreplayableBlocksForBedrock([message]);
+
+    expect(output!.content).toEqual([{ type: "text", text: "Editing the report." }]);
+    expect(message.content).toEqual(content);
+  });
+
+  it("preserves valid tool calls and their results beside an invalid tool call", () => {
+    const toolCall = { type: "tool_call" as const, id: "read-1", name: "read_file", args: { file_path: "/report.md" } };
+    const message = new AIMessage({
+      content: [invalidToolCall, toolCall],
+      response_metadata: { output_version: "v1" },
+      tool_calls: [toolCall],
+    });
+    const result = new ToolMessage({ tool_call_id: "read-1", content: "Report contents" });
+
+    const output = stripUnreplayableBlocksForBedrock([message, result]);
+
+    expect(output[0]!.content).toEqual([toolCall]);
+    expect((output[0] as AIMessage).tool_calls).toEqual([toolCall]);
+    expect(output[1]).toBe(result);
+    expect(message.content).toEqual([invalidToolCall, toolCall]);
+  });
+
   it("removes a v1 `reasoning` block (the shape the createAgent path emits)", () => {
     const msg = new AIMessage({
       content: [
@@ -15,7 +97,7 @@ describe("stripReasoningForBedrock", () => {
         { type: "text", text: "the answer" },
       ] as unknown as string,
     });
-    const [out] = stripReasoningForBedrock([msg]);
+    const [out] = stripUnreplayableBlocksForBedrock([msg]);
     expect(out).not.toBe(msg);
     expect(out!.content).toEqual([{ type: "text", text: "the answer" }]);
     expect(out).toBeInstanceOf(AIMessage);
@@ -28,7 +110,7 @@ describe("stripReasoningForBedrock", () => {
         { type: "text", text: "the answer" },
       ] as unknown as string,
     });
-    const [out] = stripReasoningForBedrock([msg]);
+    const [out] = stripUnreplayableBlocksForBedrock([msg]);
     expect(out!.content).toEqual([{ type: "text", text: "the answer" }]);
   });
 
@@ -40,7 +122,7 @@ describe("stripReasoningForBedrock", () => {
         { type: "text", text: "hi" },
       ] as unknown as string,
     });
-    const [out] = stripReasoningForBedrock([msg]);
+    const [out] = stripUnreplayableBlocksForBedrock([msg]);
     expect(out!.content).toEqual([{ type: "text", text: "hi" }]);
   });
 
@@ -51,7 +133,7 @@ describe("stripReasoningForBedrock", () => {
         { type: "tool_call", id: "t1", name: "task", args: {} },
       ] as unknown as string,
     });
-    const [out] = stripReasoningForBedrock([msg]);
+    const [out] = stripUnreplayableBlocksForBedrock([msg]);
     expect(out!.content).toEqual([{ type: "tool_call", id: "t1", name: "task", args: {} }]);
   });
 
@@ -59,7 +141,7 @@ describe("stripReasoningForBedrock", () => {
     const human = new HumanMessage("plain");
     const ai = new AIMessage({ content: [{ type: "text", text: "no reasoning here" }] as unknown as string });
     const input = [human, ai];
-    const output = stripReasoningForBedrock(input);
+    const output = stripUnreplayableBlocksForBedrock(input);
     const [outHuman, outAi] = output;
     expect(output).toBe(input);
     expect(outHuman).toBe(human);
@@ -73,9 +155,55 @@ describe("stripReasoningForBedrock", () => {
     });
     const nextHuman = new HumanMessage("follow-up");
 
-    const output = stripReasoningForBedrock([human, reasoningOnly, nextHuman]);
+    const output = stripUnreplayableBlocksForBedrock([human, reasoningOnly, nextHuman]);
 
     expect(output).toEqual([human, nextHuman]);
+  });
+
+  it.each([
+    ["empty string, legacy", "", {}],
+    ["empty array, legacy", [], {}],
+    ["empty array, v1", [], { output_version: "v1" }],
+  ])("drops an AI message that is already empty (%s)", (_label, content, metadata) => {
+    const human = new HumanMessage("question");
+    const empty = new AIMessage({ content: content as string, response_metadata: metadata });
+    const nextHuman = new HumanMessage("follow-up");
+
+    expect(stripUnreplayableBlocksForBedrock([human, empty, nextHuman])).toEqual([human, nextHuman]);
+  });
+
+  it("keeps an already-empty legacy AI message that carries tool calls", () => {
+    const msg = new AIMessage({
+      content: "",
+      tool_calls: [{ id: "t1", name: "search", args: { q: "pizza" }, type: "tool_call" }],
+    });
+
+    const output = stripUnreplayableBlocksForBedrock([msg]);
+
+    expect(output[0]).toBe(msg);
+  });
+
+  it("rebuilds content for an already-empty v1 AI message whose tool calls live only on the message", () => {
+    const msg = new AIMessage({
+      content: [],
+      response_metadata: { output_version: "v1" },
+      tool_calls: [{ id: "t1", name: "search", args: { q: "pizza" }, type: "tool_call" }],
+    });
+    (msg as { content: unknown }).content = [];
+
+    const [output] = stripUnreplayableBlocksForBedrock([msg]);
+
+    expect(output!.content).toEqual([
+      { type: "tool_call", id: "t1", name: "search", args: { q: "pizza" } },
+    ]);
+    expect(msg.content).toEqual([]);
+  });
+
+  it("leaves an empty human message for the converter to reject", () => {
+    const human = new HumanMessage({ content: [] });
+    const input = [human];
+
+    expect(stripUnreplayableBlocksForBedrock(input)).toBe(input);
   });
 
   it("keeps a legacy tool-call turn whose content contains only reasoning", () => {
@@ -84,7 +212,7 @@ describe("stripReasoningForBedrock", () => {
       tool_calls: [{ id: "t1", name: "search", args: { q: "pizza" }, type: "tool_call" }],
     });
 
-    const [output] = stripReasoningForBedrock([msg]);
+    const [output] = stripUnreplayableBlocksForBedrock([msg]);
 
     expect(output).toBeInstanceOf(AIMessage);
     expect(output!.content).toEqual([]);
@@ -100,7 +228,7 @@ describe("stripReasoningForBedrock", () => {
     // Mimic reconstructed v1 history where only `tool_calls` survived.
     (msg as { content: unknown }).content = [{ type: "reasoning", reasoning: "searching..." }];
 
-    const [output] = stripReasoningForBedrock([msg]);
+    const [output] = stripUnreplayableBlocksForBedrock([msg]);
 
     expect(output!.content).toEqual([
       { type: "tool_call", id: "t1", name: "search", args: { q: "pizza" } },
@@ -110,7 +238,7 @@ describe("stripReasoningForBedrock", () => {
   it("leaves string-content messages untouched (by reference)", () => {
     const human = new HumanMessage("plain string content");
     const input = [human];
-    const output = stripReasoningForBedrock(input);
+    const output = stripUnreplayableBlocksForBedrock(input);
     const [out] = output;
     expect(output).toBe(input);
     expect(out).toBe(human);
