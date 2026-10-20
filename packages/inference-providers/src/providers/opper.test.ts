@@ -257,13 +257,15 @@ describe("Opper model construction", () => {
     });
   });
 
+  // LangChain sends max_completion_tokens instead of max_tokens for gpt-5 ids,
+  // so this uses a pool id that keeps the max_tokens request field.
   it("sends chat completions to the configured base URL", async () => {
     const fetchFn = vi.fn(async (
       _input: Parameters<typeof fetch>[0],
       _init?: Parameters<typeof fetch>[1],
     ) => new Response(JSON.stringify({
       id: "chatcmpl-1",
-      model: "gpt-5.4-mini",
+      model: "claude-sonnet-4-6",
       choices: [{
         index: 0,
         message: { role: "assistant", content: "ok" },
@@ -279,12 +281,12 @@ describe("Opper model construction", () => {
       baseUrl: "https://api.opper.ai/v3/compat",
       fetch: fetchFn,
       models: [{
-        id: "gpt-5.4-mini",
+        id: "claude-sonnet-4-6",
         provider: "opper",
-        displayName: "gpt-5.4-mini (Opper pool)",
+        displayName: "claude-sonnet-4-6 (Opper pool)",
       }],
     });
-    const model = await provider.buildModel("gpt-5.4-mini");
+    const model = await provider.buildModel("claude-sonnet-4-6");
 
     const reply = await model.invoke([new HumanMessage("hi")]);
 
@@ -292,6 +294,6 @@ describe("Opper model construction", () => {
     const [input, init] = fetchFn.mock.calls[0] ?? [];
     expect(String(input)).toBe("https://api.opper.ai/v3/compat/chat/completions");
     const body = JSON.parse(String(init?.body)) as { model: string; max_tokens: number };
-    expect(body).toMatchObject({ model: "gpt-5.4-mini", max_tokens: 8_192 });
+    expect(body).toMatchObject({ model: "claude-sonnet-4-6", max_tokens: 8_192 });
   });
 });
