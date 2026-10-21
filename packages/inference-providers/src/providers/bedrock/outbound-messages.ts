@@ -7,10 +7,10 @@ function withContent(msg: BaseMessage, content: unknown): BaseMessage {
   return clone;
 }
 
-function isReasoningBlock(block: unknown): boolean {
+function isUnreplayableBlock(block: unknown): boolean {
   if (typeof block !== "object" || block === null) return false;
   const t = (block as { type?: unknown }).type;
-  return t === "reasoning_content" || t === "reasoning";
+  return t === "reasoning_content" || t === "reasoning" || t === "invalid_tool_call";
 }
 
 function toolCallsOf(msg: BaseMessage): Array<{
@@ -34,42 +34,54 @@ function toolCallsOf(msg: BaseMessage): Array<{
     : [];
 }
 
-/**
- * @langchain/aws@1.4.2 drops reasoning signatures while converting native v3
- * streams to v1 history, so Bedrock rejects replayed `reasoning` and
- * `reasoning_content` blocks. Strip them only from provider input, preserving
- * checkpoint display and tool calls. Remove when native-v3 conversion and replay
- * preserve signatures (langchainjs#11164 and #11246).
- */
-export function stripReasoningForBedrock(messages: BaseMessage[]): BaseMessage[] {
-  let rewritten: BaseMessage[] | undefined;
-  for (let index = 0; index < messages.length; index += 1) {
-    const msg = messages[index]!;
-    if (!Array.isArray(msg.content) || !msg.content.some(isReasoningBlock)) {
-      rewritten?.push(msg);
-      continue;
-    }
+function isEmptyContent(content: BaseMessage["content"]): boolean {
+  return Array.isArray(content) ? content.length === 0 : content === "";
+}
 
-    rewritten ??= messages.slice(0, index);
-    let content = msg.content.filter((block) => !isReasoningBlock(block));
-    const type = typeof msg.getType === "function" ? msg.getType() : "";
-    const toolCalls = type === "ai" ? toolCallsOf(msg) : [];
-    if (
-      content.length === 0 &&
-      toolCalls.length > 0 &&
-      msg.response_metadata?.output_version === "v1"
-    ) {
+/** Returns `msg` itself when nothing changes, and `undefined` to drop it. */
+function forReplay(msg: BaseMessage): BaseMessage | undefined {
+  const content =
+    Array.isArray(msg.content) && msg.content.some(isUnreplayableBlock)
+      ? msg.content.filter((block) => !isUnreplayableBlock(block))
+      : msg.content;
+  const type = typeof msg.getType === "function" ? msg.getType() : "";
+  if (type !== "ai") return content === msg.content ? msg : withContent(msg, content);
+
+  const toolCalls = toolCallsOf(msg);
+  if (isEmptyContent(content)) {
+    if (toolCalls.length === 0) return undefined;
+    if (Array.isArray(content) && msg.response_metadata?.output_version === "v1") {
       // V1 replay reads tool calls from content blocks, not `AIMessage.tool_calls`.
-      content = toolCalls.map((call) => ({
+      return withContent(msg, toolCalls.map((call) => ({
         type: "tool_call" as const,
         ...(call.id ? { id: call.id } : {}),
         name: call.name,
         args: call.args,
-      }));
+      })));
     }
-    if (type !== "ai" || content.length > 0 || toolCalls.length > 0) {
-      rewritten.push(withContent(msg, content));
+  }
+  return content === msg.content ? msg : withContent(msg, content);
+}
+
+/**
+ * Projects history into what Converse can replay; checkpoints keep the original.
+ * Reasoning blocks go because @langchain/aws@1.4.2 drops their signatures on the
+ * native v3 path and Bedrock rejects them; remove that part once
+ * langchainjs#11164 and #11246 land. Invalid tool calls go because Converse
+ * discards them, and assistant turns left with neither content nor tool calls go
+ * because Bedrock rejects empty content.
+ */
+export function stripUnreplayableBlocksForBedrock(messages: BaseMessage[]): BaseMessage[] {
+  let rewritten: BaseMessage[] | undefined;
+  for (let index = 0; index < messages.length; index += 1) {
+    const msg = messages[index]!;
+    const replayed = forReplay(msg);
+    if (replayed === msg) {
+      rewritten?.push(msg);
+      continue;
     }
+    rewritten ??= messages.slice(0, index);
+    if (replayed) rewritten.push(replayed);
   }
   return rewritten ?? messages;
 }
