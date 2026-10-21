@@ -133,9 +133,22 @@ jobs:
   # that cannot be undone, so nothing reaches GHCR until signing has succeeded and
   # its reviewer has approved. `latest` therefore only ever moves for a release
   # that produced installers.
+  #
+  # Each architecture is built, smoked, and pushed by digest on its own runner, so
+  # nothing is tagged unless both legs pass; `publish` then names the index. CI
+  # builds amd64 only, so an arm64 regression shows up here rather than on the PR,
+  # and a failed leg leaves every tag where it was.
   image:
     needs: [validate-release, ci, package, draft-release]
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     permissions:
       contents: read
@@ -143,9 +156,61 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: ./.github/actions/backend-image
+      - name: Resolve image labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: image
+        uses: ./.github/actions/backend-image
         with:
           cache-to: type=gha,mode=max
+          push-image: ghcr.io/${{ github.repository }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Record digest
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          if [[ -z "$DIGEST" ]]; then
+            echo "::error::The backend image was not pushed"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [validate-release, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+      VERSION: ${{ needs.validate-release.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
 
       - name: Resolve published tags
         id: meta
@@ -164,17 +229,39 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Resolves from the cache the composite action just wrote, so this pushes
-      # the layers the smokes exercised.
-      - name: Push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          target: runtime
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+      - name: Push multi-architecture index
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          sources=()
+          for digest in "$RUNNER_TEMP"/digests/*; do
+            sources+=("$IMAGE@sha256:$(basename "$digest")")
+          done
+          if (( ${#sources[@]} != 2 )); then
+            echo "::error::Expected 2 architecture digests, found ${#sources[@]}"
+            exit 1
+          fi
+
+          tags=()
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] && tags+=(--tag "$tag")
+          done <<<"$TAGS"
+
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+
+      - name: Verify published platforms
+        run: |
+          platforms="$(
+            docker buildx imagetools inspect --raw "$IMAGE:$VERSION" |
+              jq -r '.manifests[].platform | "\(.os)/\(.architecture)"' | sort -u
+          )"
+          for expected in linux/amd64 linux/arm64; do
+            if ! grep -qx "$expected" <<<"$platforms"; then
+              echo "::error::$IMAGE:$VERSION is missing $expected"
+              exit 1
+            fi
+          done
+          echo "published $IMAGE:$VERSION for $(paste -sd' ' - <<<"$platforms")"
 
   # No environment: the signing jobs already took the reviewer's approval, this
   # only assembles a draft, and publishing it is a separate manual act.
