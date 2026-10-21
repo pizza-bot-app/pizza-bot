@@ -38,7 +38,7 @@
     "@pizza-bot/runtime-langgraph": "*",
     "@pizza-bot/storage": "*",
     "cron": "^4.4.0",
-    "hono": "^4.13.10",
+    "hono": "^4.13.13",
     "yauzl": "^3.4.0",
     "zod": "^4.0.0"
   }
