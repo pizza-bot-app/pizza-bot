@@ -7,6 +7,7 @@ import { MakerDeb } from "@electron-forge/maker-deb";
 import { MakerRpm } from "@electron-forge/maker-rpm";
 import { AutoUnpackNativesPlugin } from "@electron-forge/plugin-auto-unpack-natives";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 // @ts-expect-error -- plain .mjs helper outside this package's tsconfig rootDir.
@@ -76,6 +77,11 @@ if (process.platform === "win32") {
 
 const iconsDir = path.join(repoRoot, "assets", "icons");
 
+// Staged per target by `npm run smolvm:fetch`; absent, the app ships without a
+// shell sandbox rather than failing to package.
+const smolvmDir = path.join(shellRoot, "dist-smolvm", "smolvm");
+const bundlesSmolvm = existsSync(smolvmDir);
+
 const LINUX_DESCRIPTION = "An inbox for asynchronous AI work";
 const LINUX_PRODUCT_DESCRIPTION =
   "An inbox for asynchronous AI work, built on DeepAgents and LangGraph.";
@@ -107,14 +113,22 @@ const config: ForgeConfig = {
       // Staged, not repo-root: shipped plugins need their own node_modules.
       path.join(shellRoot, "dist-plugins", "plugins"),
       path.join(repoRoot, "skills"),
+      ...(bundlesSmolvm ? [smolvmDir] : []),
     ],
     ...(isSigning && {
       osxSign: {
         identity: signingIdentity,
         continueOnError: false,
-        optionsForFile: () => ({
+        // Re-signing strips smolvm's own entitlements, and without the hypervisor
+        // one every VM start fails with EINVAL.
+        optionsForFile: (filePath: string) => ({
           hardenedRuntime: true,
-          entitlements: path.join(shellRoot, "entitlements.plist"),
+          entitlements: path.join(
+            shellRoot,
+            path.basename(filePath) === "smolvm-bin"
+              ? "smolvm.entitlements.plist"
+              : "entitlements.plist",
+          ),
         }),
       },
     }),
