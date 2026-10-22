@@ -10,6 +10,7 @@ import { RequestyLangChainModelProvider } from "./providers/requesty.js";
 import { OpperLangChainModelProvider } from "./providers/opper.js";
 import { UberLlmLangChainModelProvider } from "./providers/uberllm.js";
 import { CheaperInferenceLangChainModelProvider } from "./providers/cheaperinference.js";
+import { LiteLLMLangChainModelProvider } from "./providers/litellm.js";
 import { OllamaLangChainModelProvider } from "./providers/ollama.js";
 
 /** Resolve saved secret references before a provider can build its first model. */
@@ -31,6 +32,7 @@ export async function registerBuiltinProviders(registry: ModelRegistry, configs?
     new OpperLangChainModelProvider(),
     new UberLlmLangChainModelProvider(),
     new CheaperInferenceLangChainModelProvider(),
+    new LiteLLMLangChainModelProvider(),
     new OllamaLangChainModelProvider(),
   ];
   for (const provider of providers) {
