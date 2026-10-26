@@ -51,6 +51,7 @@ body:
         - OpenAI
         - OpenRouter
         - Requesty
+        - Cheaper Inference
         - Ollama
         - Not reached / not applicable
     validations:
