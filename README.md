@@ -51,7 +51,7 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 - **Delegate to specialists.** Skills become tool-scoped subagents whose progress
   appears in the Activity panel.
 - **Bring your model provider.** Amazon Bedrock, Anthropic, Google Gemini,
-  OpenAI, OpenRouter, Requesty, Opper, UberLLM, and Ollama are supported.
+  OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference, and Ollama are supported.
 - **Keep control of consequential actions.** Human-in-the-loop approvals,
   long-term memory, file attachments, and desktop notifications are built into
   the workflow.
@@ -103,7 +103,7 @@ CLI development, desktop packages, and remote backends.
 
 A running api-server needs access to at least one model provider; HTTP clients
 do not. Configure Amazon Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter,
-Requesty, Opper, UberLLM, or Ollama in **Settings > Providers**. Bedrock accepts an AWS
+Requesty, Opper, UberLLM, Cheaper Inference, or Ollama in **Settings > Providers**. Bedrock accepts an AWS
 profile, AWS access keys, or a Bedrock API key, with an optional region
 override; otherwise `AWS_REGION` or `us-west-2` is used. Bedrock combines its
 native catalog with the regional Mantle catalog and routes models through
@@ -112,7 +112,9 @@ to their advertised API family.
 OpenAI and Anthropic also accept custom base URLs for compatible endpoints;
 OpenAI can explicitly select Responses or Chat Completions, and Anthropic
 supports `x-api-key` or bearer authentication. Requesty accepts a base URL
-override such as `https://router.eu.requesty.ai/v1` for its EU region. OpenAI,
+override such as `https://router.eu.requesty.ai/v1` for its EU region. Cheaper
+Inference routes to its fixed endpoint and uses bare model ids such as
+`gpt-5.4-mini`. OpenAI,
 OpenRouter, Requesty, Opper, and UberLLM take an optional **Advanced request
 JSON** that is merged into every request, for options such as
 `{"service_tier": "flex"}`. Select
