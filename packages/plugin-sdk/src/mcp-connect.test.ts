@@ -18,8 +18,47 @@ const STATUS_SERVER = resolve(
 const EMPTY_DESC_SERVER = resolve(__dirname, "__fixtures__/mcp-empty-desc-server.mjs");
 const DELAYED_SERVER = resolve(__dirname, "__fixtures__/mcp-delayed-server.mjs");
 const UNION_SCHEMA_SERVER = resolve(__dirname, "__fixtures__/mcp-union-schema-server.mjs");
+const BROWSER_READ_SERVER = resolve(__dirname, "__fixtures__/mcp-browser-read-server.mjs");
 
 describe("connectMcpServers", () => {
+  it("keeps Playwright browser text reads inline without changing screenshot exports", async () => {
+    const r = await connectMcpServers(
+      { playwright: { command: "node", args: [BROWSER_READ_SERVER] } },
+      process.execPath,
+    );
+    try {
+      for (const name of ["browser_evaluate", "browser_snapshot"]) {
+        const tool = r.tools[`mcp:playwright:${name}`]!;
+        const schema = tool.schema as { properties: Record<string, unknown>; additionalProperties?: boolean };
+        expect(schema.properties).not.toHaveProperty("filename");
+        expect(schema.additionalProperties).toBe(false);
+        expect(tool.description).toContain("not accessible through agent read_file/glob/ls");
+        await expect(tool.invoke({ filename: "transcript.txt" })).rejects.toThrow(/filename|additional properties/i);
+        await expect(tool.invoke({ function: "() => 'bounded excerpt'" })).resolves.toContain("bounded excerpt");
+      }
+      for (const name of ["browser_take_screenshot", "export_text"]) {
+        await expect(r.tools[`mcp:playwright:${name}`]!.invoke({ filename: "requested-output" }))
+          .resolves.toContain("requested-output");
+      }
+    } finally {
+      await r.client?.close();
+    }
+  }, 20_000);
+
+  it("leaves unrelated MCP servers' similarly named browser tools unchanged", async () => {
+    const r = await connectMcpServers(
+      { other: { command: "node", args: [BROWSER_READ_SERVER] } },
+      process.execPath,
+    );
+    try {
+      const tool = r.tools["mcp:other:browser_snapshot"]!;
+      expect((tool.schema as { properties: Record<string, unknown> }).properties).toHaveProperty("filename");
+      await expect(tool.invoke({ filename: "requested-output" })).resolves.toContain("requested-output");
+    } finally {
+      await r.client?.close();
+    }
+  }, 20_000);
+
   it("returns an empty result (no client) for no entries", async () => {
     const r = await connectMcpServers({}, undefined);
     expect(r.client).toBeUndefined();
