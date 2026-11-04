@@ -7,6 +7,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: ["browser_evaluate", "browser_snapshot", "browser_take_screenshot", "export_text"].map((name) => ({
     name, description: "Read or export browser material.", inputSchema: {
       type: "object", properties: { filename: { type: "string" }, function: { type: "string" } },
+      ...(name === "browser_evaluate" ? { required: ["filename", "function"] } : {}),
     },
   })),
 }));

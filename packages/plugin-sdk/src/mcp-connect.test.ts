@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { chmodSync, mkdtempSync, statSync, writeFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,13 @@ const UNION_SCHEMA_SERVER = resolve(__dirname, "__fixtures__/mcp-union-schema-se
 const BROWSER_READ_SERVER = resolve(__dirname, "__fixtures__/mcp-browser-read-server.mjs");
 
 describe("connectMcpServers", () => {
+  it("keeps the bundled Playwright server key aligned with the schema override", () => {
+    const manifest = JSON.parse(
+      readFileSync(resolve(__dirname, "../../../plugins/playwright-mcp/.mcp.json"), "utf8"),
+    ) as { mcpServers: Record<string, unknown> };
+    expect(manifest.mcpServers).toHaveProperty("playwright");
+  });
+
   it("keeps Playwright browser text reads inline without changing screenshot exports", async () => {
     const r = await connectMcpServers(
       { playwright: { command: "node", args: [BROWSER_READ_SERVER] } },
@@ -29,10 +36,16 @@ describe("connectMcpServers", () => {
     try {
       for (const name of ["browser_evaluate", "browser_snapshot"]) {
         const tool = r.tools[`mcp:playwright:${name}`]!;
-        const schema = tool.schema as { properties: Record<string, unknown>; additionalProperties?: boolean };
+        const schema = tool.schema as { properties: Record<string, unknown>; additionalProperties?: boolean; required?: string[] };
         expect(schema.properties).not.toHaveProperty("filename");
         expect(schema.additionalProperties).toBe(false);
-        expect(tool.description).toContain("not accessible through agent read_file/glob/ls");
+        expect(tool.description).toContain("Return text inline");
+        if (name === "browser_evaluate") {
+          expect(schema.required).toEqual(["function"]);
+          expect(tool.description).toContain("4,000 characters");
+        } else {
+          expect(tool.description).not.toContain("4,000 characters");
+        }
         await expect(tool.invoke({ filename: "transcript.txt" })).rejects.toThrow(/filename|additional properties/i);
         await expect(tool.invoke({ function: "() => 'bounded excerpt'" })).resolves.toContain("bounded excerpt");
       }
