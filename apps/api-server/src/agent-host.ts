@@ -659,8 +659,15 @@ export class AgentHost {
     return this.skillInventory.get(id);
   }
 
+  // Without a stored preference a skill follows its MCP servers, so a server that
+  // ships disabled takes its skills with it until the user turns it on.
   private skillEnabled(skill: SkillCatalogEntry): boolean {
-    return this.capabilityPreferences.get(skillPreferenceKey(skill)) ?? true;
+    return (
+      this.capabilityPreferences.get(skillPreferenceKey(skill)) ??
+      !skillMcpServerIds(skill).some(
+        (id) => this.mcpLifecycle.get(id)?.status === "disabled",
+      )
+    );
   }
 
   private dependentSkills(serverId: string): CapabilitySkillDependency[] {

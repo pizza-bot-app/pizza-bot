@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "google-workspace": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/src/server.mjs"],
+      "env": {
+        "PIZZA_DATA_ROOT": "${PIZZA_DATA_ROOT}",
+        "DBUS_SESSION_BUS_ADDRESS": "${DBUS_SESSION_BUS_ADDRESS}",
+        "XDG_RUNTIME_DIR": "${XDG_RUNTIME_DIR}"
+      },
+      "enabled": false
+    }
+  }
+}
