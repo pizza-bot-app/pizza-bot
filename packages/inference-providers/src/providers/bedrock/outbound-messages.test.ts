@@ -164,6 +164,7 @@ describe("stripUnreplayableBlocksForBedrock", () => {
     ["empty string, legacy", "", {}],
     ["empty array, legacy", [], {}],
     ["empty array, v1", [], { output_version: "v1" }],
+    ["empty text block, v1", [{ type: "text", text: "" }], { output_version: "v1" }],
   ])("drops an AI message that is already empty (%s)", (_label, content, metadata) => {
     const human = new HumanMessage("question");
     const empty = new AIMessage({ content: content as string, response_metadata: metadata });

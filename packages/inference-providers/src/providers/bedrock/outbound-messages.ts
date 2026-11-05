@@ -34,8 +34,14 @@ function toolCallsOf(msg: BaseMessage): Array<{
     : [];
 }
 
+function isEmptyTextBlock(block: unknown): boolean {
+  if (typeof block !== "object" || block === null) return false;
+  const { type, text } = block as { type?: unknown; text?: unknown };
+  return type === "text" && text === "";
+}
+
 function isEmptyContent(content: BaseMessage["content"]): boolean {
-  return Array.isArray(content) ? content.length === 0 : content === "";
+  return Array.isArray(content) ? content.every(isEmptyTextBlock) : content === "";
 }
 
 /** Returns `msg` itself when nothing changes, and `undefined` to drop it. */

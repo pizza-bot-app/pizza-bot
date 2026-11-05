@@ -368,6 +368,10 @@ describe("truncatedTurnMiddleware", () => {
     expect(seen[1]!.systemMessage.text).toBe("Base prompt.");
   });
 
+  it("names each cut-off tool once in the hidden instruction", () => {
+    expect(toolCallCutOffInstruction(["edit_file", "edit_file"])).toBe(toolCallCutOffInstruction(["edit_file"]));
+  });
+
   it("clears the flag and the retry budget when a run starts", () => {
     expect(middleware.beforeAgent()).toEqual({
       [TRUNCATED_TURN_CHANNEL]: false,

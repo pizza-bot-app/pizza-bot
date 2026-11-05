@@ -117,6 +117,16 @@ describe("truncated-turn flag across runs", () => {
     expect(model.inputs[1]!.some(hasInvalidToolCall)).toBe(false);
   }, 30_000);
 
+  it("counts each silent retry as a model call", async () => {
+    const model = new ScriptedModel([{ message: cutOffEdit() }, { message: new AIMessage("Report updated.") }]);
+    const agent = await createPizzaBotAgent("Help the user.", { model, checkpointer: new MemorySaver() });
+    const threadId = `truncated_${Math.random().toString(36).slice(2)}`;
+
+    await runTurn(agent, threadId);
+
+    expect((await agent.getState(threadId)).values.threadModelCallCount).toBe(2);
+  }, 30_000);
+
   it("drops the hidden instruction once the retry succeeds", async () => {
     const model = new ScriptedModel([
       { message: cutOffEdit() },
