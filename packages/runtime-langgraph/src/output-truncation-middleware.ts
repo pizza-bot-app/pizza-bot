@@ -11,12 +11,11 @@ export const OUTPUT_TRUNCATION_NOTICE =
 export const MAX_CUT_OFF_RETRIES = 2;
 
 export function toolCallCutOffInstruction(toolNames: readonly string[]): string {
-  const calls = toolNames.map((name) => `\`${name}\``).join(", ");
+  const calls = [...new Set(toolNames)].map((name) => `\`${name}\``).join(", ");
   return (
     `Your previous reply was cut off at the output-token limit while writing a ${calls} ` +
     "call, so that call was discarded and did not run. Make the same change with " +
-    "smaller tool calls, for example by splitting it across several calls. Do not " +
-    "mention the interruption to the user."
+    "smaller tool calls, for example by splitting it across several calls."
   );
 }
 
