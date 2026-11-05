@@ -184,7 +184,7 @@ describe("AgentHost.reloadMcpServers", () => {
     expect(await host.toolCatalog()).not.toHaveProperty("disabled");
   }, 30_000);
 
-  it("keeps skill intent while an external dependency is disabled", async () => {
+  it("defaults a skill without a preference to its MCP server's enabled state", async () => {
     const pluginMcpFile = join(pluginsDir, "example-mcp-status", ".mcp.json");
     writeFileSync(
       pluginMcpFile,
@@ -203,14 +203,16 @@ describe("AgentHost.reloadMcpServers", () => {
 
     expect(
       (await host.skillCatalog()).find((skill) => skill.id === "health-report"),
-    ).toMatchObject({
-      enabled: true,
-      status: "unavailable",
-      statusDetail: "mcp-status is disabled",
-    });
+    ).toMatchObject({ enabled: false, status: "disabled" });
     expect(
       (await host.listMcpServers()).find((server) => server.id === "mcp-status"),
     ).toMatchObject({ enabled: false, status: "disabled" });
+
+    await host.setMcpServerEnabled("mcp-status", true);
+
+    expect(
+      (await host.skillCatalog()).find((skill) => skill.id === "health-report"),
+    ).toMatchObject({ enabled: true, status: "ready" });
     expect(
       host.capabilityPreferences.get({
         kind: "skill",

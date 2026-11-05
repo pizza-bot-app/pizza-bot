@@ -18,10 +18,10 @@ import {
 import { CapabilityDependencyError, type AgentHost } from "./agent-host.js";
 import { fileResourceRoutes, type ParseResult } from "./resource-crud.js";
 import {
-  MAX_SKILL_ARCHIVE_BYTES,
+  MAX_SKILL_UPLOAD_BYTES,
   MAX_SKILL_UNCOMPRESSED_BYTES,
   SkillImportError,
-  parseSkillArchive,
+  parseSkillImport,
   type ImportedSkill,
 } from "./skill-import.js";
 import { limitMultipartBody } from "./request-limits.js";
@@ -241,6 +241,7 @@ async function writeSkill(
 
 async function writeImportedSkill(skillsDir: string, skill: ImportedSkill): Promise<void> {
   const dir = join(skillsDir, skill.id);
+  await mkdir(skillsDir, { recursive: true });
   await mkdir(dir, { recursive: false });
   try {
     for (const file of skill.files) {
@@ -360,7 +361,7 @@ export function skillRoutes(host: AgentHost): Hono {
     }
   });
 
-  app.use("/skills/import", limitMultipartBody(MAX_SKILL_ARCHIVE_BYTES));
+  app.use("/skills/import", limitMultipartBody(MAX_SKILL_UPLOAD_BYTES));
   app.post("/skills/import", async (c) => {
     const skillsDir = await host.skillsDirectory();
     if (!skillsDir) return c.json({ error: "skills_disabled" }, 409);
@@ -369,42 +370,38 @@ export function skillRoutes(host: AgentHost): Hono {
     try {
       form = await c.req.formData();
     } catch {
-      return c.json({ error: "invalid_multipart", detail: "Expected a ZIP file upload." }, 400);
+      return c.json({ error: "invalid_multipart", detail: "Expected a Markdown or ZIP file upload." }, 400);
     }
     const file = form.get("file");
     if (!(file instanceof File)) {
-      return c.json({ error: "missing_file", detail: "Select a ZIP file to import." }, 400);
+      return c.json({ error: "missing_file", detail: "Select a Markdown or ZIP file to import." }, 400);
     }
-    if (file.size > MAX_SKILL_ARCHIVE_BYTES) {
-      return c.json({ error: "archive_too_large", detail: "The selected ZIP file is too large." }, 413);
+    if (file.size > MAX_SKILL_UPLOAD_BYTES) {
+      return c.json({ error: "file_too_large", detail: "The selected file exceeds the 20 MiB limit." }, 413);
     }
 
-    try {
-      const skill = await parseSkillArchive(new Uint8Array(await file.arrayBuffer()));
-      if (await userSkillExists(skillsDir, skill.id)) {
-        return c.json(
-          { error: "already_exists", detail: `A custom skill named "${skill.id}" already exists.` },
-          409,
-        );
-      }
-      if (await host.skillFor(skill.id)) {
-        return c.json(
-          { error: "reserved_id", detail: `The skill name "${skill.id}" is already in use.` },
-          409,
-        );
-      }
-
-      await writeImportedSkill(skillsDir, skill);
-      await host.reloadSkills();
-      const entry = await host.skillFor(skill.id);
-      return c.json(entry ? toWire(entry) : importedToWire(skill), 201);
-    } catch (error) {
-      if (error instanceof SkillImportError) {
-        const status = error.code === "archive_too_large" ? 413 : 400;
-        return c.json({ error: error.code, detail: error.message }, status);
-      }
-      throw error;
+    const skill = await parseSkillImport(file.name, new Uint8Array(await file.arrayBuffer()));
+    if (skill instanceof SkillImportError) {
+      const status = skill.code === "archive_too_large" || skill.code === "file_too_large" ? 413 : 400;
+      return c.json({ error: skill.code, detail: skill.message }, status);
     }
+    if (await userSkillExists(skillsDir, skill.id)) {
+      return c.json(
+        { error: "already_exists", detail: `A custom skill named "${skill.id}" already exists.` },
+        409,
+      );
+    }
+    if (await host.skillFor(skill.id)) {
+      return c.json(
+        { error: "reserved_id", detail: `The skill name "${skill.id}" is already in use.` },
+        409,
+      );
+    }
+
+    await writeImportedSkill(skillsDir, skill);
+    await host.reloadSkills();
+    const entry = await host.skillFor(skill.id);
+    return c.json(entry ? toWire(entry) : importedToWire(skill), 201);
   });
 
   app.get("/skills/:id", async (c) => {

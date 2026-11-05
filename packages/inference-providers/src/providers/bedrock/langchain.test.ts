@@ -3,6 +3,7 @@ import {
   HumanMessage,
   ToolMessage,
 } from "@langchain/core/messages";
+import { BEDROCK_DOCUMENT_MIME_TYPES } from "@pizza-bot/core";
 
 const sdk = vi.hoisted(() => ({
   chatConfig: undefined as Record<string, unknown> | undefined,
@@ -166,6 +167,7 @@ describe("BedrockLangChainModelProvider authentication", () => {
     const model = await provider.buildModel("global.anthropic.claude-sonnet-5");
 
     expect(model.profile).toEqual({
+      fileMimeTypes: [...BEDROCK_DOCUMENT_MIME_TYPES],
       maxInputTokens: 1_000_000,
       toolCalling: true,
     });
