@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ASSISTANT_ID, PIZZA_BOT_AGENT, TRUNCATED_TURN_CHANNEL, type RunInput, type RunOptions, type ThreadState, type ThreadStateValues } from "@pizza-bot/core";
+import { ASSISTANT_ID, CUT_OFF_TOOL_CALLS_CHANNEL, PIZZA_BOT_AGENT, TRUNCATED_TURN_CHANNEL, type RunInput, type RunOptions, type ThreadState, type ThreadStateValues } from "@pizza-bot/core";
 import { createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
 import { AIMessage, type AIMessageFields } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -17,6 +17,7 @@ const settle = async (n = 10) => {
 interface ScriptedTurn {
   events: ChatModelStreamEvent[];
   message: AIMessage;
+  beforeStream?: () => Promise<void>;
 }
 
 /**
@@ -47,7 +48,9 @@ class NativeStreamModel extends BaseChatModel<Record<string, never>> {
     return { generations: [{ message: this.next().message, text: "" }] };
   }
   override async *_streamChatModelEvents(): AsyncGenerator<ChatModelStreamEvent> {
-    for (const event of this.next().events) yield event;
+    const turn = this.next();
+    await turn.beforeStream?.();
+    for (const event of turn.events) yield event;
   }
 }
 
@@ -90,7 +93,11 @@ const fakeAgentState = {
   }),
 };
 
-async function runThroughRealSdk(model: NativeStreamModel, threadId: string) {
+async function runThroughRealSdk(
+  model: NativeStreamModel,
+  threadId: string,
+  onSnapshot?: (snapshot: { isLoading: boolean; values: unknown }) => void,
+) {
   const agent = await createPizzaBotAgent(PIZZA_BOT_AGENT.systemPrompt, { model });
   const streamFn = (input: RunInput, opts: RunOptions) => agent.streamProtocol(input, opts);
   const runs = new ProtocolRunManager(streamFn);
@@ -103,11 +110,15 @@ async function runThroughRealSdk(model: NativeStreamModel, threadId: string) {
     optimistic: false,
   });
   const release = controller.activate();
+  const unsubscribe = onSnapshot
+    ? controller.rootStore.subscribe(() => onSnapshot(controller.rootStore.getSnapshot()))
+    : undefined;
   try {
     await controller.submit({ messages: [{ role: "user", content: "summarize" }] });
     await settle();
     return controller.rootStore.getSnapshot();
   } finally {
+    unsubscribe?.();
     release();
   }
 }
@@ -140,6 +151,22 @@ describe("a truncated orchestrator turn reaches the real SDK rootStore", () => {
     expect(rendered).toContain("Report updated.");
     expect((snapshot.values as ThreadStateValues)[TRUNCATED_TURN_CHANNEL]).toBe(false);
     expect(snapshot.error).toBeUndefined();
+  });
+
+  it("publishes the cut-off retry to the client while the retry runs, then clears it", async () => {
+    const retryingDuringRun: unknown[] = [];
+    // Hold the retry open so the client settles mid-run, as it does while a real model call streams.
+    const retry = { ...plainTextTurn("Report updated."), beforeStream: () => settle() };
+    const snapshot = await runThroughRealSdk(
+      new NativeStreamModel([cutOffToolCallTurn(), retry]),
+      "t-cut-off-status",
+      (s) => {
+        if (s.isLoading) retryingDuringRun.push((s.values as ThreadStateValues)[CUT_OFF_TOOL_CALLS_CHANNEL]);
+      },
+    );
+
+    expect(retryingDuringRun).toContainEqual(["edit_file"]);
+    expect((snapshot.values as ThreadStateValues)[CUT_OFF_TOOL_CALLS_CHANNEL]).toEqual([]);
   });
 });
 

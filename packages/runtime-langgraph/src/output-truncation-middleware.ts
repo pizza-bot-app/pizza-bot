@@ -2,7 +2,7 @@
 import { AIMessage, RemoveMessage, type BaseMessage } from "@langchain/core/messages";
 import { createMiddleware } from "langchain";
 import { z } from "zod";
-import { TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
+import { CUT_OFF_TOOL_CALLS_CHANNEL, TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
 
 export const OUTPUT_TRUNCATION_NOTICE =
   "\n\n[OUTPUT_TRUNCATED: This task result is incomplete because the worker " +
@@ -93,7 +93,7 @@ export function outputTruncationMiddleware() {
 const truncatedTurnState = z.object({
   [TRUNCATED_TURN_CHANNEL]: z.boolean().optional(),
   cutOffRetries: z.number().optional(),
-  cutOffToolCalls: z.array(z.string()).optional(),
+  [CUT_OFF_TOOL_CALLS_CHANNEL]: z.array(z.string()).optional(),
 });
 
 /**
@@ -102,15 +102,16 @@ const truncatedTurnState = z.object({
  * state. Reset at run start so a run that never completes a model call
  * (stopped, or the model-call ceiling already spent) cannot inherit the flag.
  * A cut-off tool call never ran, so the turn is removed and the model asked
- * again with a hidden instruction; only past the retry cap does the human see it.
+ * again with a hidden instruction; the web shows a retry status meanwhile, and
+ * only past the retry cap does the human get the banner.
  */
 export function truncatedTurnMiddleware() {
   return createMiddleware({
     name: "truncatedTurn",
     stateSchema: truncatedTurnState,
-    beforeAgent: () => ({ [TRUNCATED_TURN_CHANNEL]: false, cutOffRetries: 0, cutOffToolCalls: [] }),
+    beforeAgent: () => ({ [TRUNCATED_TURN_CHANNEL]: false, cutOffRetries: 0, [CUT_OFF_TOOL_CALLS_CHANNEL]: [] }),
     wrapModelCall: (request, handler) => {
-      const names = request.state.cutOffToolCalls;
+      const names = request.state[CUT_OFF_TOOL_CALLS_CHANNEL];
       if (!names?.length) return handler(request);
       return handler({
         ...request,
@@ -126,12 +127,12 @@ export function truncatedTurnMiddleware() {
           return {
             messages: [new RemoveMessage({ id: last.id })],
             cutOffRetries: retries + 1,
-            cutOffToolCalls: cutOffToolCallNames(last),
+            [CUT_OFF_TOOL_CALLS_CHANNEL]: cutOffToolCallNames(last),
             [TRUNCATED_TURN_CHANNEL]: false,
             jumpTo: "model",
           };
         }
-        return { [TRUNCATED_TURN_CHANNEL]: isTruncatedTurn(last), cutOffToolCalls: [] };
+        return { [TRUNCATED_TURN_CHANNEL]: isTruncatedTurn(last), [CUT_OFF_TOOL_CALLS_CHANNEL]: [] };
       },
     },
   });
