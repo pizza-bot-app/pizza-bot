@@ -15,6 +15,6 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@napi-rs/keyring": "^2.1.0",
     "google-auth-library": "^11.1.0",
-    "zod": "^4.0.0"
+    "zod": "^4.6.6"
   }
 }
