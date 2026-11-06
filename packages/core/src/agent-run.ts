@@ -127,14 +127,24 @@ export interface RunHandle {
   endedAt?: number;
 }
 
+export interface StateHistoryOptions {
+  // Scopes history to a subagent subgraph's own checkpoints (its transcript),
+  // instead of the root thread's full message list.
+  checkpointNs?: string;
+  // Paging must reach the checkpointer: bounding the page in the consumer still
+  // materializes every row for the thread and namespace.
+  limit?: number;
+  // Spelled out as an ID because the checkpointer's own `before` is a config
+  // object this has to be wrapped into.
+  beforeCheckpointId?: string;
+}
+
 /**
  * Streaming stays on concrete runtime agents because its event types would
  * introduce a runtime SDK dependency into core.
  */
 export interface AgentHandle {
   getState(threadId: string, checkpointId?: string): Promise<ThreadState>;
-  // `checkpointNs` scopes history to a subagent subgraph's own checkpoints
-  // (its transcript), instead of the root thread's full message list.
-  getStateHistory(threadId: string, checkpointNs?: string): AsyncIterable<ThreadState>;
+  getStateHistory(threadId: string, options?: StateHistoryOptions): AsyncIterable<ThreadState>;
   updateState(threadId: string, values: unknown, asNode?: string): Promise<Checkpoint>;
 }

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { StateHistoryOptions } from "@pizza-bot/core";
 import type { AgentHost } from "./agent-host.js";
 import { toProtocolState } from "./protocol-commands.js";
 
@@ -45,7 +46,9 @@ export function langGraphRoutes(host: AgentHost): Hono {
 
   app.get("/threads/:thread_id/history", async (c) => {
     await host.whenReady();
-    return c.json(await collectHistory(host, c.req.param("thread_id")));
+    return c.json(
+      await collectHistory(host, c.req.param("thread_id"), { limit: DEFAULT_HISTORY_LIMIT }),
+    );
   });
 
   // The LangGraph SDK uses POST for paginated history queries.
@@ -56,8 +59,7 @@ export function langGraphRoutes(host: AgentHost): Hono {
       before?: { configurable?: { checkpoint_id?: string } } | string;
       checkpoint?: { checkpoint_ns?: string };
     };
-    const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : 10;
-    const before =
+    const beforeCheckpointId =
       typeof body.before === "string" ? body.before : body.before?.configurable?.checkpoint_id;
     // A scoped `checkpoint_ns` narrows history to a subagent subgraph's own
     // transcript; without it the SDK's scoped projection would seed from the
@@ -65,8 +67,8 @@ export function langGraphRoutes(host: AgentHost): Hono {
     const checkpointNs = body.checkpoint?.checkpoint_ns;
     return c.json(
       await collectHistory(host, c.req.param("thread_id"), {
-        limit,
-        ...(before != null ? { before } : {}),
+        limit: resolveHistoryLimit(body.limit),
+        ...(beforeCheckpointId != null ? { beforeCheckpointId } : {}),
         ...(checkpointNs ? { checkpointNs } : {}),
       }),
     );
@@ -75,21 +77,29 @@ export function langGraphRoutes(host: AgentHost): Hono {
   return app;
 }
 
+const DEFAULT_HISTORY_LIMIT = 10;
+const MAX_HISTORY_LIMIT = 100;
+
+// The saver interpolates the limit into the SQL text and omits `LIMIT` entirely
+// for a falsy one, so anything outside `[1, MAX]` recreates the unbounded scan:
+// `0` drops the clause, `1e309` yields `LIMIT NaN`, and `1e21` stringifies
+// through the saver's `parseInt` to `1`.
+function resolveHistoryLimit(requested: unknown): number {
+  if (typeof requested !== "number" || !Number.isFinite(requested) || requested < 1) {
+    return DEFAULT_HISTORY_LIMIT;
+  }
+  return Math.min(Math.floor(requested), MAX_HISTORY_LIMIT);
+}
+
 async function collectHistory(
   host: AgentHost,
   threadId: string,
-  opts?: { limit?: number; before?: string; checkpointNs?: string },
+  options: StateHistoryOptions & { limit: number },
 ): Promise<unknown[]> {
   const out: unknown[] = [];
-  let skipping = opts?.before != null;
-  for await (const s of host.agent.getStateHistory(threadId, opts?.checkpointNs)) {
-    if (skipping) {
-      // The SDK's before cursor is exclusive, so omit the matching checkpoint too.
-      if (s.checkpointId === opts!.before) skipping = false;
-      continue;
-    }
+  for await (const s of host.agent.getStateHistory(threadId, options)) {
     out.push(toProtocolState(s));
-    if (opts?.limit != null && out.length >= opts.limit) break;
+    if (out.length >= options.limit) break;
   }
   return out;
 }

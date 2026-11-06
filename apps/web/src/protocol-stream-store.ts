@@ -78,6 +78,9 @@ interface ThreadEntry {
   pendingInterruptCount?: number;
   // Replayed delegation timestamps reflect page load, not actual execution.
   liveDelegationIds: Set<string>;
+  // The SDK re-stamps completedAt whenever a later root `values` frame carries
+  // the task's ToolMessage, so keep the first one observed.
+  delegationCompletedAt: Map<string, number>;
   lastAccessed: number;
 }
 
@@ -238,6 +241,7 @@ export class ProtocolStreamStore {
       queued: [],
       steerCancellationPending: false,
       liveDelegationIds: new Set(),
+      delegationCompletedAt: new Map(),
       lastAccessed: Date.now(),
     };
     this.entries.set(threadId, e);
@@ -337,6 +341,10 @@ export class ProtocolStreamStore {
       const taskError = taskErrors.get(s.id);
       if (root.isLoading) e.liveDelegationIds.add(s.id);
       const live = e.liveDelegationIds.has(s.id);
+      if (live && s.completedAt && !e.delegationCompletedAt.has(s.id)) {
+        e.delegationCompletedAt.set(s.id, s.completedAt.getTime());
+      }
+      const completedAt = live ? e.delegationCompletedAt.get(s.id) : undefined;
       delegations[s.id] = {
         delegationId: s.id,
         subagent: s.name,
@@ -354,7 +362,7 @@ export class ProtocolStreamStore {
         ...(s.output !== undefined ? { output: s.output } : {}),
         ...(s.error || taskError ? { errorText: s.error ?? taskError } : {}),
         ...(live && s.startedAt ? { startedAt: s.startedAt.getTime() } : {}),
-        ...(live && s.completedAt ? { completedAt: s.completedAt.getTime() } : {}),
+        ...(completedAt !== undefined ? { completedAt } : {}),
         parentId: s.parentId,
         depth: s.depth,
         ...(batchId ? { batchId } : {}),

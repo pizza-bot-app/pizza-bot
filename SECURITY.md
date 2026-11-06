@@ -57,6 +57,13 @@ the safe defaults, and the choices that weaken them.
   the standard AWS credential chain. Access keys and Bedrock API keys entered in
   the desktop app use `safeStorage` like other provider secrets; server-side
   configuration stores only environment-variable references.
+- **Google Workspace credentials live in the OS keychain.** The
+  `google-workspace` plugin stores its OAuth client and refresh token directly
+  in the OS keychain (service `pizza-bot-google-workspace`), not in
+  `secrets.json`. Its scopes are `gmail.readonly`, `gmail.compose` (the server
+  only creates drafts, but Google's scope also permits sending), `calendar.readonly`,
+  and `calendar.events`; mail and event text is
+  untrusted input to the model.
 - **Environment references stay raw on disk.** MCP server manifests keep
   `${ENV_VAR}` references literally and expand them only for a live connection.
   Literal header and environment values are also accepted and would be stored as

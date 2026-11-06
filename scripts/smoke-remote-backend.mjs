@@ -119,7 +119,7 @@ try {
   assert.equal(plugins.status, 200);
   assert.deepEqual(
     (await plugins.json()).plugins.map((plugin) => plugin.name).sort(),
-    ["playwright-mcp"],
+    ["google-workspace", "playwright-mcp"],
   );
 
   const playwright = await waitForPlaywright(
@@ -134,13 +134,33 @@ try {
 
   const skills = await fetch(`${baseUrl}/skills`, { headers: authHeaders });
   assert.equal(skills.status, 200);
-  const browserAutomation = (await skills.json()).skills.find(
+  const skillRows = (await skills.json()).skills;
+  const browserAutomation = skillRows.find(
     (skill) => skill.id === "browser-automation",
   );
   assert.equal(
     browserAutomation?.status,
     expectPlaywrightUnavailable ? "unavailable" : "ready",
     `unexpected browser skill state: ${browserAutomation?.statusDetail ?? "not found"}`,
+  );
+  assert.deepEqual(
+    skillRows
+      .filter((skill) => skill.pluginName === "google-workspace")
+      .map(({ id, status }) => ({ id, status }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    [
+      { id: "calendar", status: "disabled" },
+      { id: "email", status: "disabled" },
+    ],
+    "google-workspace skills must ship disabled",
+  );
+
+  const mcpServers = await fetch(`${baseUrl}/mcp-servers`, { headers: authHeaders });
+  assert.equal(mcpServers.status, 200);
+  assert.equal(
+    (await mcpServers.json()).servers.find((server) => server.id === "google-workspace")
+      ?.status,
+    "disabled",
   );
 
   streamAbort = new AbortController();

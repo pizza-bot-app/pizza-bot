@@ -171,8 +171,8 @@ function SkillImportControl({
         ref={inputRef}
         hidden
         type="file"
-        accept=".zip,application/zip"
-        aria-label="Choose a skill ZIP file"
+        accept=".md,.markdown,.zip,text/markdown,application/zip"
+        aria-label="Choose a Markdown or ZIP skill file"
         onChange={(event) => void handleFile(event)}
       />
       <button

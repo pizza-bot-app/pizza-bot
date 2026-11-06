@@ -27,6 +27,7 @@ import { PROTOCOL_VERSION } from "@pizza-bot/core";
 import { isAllowedRendererNavigation } from "./navigation-policy.js";
 import { handleSquirrelStartup, SQUIRREL_APP_ID } from "./squirrel-startup.js";
 import { resolveWindowIconPath } from "./window-icon.js";
+import { type LoginShellPathResult, mergePath, readLoginShellPath } from "./login-shell-path.js";
 import {
   BoundedRetention,
   NATIVE_NOTIFICATION_CHANNELS,
@@ -112,6 +113,7 @@ const shellLogger = configureLogging({
 installConsoleCapture(shellLogger.child({ component: "console" }));
 installProcessErrorHandlers(shellLogger.child({ component: "process" }));
 
+let loginShellPathApplied: Promise<void> = Promise.resolve();
 let sidecar: Sidecar | undefined;
 let mainWindow: BrowserWindow | undefined;
 let activeNotificationThreadId: string | null = null;
@@ -161,6 +163,7 @@ app.on("second-instance", () => {
 void main();
 
 async function main(): Promise<void> {
+  loginShellPathApplied = applyLoginShellPath(readLoginShellPath());
   await app.whenReady();
   shellLogger.info("Desktop shell ready", {
     event: "desktop.ready",
@@ -274,6 +277,25 @@ async function main(): Promise<void> {
   });
 }
 
+async function applyLoginShellPath(pending: Promise<LoginShellPathResult>): Promise<void> {
+  const result = await pending;
+  if ("reason" in result) {
+    if (result.reason !== "unsupported_platform") {
+      shellLogger.warn("Could not read the login shell PATH; keeping the launch PATH", {
+        event: "desktop.login_shell_path_unavailable",
+        reason: result.reason,
+        elapsedMs: result.elapsedMs,
+      });
+    }
+    return;
+  }
+  shellLogger.debug("Read the login shell PATH", {
+    event: "desktop.login_shell_path_read",
+    elapsedMs: result.elapsedMs,
+  });
+  process.env.PATH = mergePath(result.path, process.env.PATH);
+}
+
 function initialConnection(): ActiveConnection | { mode: "local" } {
   const environmentUrl = process.env.PIZZA_API_BASE?.trim();
   if (environmentUrl) {
@@ -378,6 +400,8 @@ function reportSidecarFatal(err: Error): void {
 
 /** Fork the sidecar with secrets decrypted from current storage. */
 async function bootSidecar(dataRoot: string, apiToken: string): Promise<Sidecar> {
+  // The child, and every stdio MCP server it spawns, inherits this process's PATH.
+  await loginShellPathApplied;
   const mcpNodePath = resolveMcpNodePath();
   return startSidecar({
     serverModulePath: resolveServerEntry(),

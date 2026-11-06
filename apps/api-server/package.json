@@ -27,8 +27,8 @@
     "tsx": "^4.23.15"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.0",
-    "@langchain/core": "^1.2.13",
+    "@hono/node-server": "^2.1.6",
+    "@langchain/core": "^1.2.14",
     "@langchain/langgraph-sdk": "~1.12.0",
     "@pizza-bot/core": "*",
     "@pizza-bot/logging": "*",
@@ -38,7 +38,7 @@
     "@pizza-bot/runtime-langgraph": "*",
     "@pizza-bot/storage": "*",
     "cron": "^4.4.0",
-    "hono": "^4.13.10",
+    "hono": "^4.13.16",
     "yauzl": "^3.4.0",
     "zod": "^4.0.0"
   }

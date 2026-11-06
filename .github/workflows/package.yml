@@ -309,7 +309,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          # rpm 4.20+ (ubuntu-26.04) breaks electron-installer-redhat's spec: `cp: cannot stat 'usr/*'`.
+          - runner: ubuntu-24.04
             arch: x64
           - runner: ubuntu-24.04-arm
             arch: arm64

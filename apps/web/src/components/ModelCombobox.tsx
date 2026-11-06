@@ -89,12 +89,18 @@ export function ModelCombobox({
   useEffect(() => {
     if (!open) return;
     setQuery("");
+    requestAnimationFrame(() => searchRef.current?.focus());
+  }, [open]);
+
+  // Keyed by ids because status polling rebuilds an identical catalog with a fresh array.
+  const modelKey = models.map((model) => model.id).join("\n");
+  useEffect(() => {
+    if (!open) return;
     const index = rows.findIndex((row) => row.value === value && !row.disabled);
     setCursor(index < 0 ? firstEnabled : index);
-    requestAnimationFrame(() => searchRef.current?.focus());
-    // Seed only on open or an external value change; typing re-seeds below.
+    // Seed only on open or an external value/catalog change; typing re-seeds below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, value, models]);
+  }, [open, value, modelKey]);
 
   useEffect(() => {
     if (!normalized) return;
