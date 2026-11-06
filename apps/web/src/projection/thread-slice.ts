@@ -56,4 +56,9 @@ export interface ThreadSlice {
    * The run still completes with `success`, so this is not an `errorText`.
    */
   truncated: boolean;
+  /**
+   * The orchestrator dropped a reply cut off mid tool call and is asking the
+   * model again, so the turn that just vanished from the feed is being redone.
+   */
+  retryingCutOff: boolean;
 }
