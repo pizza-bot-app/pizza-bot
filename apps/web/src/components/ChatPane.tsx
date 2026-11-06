@@ -8,6 +8,7 @@ import { WelcomeState } from "./WelcomeState.js";
 import { Composer } from "./Composer.js";
 import { RunErrorBanner } from "./RunErrorBanner.js";
 import { TruncatedNoticeBanner } from "./TruncatedNoticeBanner.js";
+import { CutOffRetryNotice } from "./CutOffRetryNotice.js";
 import { useHotkey } from "../hotkeys/index.js";
 
 const INTERACTIVE_CHAT_SELECTOR =
@@ -52,7 +53,7 @@ export function ChatPane({
   searchTarget,
   onSearchTargetHandled,
 }: ChatPaneProps) {
-  const { messages, status, errorText, errorCode, truncated, queued, send, steerNow, cancelQueued, stop, decide } =
+  const { messages, status, errorText, errorCode, truncated, retryingCutOff, queued, send, steerNow, cancelQueued, stop, decide } =
     useThreadSlice(threadId, hydrateOnMount);
   const [prefill, setPrefill] = useState<string | undefined>();
   const [prefillToken, setPrefillToken] = useState(0);
@@ -105,6 +106,7 @@ export function ChatPane({
         <RunErrorBanner text={errorText} code={errorCode} />
       )}
       {status === "idle" && truncated && <TruncatedNoticeBanner />}
+      {status === "streaming" && retryingCutOff && <CutOffRetryNotice />}
       <Composer
         threadId={threadId}
         streaming={status === "streaming"}
