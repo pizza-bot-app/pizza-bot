@@ -17,6 +17,6 @@
     "@langchain/core": "^1.2.14",
     "@langchain/langgraph": "^1.4.18",
     "deepagents": "^1.15.1",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }
