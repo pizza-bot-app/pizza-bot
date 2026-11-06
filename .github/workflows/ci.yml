@@ -117,7 +117,8 @@ jobs:
   # `package`: it is the command a release runs, and it exercises the deb and rpm
   # makers a release depends on.
   desktop:
-    runs-on: ubuntu-latest
+    # rpm 4.20+ (ubuntu-26.04) breaks electron-installer-redhat's spec: `cp: cannot stat 'usr/*'`.
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
