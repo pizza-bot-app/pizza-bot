@@ -1756,8 +1756,7 @@ button.sidebar-folder-row:hover,
 .resource-editor-delete { color: var(--danger, #e5484d); }
 .resource-editor-delete:hover:not(:disabled) { border-color: var(--danger, #e5484d); }
 
-.resource-card-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex: 0 0 auto; }
-.mcp-managed-link { display: inline-flex; align-items: center; gap: 5px; margin-right: 8px; white-space: nowrap; }
+.mcp-managed-link { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .mcp-managed-link:disabled { color: var(--dim); cursor: default; text-decoration: none; }
 .mcp-load-error {
   display: flex; align-items: center; gap: 12px; padding: 12px 14px;
@@ -1770,13 +1769,6 @@ button.sidebar-folder-row:hover,
 .mcp-secret-field { position: relative; display: flex; min-width: 0; }
 .mcp-secret-field .field-input { flex: 1; min-width: 0; padding-right: 36px; }
 .mcp-secret-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: transparent; }
-
-@media (max-width: 560px) {
-  .resource-card-head { flex-wrap: wrap; }
-  .resource-card-actions { width: 100%; margin-left: 0; }
-  .resource-card-actions .plugin-card-action { width: 44px; height: 44px; }
-  .mcp-managed-link { flex: 1; min-height: 44px; }
-}
 
 @media (max-width: 560px) {
   .mcp-reconnect { align-items: stretch; flex-direction: column; }
