@@ -34,18 +34,17 @@ const button = (html: string, label: string) =>
     .find((b) => b.includes(`aria-label="${label}"`) || new RegExp(`>\\s*${label}</button>$`).test(b));
 
 describe("McpServerActions", () => {
-  it("offers live Edit and Delete icon actions for a custom server", () => {
+  it("offers a live Edit button and Delete action for a custom server", () => {
     const html = render(server());
-    expect(button(html, "Edit outlook")).toContain("plugin-card-action");
-    expect(button(html, "Edit outlook")).not.toContain("disabled");
+    expect(button(html, "Edit")).not.toContain("disabled");
     expect(button(html, "Delete outlook")).toContain("plugin-card-remove");
     expect(button(html, "Delete outlook")).not.toContain("disabled");
     expect(html).not.toContain("Managed by plugin");
   });
 
-  it("disables Edit and Delete for a plugin server and links to the plugin", () => {
+  it("hides Edit, disables Delete for a plugin server and links to the plugin", () => {
     const html = render(server({ source: "plugin", pluginName: "amazon" }));
-    expect(button(html, "Edit outlook")).toMatch(/title="Managed by the amazon plugin"[^>]*disabled=""/);
+    expect(button(html, "Edit")).toBeUndefined();
     expect(button(html, "Delete outlook")).toMatch(/title="Managed by the amazon plugin"[^>]*disabled=""/);
     expect(button(html, "Managed by plugin")).toContain("mcp-managed-link");
     expect(button(html, "Managed by plugin")).not.toContain("disabled");
@@ -53,7 +52,7 @@ describe("McpServerActions", () => {
 
   it("disables Delete with the blocking reason when enabled skills depend on the server", () => {
     const html = render(server(), "Required by Email Triage. Disable that skill first.");
-    expect(button(html, "Edit outlook")).not.toContain("disabled");
+    expect(button(html, "Edit")).not.toContain("disabled");
     expect(button(html, "Delete outlook")).toMatch(
       /title="Required by Email Triage\. Disable that skill first\."[^>]*disabled=""/,
     );

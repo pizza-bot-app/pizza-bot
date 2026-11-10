@@ -124,16 +124,11 @@ export function McpServerActions({
           <Puzzle size={13} /> Managed by plugin
         </button>
       )}
-      <button
-        type="button"
-        className="plugin-card-action"
-        aria-label={`Edit ${server.id}`}
-        title={managed ? managedReason : "Edit"}
-        onClick={onEdit}
-        disabled={managed}
-      >
-        <Pencil size={15} />
-      </button>
+      {!managed && (
+        <button type="button" className="btn-secondary" onClick={onEdit}>
+          <Pencil size={14} /> Edit
+        </button>
+      )}
       <button
         type="button"
         className="plugin-card-action plugin-card-remove"
