@@ -52,11 +52,14 @@ describe("McpServerEditor", () => {
     )).not.toContain("The ID is fixed once created");
   });
 
-  it("keeps destructive actions out of the form: only Cancel and Save in the footer", () => {
-    const html = render();
+  it("orders the footer Delete, then Cancel and Save", () => {
+    const html = render({ onDelete: vi.fn() });
     const footer = html.slice(html.indexOf('<footer class="resource-editor-actions"'));
-    expect(footer).toContain(">Cancel</button>");
-    expect(footer).toContain(">Save</button>");
-    expect(footer).not.toContain("Delete");
+    expect(footer).toMatch(/resource-editor-delete[\s\S]*Delete[\s\S]*>Cancel<\/button>[\s\S]*>Save<\/button>/);
+  });
+
+  it("disables Delete with the blocking reason when dependents require the server", () => {
+    const html = render({ onDelete: vi.fn(), deleteBlockedReason: "Required by Email Triage." });
+    expect(html).toMatch(/<button[^>]*resource-editor-delete[^>]*disabled=""[^>]*title="Required by Email Triage\."/);
   });
 });
