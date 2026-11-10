@@ -517,4 +517,48 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       expect.arrayContaining(["/first.txt", "/second.txt"]),
     );
   });
+
+  it("each task() dispatched from one eval reports its own tool call id", async () => {
+    // The SDK keys delegations on tool_call_id, so siblings sharing the eval call's
+    // id collapse into one Activity card.
+    const model = new ScriptedModel([
+      new AIMessage({
+        content: "",
+        tool_calls: [{
+          id: "eval-dispatch-1",
+          name: "eval",
+          args: {
+            code: `(await Promise.all(["fact a", "fact b"].map((d) => task({ description: d, subagentType: "specialist" })))).join(" | ")`,
+          },
+          type: "tool_call",
+        }],
+      }),
+      new AIMessage({ content: "done" }),
+    ]);
+    const agent = await createPizzaBotAgent(PIZZA_BOT_AGENT.systemPrompt, {
+      model,
+      skills: skillCatalog("specialist", "Answers facts.", "Answer the fact.", []),
+    });
+
+    const events: ProtocolEvent[] = [];
+    for await (const ev of agent.streamProtocol(
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "two facts" }] }] },
+      { threadId: `proto_eval_dispatch_${Math.random().toString(36).slice(2)}` },
+    )) {
+      events.push(ev);
+    }
+
+    const taskStarts = events
+      .filter((e) => channelOf(e) === "tools")
+      .map((e) => e.params.data as { event?: string; tool_name?: string; tool_call_id?: string; input?: unknown })
+      .filter((d) => d.event === "tool-started" && d.tool_name === "task");
+    const ids = taskStarts.map((d) => d.tool_call_id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids).not.toContain("eval-dispatch-1");
+    expect(taskStarts.map((d) => JSON.stringify(d.input)).sort()).toEqual([
+      expect.stringContaining("fact a"),
+      expect.stringContaining("fact b"),
+    ]);
+  });
 });
