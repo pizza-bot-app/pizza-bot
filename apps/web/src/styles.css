@@ -1756,6 +1756,7 @@ button.sidebar-folder-row:hover,
 .resource-editor-delete { color: var(--danger, #e5484d); }
 .resource-editor-delete:hover:not(:disabled) { border-color: var(--danger, #e5484d); }
 
+.resource-card-header-action { margin-left: auto; flex: 0 0 auto; }
 .mcp-managed-link { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .mcp-managed-link:disabled { color: var(--dim); cursor: default; text-decoration: none; }
 .mcp-load-error {
