@@ -97,18 +97,29 @@ export function McpServersModule({
   );
 }
 
+export function McpManagedLink({ onOpenPlugins }: { onOpenPlugins?: () => void }) {
+  return (
+    <button
+      type="button"
+      className="resource-card-link mcp-managed-link"
+      onClick={onOpenPlugins}
+      disabled={!onOpenPlugins}
+    >
+      <Puzzle size={13} /> Managed by plugin
+    </button>
+  );
+}
+
 export function McpServerActions({
   server,
   deleteBlockedReason,
   onEdit,
   onDelete,
-  onOpenPlugins,
 }: {
   server: McpServerRow;
   deleteBlockedReason?: string;
   onEdit: () => void;
   onDelete: () => void;
-  onOpenPlugins?: () => void;
 }) {
   const managed = server.source === "plugin";
   const managedReason = `Managed by the ${server.pluginName ?? "plugin"} plugin`;
@@ -124,16 +135,7 @@ export function McpServerActions({
         <Trash2 size={14} /> Delete
       </button>
       <span className="resource-editor-actions-spacer" />
-      {managed ? (
-        <button
-          type="button"
-          className="resource-card-link mcp-managed-link"
-          onClick={onOpenPlugins}
-          disabled={!onOpenPlugins}
-        >
-          <Puzzle size={13} /> Managed by plugin
-        </button>
-      ) : (
+      {!managed && (
         <button type="button" className="btn-secondary" onClick={onEdit}>
           <Pencil size={14} /> Edit
         </button>
@@ -273,13 +275,15 @@ function McpServerDetail({
         reconnectControl={reconnectControl}
         dependents={dependents}
         onBack={backToList}
+        headerAction={
+          selected.source === "plugin" ? <McpManagedLink onOpenPlugins={onOpenPlugins} /> : undefined
+        }
         footer={
           <McpServerActions
             server={selected}
             deleteBlockedReason={deleteBlockedReason}
             onEdit={() => setSelection({ mode: "edit", id: selected.id })}
             onDelete={() => void requestDelete(selected)}
-            onOpenPlugins={onOpenPlugins}
           />
         }
         loadError={

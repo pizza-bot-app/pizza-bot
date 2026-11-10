@@ -30,6 +30,13 @@ describe("McpServerCard", () => {
     expect(html).not.toContain('class="provenance-badge plugin"');
   });
 
+  it("renders the header action inside the header", () => {
+    const html = renderToStaticMarkup(
+      <McpServerCard server={server({ source: "plugin" })} headerAction={<a id="managed" />} />,
+    );
+    expect(html).toMatch(/<header[^>]*>(?:(?!<\/header>)[\s\S])*id="managed"[\s\S]*<\/header>/);
+  });
+
   it("shows plugin provenance in the header", () => {
     const html = renderToStaticMarkup(
       <McpServerCard server={server({ source: "plugin", pluginName: "outlook-suite" })} />,

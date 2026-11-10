@@ -33,6 +33,7 @@ export interface McpServerCardProps {
   server: McpServerRow;
   onBack?: () => void;
   onGetTools?: (id: string) => Promise<McpToolInfo[]>;
+  headerAction?: ReactNode;
   footer?: ReactNode;
   enablement?: ReactNode;
   reconnectControl?: ReactNode;
@@ -42,6 +43,7 @@ export interface McpServerCardProps {
 
 export function McpServerCard({
   server,
+  headerAction,
   footer,
   enablement,
   reconnectControl,
@@ -97,6 +99,7 @@ export function McpServerCard({
             </p>
           )}
         </div>
+        {headerAction && <div className="resource-card-header-action">{headerAction}</div>}
       </header>
 
       {loadError}
