@@ -114,7 +114,17 @@ export function McpServerActions({
   const managedReason = `Managed by the ${server.pluginName ?? "plugin"} plugin`;
   return (
     <>
-      {managed && (
+      <button
+        type="button"
+        className="btn-secondary resource-editor-delete"
+        title={managed ? managedReason : deleteBlockedReason}
+        onClick={onDelete}
+        disabled={managed || Boolean(deleteBlockedReason)}
+      >
+        <Trash2 size={14} /> Delete
+      </button>
+      <span className="resource-editor-actions-spacer" />
+      {managed ? (
         <button
           type="button"
           className="resource-card-link mcp-managed-link"
@@ -123,22 +133,11 @@ export function McpServerActions({
         >
           <Puzzle size={13} /> Managed by plugin
         </button>
-      )}
-      {!managed && (
+      ) : (
         <button type="button" className="btn-secondary" onClick={onEdit}>
           <Pencil size={14} /> Edit
         </button>
       )}
-      <button
-        type="button"
-        className="plugin-card-action plugin-card-remove"
-        aria-label={`Delete ${server.id}`}
-        title={managed ? managedReason : deleteBlockedReason ?? "Delete"}
-        onClick={onDelete}
-        disabled={managed || Boolean(deleteBlockedReason)}
-      >
-        <Trash2 size={15} />
-      </button>
     </>
   );
 }
@@ -274,7 +273,7 @@ function McpServerDetail({
         reconnectControl={reconnectControl}
         dependents={dependents}
         onBack={backToList}
-        actions={
+        footer={
           <McpServerActions
             server={selected}
             deleteBlockedReason={deleteBlockedReason}

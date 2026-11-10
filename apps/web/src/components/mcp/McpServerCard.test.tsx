@@ -17,12 +17,15 @@ function server(overrides: Partial<McpServerRow> = {}): McpServerRow {
 }
 
 describe("McpServerCard", () => {
-  it("renders the actions slot and the server's own provenance badge", () => {
+  it("renders the footer slot at the bottom, after the header and dependents", () => {
     const html = renderToStaticMarkup(
-      <McpServerCard server={server()} actions={<button>Edit</button>} />,
+      <McpServerCard
+        server={server()}
+        dependents={<div id="dependents" />}
+        footer={<button>Edit</button>}
+      />,
     );
-    expect(html).toContain('class="resource-card-actions"');
-    expect(html).toContain("<button>Edit</button>");
+    expect(html).toMatch(/<\/header>[\s\S]*id="dependents"[\s\S]*<footer class="resource-editor-actions"><button>Edit<\/button><\/footer>/);
     expect(html).toContain('class="provenance-badge user"');
     expect(html).not.toContain('class="provenance-badge plugin"');
   });
