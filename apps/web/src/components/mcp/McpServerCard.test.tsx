@@ -1,0 +1,69 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import type { McpServerRow } from "@/api-client";
+import { McpServerCard, mcpStatusLabel } from "./McpServerCard.js";
+
+function server(overrides: Partial<McpServerRow> = {}): McpServerRow {
+  return {
+    id: "outlook",
+    source: "user",
+    entry: { command: "npx", args: ["-y", "outlook-mcp"] },
+    enabled: true,
+    status: "connected",
+    toolCount: 12,
+    dependentSkills: [],
+    ...overrides,
+  };
+}
+
+describe("McpServerCard", () => {
+  it("renders the footer slot at the bottom, after the header and dependents", () => {
+    const html = renderToStaticMarkup(
+      <McpServerCard
+        server={server()}
+        dependents={<div id="dependents" />}
+        footer={<button>Edit</button>}
+      />,
+    );
+    expect(html).toMatch(/<\/header>[\s\S]*id="dependents"[\s\S]*<footer class="resource-editor-actions"><button>Edit<\/button><\/footer>/);
+    expect(html).toContain('class="provenance-badge user"');
+    expect(html).not.toContain('class="provenance-badge plugin"');
+  });
+
+  it("renders the header action inside the header", () => {
+    const html = renderToStaticMarkup(
+      <McpServerCard server={server({ source: "plugin" })} headerAction={<a id="managed" />} />,
+    );
+    expect(html).toMatch(/<header[^>]*>(?:(?!<\/header>)[\s\S])*id="managed"[\s\S]*<\/header>/);
+  });
+
+  it("shows plugin provenance in the header", () => {
+    const html = renderToStaticMarkup(
+      <McpServerCard server={server({ source: "plugin", pluginName: "outlook-suite" })} />,
+    );
+    expect(html).toContain('class="provenance-badge plugin"');
+    expect(html).toContain("from plugin <code>outlook-suite</code>");
+  });
+
+  it("renders the load-error slot above the enablement control", () => {
+    const html = renderToStaticMarkup(
+      <McpServerCard
+        server={server()}
+        loadError={<div id="load-error" />}
+        enablement={<div id="enablement" />}
+      />,
+    );
+    expect(html.indexOf('id="load-error"')).toBeLessThan(html.indexOf('id="enablement"'));
+  });
+});
+
+describe("mcpStatusLabel", () => {
+  it("distinguishes connecting, failed and crashed instead of a generic 'not connected'", () => {
+    expect(mcpStatusLabel(server({ status: "loading" }))).toBe("Connecting…");
+    expect(mcpStatusLabel(server({ status: "retrying" }))).toBe("Connecting…");
+    expect(mcpStatusLabel(server({ status: "error" }))).toBe("Failed to connect");
+    expect(mcpStatusLabel(server({ status: "crashed" }))).toBe("Crashed");
+    expect(mcpStatusLabel(server({ status: "connected", toolCount: 1 }))).toBe("Connected · 1 tool");
+    expect(mcpStatusLabel(server({ enabled: false }))).toBe("Disabled");
+  });
+});
