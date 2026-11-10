@@ -7,7 +7,7 @@
 import { Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
 import { BaseMessage } from "@langchain/core/messages";
-import { tool } from "@langchain/core/tools";
+import { tool, type ToolRunnableConfig } from "@langchain/core/tools";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { isCommand } from "@langchain/langgraph";
 import { SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY } from "deepagents";
@@ -207,22 +207,29 @@ export async function createWorkerCodeInterpreterMiddleware(
       if (!taskTool) throw new Error("subagent dispatch is not available in this sandbox");
       const responseSchema = message.responseSchema;
       if (responseSchema !== undefined) validateResponseSchema(responseSchema);
-      const config: RunnableConfig =
-        responseSchema === undefined
-          ? session.config
-          : {
-              ...session.config,
-              configurable: {
-                ...session.config.configurable,
-                [SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY]: asResponseFormat(responseSchema),
-              },
-            };
-      const content = unwrapToolEnvelope(
-        await taskTool.invoke(
-          { description: message.description, subagent_type: message.subagentType },
-          config,
-        ),
-      );
+      const args = { description: message.description, subagent_type: message.subagentType };
+      // `toolCall` is the eval call. The tool wrapper falls back to its id when the
+      // args aren't a ToolCall, so without a per-dispatch call every task() from one
+      // eval reports the eval call's id and the SDK folds them into one delegation.
+      const evalCallId = (session.config as ToolRunnableConfig).toolCall?.id;
+      const config: ToolRunnableConfig = {
+        ...session.config,
+        ...(evalCallId && {
+          toolCall: {
+            type: "tool_call",
+            id: `${evalCallId}:task:${message.id}`,
+            name: taskTool.name,
+            args,
+          },
+        }),
+        ...(responseSchema !== undefined && {
+          configurable: {
+            ...session.config.configurable,
+            [SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY]: asResponseFormat(responseSchema),
+          },
+        }),
+      };
+      const content = unwrapToolEnvelope(await taskTool.invoke(args, config));
       const value =
         responseSchema !== undefined && typeof content === "string"
           ? tryParseJson(content)
