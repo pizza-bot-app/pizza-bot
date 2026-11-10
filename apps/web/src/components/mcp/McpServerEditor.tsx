@@ -10,6 +10,9 @@ import { parseMcpJson, type ParsedMcpJson } from "./mcp-json.js";
 export interface McpServerEditorProps {
   server: McpServerDoc | null;
   onSave: (id: string, entry: McpServerEntryWire) => Promise<void>;
+  onDelete?: () => void;
+  /** When set, Delete stays visible but disabled and explains why. */
+  deleteBlockedReason?: string;
   enablement?: ReactNode;
   reconnectControl?: ReactNode;
   dependents?: ReactNode;
@@ -87,6 +90,8 @@ function buildEntry(draft: Draft, enabled?: boolean): McpServerEntryWire {
 export function McpServerEditor({
   server,
   onSave,
+  onDelete,
+  deleteBlockedReason,
   enablement,
   reconnectControl,
   dependents,
@@ -300,6 +305,17 @@ export function McpServerEditor({
       </div>
 
       <footer className="resource-editor-actions">
+        {!isNew && onDelete && (
+          <button
+            type="button"
+            className="btn-secondary resource-editor-delete"
+            onClick={onDelete}
+            disabled={saving || Boolean(deleteBlockedReason)}
+            title={deleteBlockedReason}
+          >
+            <Trash2 size={14} /> Delete
+          </button>
+        )}
         <span className="resource-editor-actions-spacer" />
         <button type="button" className="btn-secondary" onClick={cancel} disabled={saving}>
           Cancel

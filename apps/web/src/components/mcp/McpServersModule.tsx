@@ -258,6 +258,8 @@ function McpServerDetail({
         reconnectControl={reconnectControl}
         dependents={dependents}
         onSave={handleSave}
+        onDelete={() => void requestDelete(selected)}
+        deleteBlockedReason={deleteBlockedReason}
         onCancel={leaveEditor}
       />
     );
