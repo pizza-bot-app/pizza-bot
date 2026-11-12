@@ -52,6 +52,7 @@ body:
         - OpenRouter
         - Requesty
         - Opper
+        - UberLLM
         - Ollama
         - Not reached / not applicable
     validations:
