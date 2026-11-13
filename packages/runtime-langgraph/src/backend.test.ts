@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CompositeBackend, StateBackend } from "deepagents";
+import {
+  CompositeBackend,
+  StateBackend,
+  type GlobResult,
+  type SandboxBackendProtocolV2,
+} from "deepagents";
 import { buildBackend } from "./backend.js";
 import {
   mkdtempSync,
@@ -412,5 +417,31 @@ describe("buildBackend", () => {
     enabled = true;
     expect((await backend.read("/memories/preferences.md")).content).toContain("thin crust");
     removeDir(dir);
+  });
+
+  it("mounts a sandbox's guest /workspace and rebases its relative glob results", async () => {
+    const globs: Array<[string, string]> = [];
+    const sandbox = {
+      id: "vm",
+      execute: async () => ({ output: "", exitCode: 0, truncated: false }),
+      glob: async (pattern: string, base: string): Promise<GlobResult> => {
+        globs.push([pattern, base]);
+        return { files: [{ path: "a/b.txt", is_dir: false, size: 1 }] };
+      },
+      ls: async () => ({
+        files: [{ path: "/workspace/a/", is_dir: true, size: 0 }],
+      }),
+    } as unknown as SandboxBackendProtocolV2;
+    const backend = buildBackend({ sandbox, sandboxExecute: true }) as CompositeBackend;
+
+    expect((await backend.glob("**/*.txt", "/workspace/")).files?.map((f) => f.path)).toEqual([
+      "/workspace/a/b.txt",
+    ]);
+    expect((await backend.glob("*.txt", "/workspace/a")).files?.map((f) => f.path)).toEqual([
+      "/workspace/a/a/b.txt",
+    ]);
+    expect(globs).toEqual([["**/*.txt", "/workspace"], ["*.txt", "/workspace/a"]]);
+    expect((await backend.ls("/workspace/")).files?.map((f) => f.path)).toEqual(["/workspace/a/"]);
+    expect(backend.id).toBe("vm");
   });
 });
