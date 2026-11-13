@@ -1,6 +1,7 @@
 import {
   ASSISTANT_ID,
   classifyError,
+  CUT_OFF_TOOL_CALLS_CHANNEL,
   type HitlDecision,
   type AttachmentMeta,
   type ThreadStateValues,
@@ -41,6 +42,7 @@ const EMPTY_SLICE: ThreadSlice = {
   queued: [],
   usage: undefined,
   truncated: false,
+  retryingCutOff: false,
 };
 
 export type HydrationStatus = "unattached" | "loading" | "ready" | "error";
@@ -386,7 +388,10 @@ export class ProtocolStreamStore {
       rootError ?? (e.hydrationStatus === "error" ? e.hydrationError : undefined);
     const errorText = status === "error" ? errorMessage(surfacedError) : undefined;
     const errorCode = errorText !== undefined ? classifyError(surfacedError) : undefined;
-    const truncated = (root.values as ThreadStateValues | undefined)?.[TRUNCATED_TURN_CHANNEL] === true;
+    const values = root.values as ThreadStateValues | undefined;
+    const truncated = values?.[TRUNCATED_TURN_CHANNEL] === true;
+    // The channel outlives a stopped run until the next run resets it.
+    const retryingCutOff = root.isLoading && (values?.[CUT_OFF_TOOL_CALLS_CHANNEL]?.length ?? 0) > 0;
 
     if (e.hydrationStatus === "ready" && !root.isLoading && !root.interrupt) {
       messages = sealOpenToolCalls(messages);
@@ -399,6 +404,7 @@ export class ProtocolStreamStore {
       errorText,
       errorCode,
       truncated,
+      retryingCutOff,
       ...(e.runId ? { runId: e.runId } : { runId: undefined }),
       attached: e.hydrationStatus === "ready",
       hydrationStatus: e.hydrationStatus,
@@ -810,6 +816,7 @@ function sliceEqual(a: ProtocolThreadSlice, b: ProtocolThreadSlice): boolean {
     a.errorText === b.errorText &&
     a.errorCode === b.errorCode &&
     a.truncated === b.truncated &&
+    a.retryingCutOff === b.retryingCutOff &&
     a.runId === b.runId &&
     a.attached === b.attached &&
     a.hydrationStatus === b.hydrationStatus &&
