@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { findClientFile, openBrowser, startConsent } from "./consent.mjs";
+import { envCredentials } from "./env-credentials.mjs";
 import { SCOPES, createClients } from "./google.mjs";
 import { loadCredentials, saveCredentials } from "./keychain.mjs";
 import { createSignIn } from "./sign-in.mjs";
@@ -19,6 +20,7 @@ const dataRoot = process.env.PIZZA_DATA_ROOT ?? join(homedir(), ".pizza-bot-oss"
 
 const signIn = createSignIn({
   clientDir: join(dataRoot, "google-workspace"),
+  envCredentials,
   scope: SCOPES.readWrite,
   loadCredentials,
   saveCredentials,

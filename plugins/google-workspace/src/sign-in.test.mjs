@@ -8,12 +8,13 @@ import { createSignIn } from "./sign-in.mjs";
 
 const CLIENT = { clientId: "id", clientSecret: "secret" };
 
-function harness({ stored = null, clientFile = { path: "/c/client.json", client: CLIENT } } = {}) {
+function harness({ stored = null, clientFile = { path: "/c/client.json", client: CLIENT }, fromEnv } = {}) {
   const calls = { consents: [], opened: [], saved: [], removed: [] };
   let finish;
   const signIn = createSignIn({
     clientDir: "/c",
     scope: ["s"],
+    envCredentials: () => fromEnv,
     loadCredentials: () => stored,
     saveCredentials: (c) => {
       calls.saved.push(c);
@@ -78,7 +79,25 @@ test("wraps keychain failures", async () => {
       throw new Error("no secret service");
     },
   });
-  await assert.rejects(signIn.credentials(), /OS keychain is unavailable: no secret service/);
+  await assert.rejects(signIn.credentials(), /OS keychain is unavailable: no secret service\. .*set GOOGLE_OAUTH_CLIENT_ID/);
+});
+
+test("environment credentials win over the keychain and never touch it", async () => {
+  const fromEnv = { ...CLIENT, refreshToken: "env" };
+  const signIn = createSignIn({
+    clientDir: "/c",
+    envCredentials: () => fromEnv,
+    loadCredentials: () => {
+      throw new Error("no secret service");
+    },
+  });
+  assert.deepEqual(await signIn.credentials(), fromEnv);
+});
+
+test("reauthorize with environment credentials asks for a new token instead of a browser consent", async () => {
+  const { signIn, calls } = harness({ fromEnv: { ...CLIENT, refreshToken: "env" } });
+  assert.match(await signIn.reauthorize({ ...CLIENT, refreshToken: "env" }), /Replace GOOGLE_OAUTH_REFRESH_TOKEN .*--print/);
+  assert.equal(calls.consents.length, 0);
 });
 
 test("reauthorize reuses the stored client without a client file", async () => {
@@ -110,5 +129,16 @@ test("startConsent's loopback listener rejects a mismatched state", async () => 
   const rejected = assert.rejects(refreshToken, /OAuth state mismatch/);
   const res = await fetch(`${redirect.origin}/?code=c&state=wrong`);
   assert.equal(res.status, 400);
+  await rejected;
+});
+
+test("deliverRedirect forwards a pasted address to the listener and rejects another origin", async () => {
+  const { deliverRedirect, startConsent } = await import("./consent.mjs");
+  const { url, refreshToken } = await startConsent({ ...CLIENT, scope: ["s"], timeoutMs: 5_000 });
+  const origin = new URL(new URL(url).searchParams.get("redirect_uri")).origin;
+  await assert.rejects(deliverRedirect(url, "not a url"), /not a URL/);
+  await assert.rejects(deliverRedirect(url, "http://127.0.0.1:1/?code=c&state=x"), /Expected an address starting with/);
+  const rejected = assert.rejects(refreshToken, /OAuth state mismatch/);
+  await deliverRedirect(url, `  ${origin}/?code=c&state=wrong\n`);
   await rejected;
 });
