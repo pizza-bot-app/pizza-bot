@@ -169,6 +169,8 @@ export function codeInterpreterOptions(hasSubagents: boolean) {
     // a skill worker, and subagent dispatch where it is enabled.
     executionTimeoutMs: 120_000,
     subagents: hasSubagents,
+    // Matches upstream's default cap on concurrent `task()` calls per REPL.
+    maxSubagentConcurrency: 32,
   } as const;
 }
 

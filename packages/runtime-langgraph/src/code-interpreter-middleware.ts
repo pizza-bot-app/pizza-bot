@@ -19,10 +19,8 @@ export interface SandboxOptions {
   maxResultChars: number;
   executionTimeoutMs: number;
   subagents: boolean;
+  maxSubagentConcurrency: number;
 }
-
-/** Mirrors the fixed cap upstream applies when `subagents` is enabled. */
-const SUBAGENT_CONCURRENCY = 32;
 
 /**
  * Grace past the guest deadline before a silent worker counts as wedged. The
@@ -238,7 +236,7 @@ export async function createWorkerCodeInterpreterMiddleware(
       memoryLimitBytes: DEFAULT_MEMORY_LIMIT,
       maxStackSizeBytes: DEFAULT_MAX_STACK_SIZE,
       sessionId: key,
-      subagentConcurrency: options.subagents && taskTool ? SUBAGENT_CONCURRENCY : 0,
+      subagentConcurrency: options.subagents && taskTool ? options.maxSubagentConcurrency : 0,
     };
     const worker = new Worker(WORKER_ENTRY, { workerData, execArgv: WORKER_EXEC_ARGV });
     // A wedged sandbox must never be the reason the process cannot exit.

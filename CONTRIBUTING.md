@@ -8,7 +8,7 @@ with the [README](README.md) for layout and how to run, and
 ## Getting started
 
 ```bash
-node -v            # need >= 24
+node -v            # need >= 24 (.nvmrc: `nvm use` / `fnm use`)
 npm install        # installs workspaces; better-sqlite3 uses a shipped prebuild
 npm run build      # required before running an app from a fresh clone
 npm run typecheck  # tsc across the whole project-reference graph
