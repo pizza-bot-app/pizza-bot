@@ -32,6 +32,7 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_CATALOG_PAGES = 10;
 const VERTEX_FALLBACK_MODEL = "gemini-2.5-flash";
+const DEFAULT_VERTEX_LOCATION = "global";
 
 const PLATFORM_LABELS: Record<GooglePlatform, string> = {
   gai: "Google AI Studio",
@@ -69,6 +70,9 @@ export interface GoogleProviderOptions {
   modelsDevFetch?: typeof fetch;
   maxOutputTokens?: number;
   platform?: GooglePlatformSetting;
+  /** Routes Vertex AI through a project-qualified endpoint instead of Vertex AI Express. */
+  project?: string;
+  location?: string;
   models?: ModelDescriptor[];
 }
 
@@ -102,6 +106,19 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
         ],
       },
       {
+        key: "project",
+        label: "Vertex AI project ID",
+        type: "text",
+        required: false,
+      },
+      {
+        key: "location",
+        label: "Vertex AI location",
+        type: "text",
+        required: false,
+        default: DEFAULT_VERTEX_LOCATION,
+      },
+      {
         key: "maxOutputTokens",
         label: "Output token budget",
         type: "text",
@@ -122,6 +139,8 @@ export class GoogleLangChainModelProvider implements ModelProvider {
   private apiKey: string | undefined;
   private maxOutputTokens: number;
   private platform: GooglePlatformSetting;
+  private project: string | undefined;
+  private location: string;
   private detectedPlatform: GooglePlatform | undefined;
   private aiStudioGeneration: Promise<boolean> | undefined;
 
@@ -159,6 +178,8 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     this.maxOutputTokens =
       positiveInteger(opts.maxOutputTokens) ?? DEFAULT_MAX_OUTPUT_TOKENS;
     this.platform = validPlatform(opts.platform) ?? "auto";
+    this.project = nonEmpty(opts.project);
+    this.location = nonEmpty(opts.location) ?? DEFAULT_VERTEX_LOCATION;
     for (const descriptor of opts.models ?? []) {
       this.descriptors.set(descriptor.id, descriptor);
     }
@@ -170,6 +191,8 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     this.maxOutputTokens =
       positiveInteger(cfg.values.maxOutputTokens) ?? DEFAULT_MAX_OUTPUT_TOKENS;
     this.platform = validPlatform(cfg.values.platform) ?? "auto";
+    this.project = nonEmpty(cfg.values.project);
+    this.location = nonEmpty(cfg.values.location) ?? DEFAULT_VERTEX_LOCATION;
     this.detectedPlatform = undefined;
     this.aiStudioGeneration = undefined;
     if (!this.models) this.descriptors.clear();
@@ -229,7 +252,20 @@ export class GoogleLangChainModelProvider implements ModelProvider {
       this.maxOutputTokens,
       advertisedMax ?? Number.POSITIVE_INFINITY,
     );
+    // Vertex AI Express URLs carry no project or location, and Google serves them
+    // from us-central1, where models offered only on `global` or a multi-region
+    // are not found. The same API key authenticates the project-qualified URL.
+    const vertexProject = platform === "gcp" ? this.project : undefined;
     class ThoughtSignatureSafeChatGoogle extends ChatGoogle {
+      constructor(fields: ConstructorParameters<typeof ChatGoogle>[0]) {
+        super(fields);
+        if (vertexProject) this.apiClient.getProjectId = async () => vertexProject;
+      }
+
+      override get isVertexExpress() {
+        return vertexProject ? false : super.isVertexExpress;
+      }
+
       override get profile() {
         return withContextWindow(super.profile, descriptor?.contextWindow);
       }
@@ -283,6 +319,7 @@ export class GoogleLangChainModelProvider implements ModelProvider {
       model: modelId,
       apiKey,
       platformType: platform,
+      ...(vertexProject ? { location: this.location } : {}),
       ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
     });
   }
@@ -533,6 +570,10 @@ function validPlatform(value: string | undefined): GooglePlatformSetting | undef
   return value === "auto" || value === "gai" || value === "gcp"
     ? value
     : undefined;
+}
+
+function nonEmpty(value: string | undefined): string | undefined {
+  return value?.trim() || undefined;
 }
 
 function uniqueModels(models: ModelDescriptor[]): ModelDescriptor[] {
