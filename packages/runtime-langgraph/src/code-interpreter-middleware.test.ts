@@ -47,6 +47,7 @@ async function sandbox(ptc: string[] = []): Promise<WorkerMiddleware> {
     maxResultChars: 2_000,
     executionTimeoutMs: GUEST_DEADLINE_MS,
     subagents: false,
+    maxSubagentConcurrency: 32,
   })) as WorkerMiddleware;
   return middleware;
 }
