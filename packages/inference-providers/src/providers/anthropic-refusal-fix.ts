@@ -2,6 +2,7 @@
  * Restores the `refusal` content block that `@langchain/anthropic`'s v1 stream
  * converter drops: it reduces `stop_reason: "refusal"` to `content_filter` and
  * discards `stop_details`, so the agent's refusal middleware never fires.
+ * TODO: remove once https://github.com/langchain-ai/langchainjs/issues/12268 ships.
  */
 import type { ChatModelStreamEvent } from "@langchain/core/language_models/event";
 
