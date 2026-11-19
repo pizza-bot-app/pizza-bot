@@ -35,11 +35,9 @@ function toolCallsOf(msg: BaseMessage): Array<{
 }
 
 /**
- * @langchain/aws@1.4.2 drops reasoning signatures while converting native v3
- * streams to v1 history, so Bedrock rejects replayed `reasoning` and
- * `reasoning_content` blocks. Strip them only from provider input, preserving
- * checkpoint display and tool calls. Remove when native-v3 conversion and replay
- * preserve signatures (langchainjs#11164 and #11246).
+ * Bedrock validates `reasoning` signatures against the model that issued them, so
+ * history from another provider (unsigned or foreign-signed) is rejected with a
+ * 400. Strip from provider input only, preserving checkpoint display and tool calls.
  */
 export function stripReasoningForBedrock(messages: BaseMessage[]): BaseMessage[] {
   let rewritten: BaseMessage[] | undefined;
