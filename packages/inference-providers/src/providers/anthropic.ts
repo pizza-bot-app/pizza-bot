@@ -7,6 +7,7 @@ import {
   type ModelsDevCatalogLoader,
 } from "../models-dev.js";
 import { withContextWindow } from "../model-profile.js";
+import { markRefusalStops, restoreRefusalBlocks } from "./anthropic-refusal-fix.js";
 import {
   catalogConnectionError,
   catalogHttpError,
@@ -271,6 +272,17 @@ export async function createAnthropicChatModel(
   class ContextAwareChatAnthropic extends ChatAnthropic {
     override get profile() {
       return withContextWindow(super.profile, descriptor?.contextWindow);
+    }
+
+    // The request types are not exported; `never` passes them through unchanged.
+    protected override async createStreamWithRetry(request: never, options?: never) {
+      return markRefusalStops(await super.createStreamWithRetry(request, options));
+    }
+
+    override _streamChatModelEvents(
+      ...args: Parameters<typeof ChatAnthropic.prototype._streamChatModelEvents>
+    ) {
+      return restoreRefusalBlocks(super._streamChatModelEvents(...args));
     }
   }
 
