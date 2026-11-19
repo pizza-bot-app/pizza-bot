@@ -20,6 +20,7 @@ import {
   type BedrockProviderOptions,
 } from "./models.js";
 import {
+  dropBlankTextBlocksForBedrock,
   endsWithCacheIncompatibleDocument,
   sanitizeDocumentNamesForBedrock,
   stripReasoningForBedrock,
@@ -385,7 +386,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       private outbound(messages: BaseMessage[], options: any): [BaseMessage[], any] {
         const rewritten = normalizeMultimodalToolResultsForBedrock(
-          sanitizeDocumentNamesForBedrock(stripReasoningForBedrock(messages)),
+          sanitizeDocumentNamesForBedrock(stripReasoningForBedrock(dropBlankTextBlocksForBedrock(messages))),
         );
         if (options?.cache_control && endsWithCacheIncompatibleDocument(rewritten)) {
           const { cache_control: _dropped, ...rest } = options;

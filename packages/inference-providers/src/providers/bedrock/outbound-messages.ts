@@ -72,6 +72,35 @@ export function stripReasoningForBedrock(messages: BaseMessage[]): BaseMessage[]
   return rewritten ?? messages;
 }
 
+function isBlankTextBlock(block: unknown): boolean {
+  if (typeof block !== "object" || block === null) return false;
+  const { type, text } = block as { type?: unknown; text?: unknown };
+  return type === "text" && typeof text === "string" && text.trim() === "";
+}
+
+/**
+ * Bedrock Converse rejects blank text blocks, which other models emit alongside
+ * an invalid tool call. An assistant message left with no content and no tool
+ * calls is dropped; other roles keep their original content.
+ */
+export function dropBlankTextBlocksForBedrock(messages: BaseMessage[]): BaseMessage[] {
+  let rewritten: BaseMessage[] | undefined;
+  for (let index = 0; index < messages.length; index += 1) {
+    const msg = messages[index]!;
+    if (!Array.isArray(msg.content) || !msg.content.some(isBlankTextBlock)) {
+      rewritten?.push(msg);
+      continue;
+    }
+    const content = msg.content.filter((block) => !isBlankTextBlock(block));
+    const isAi = typeof msg.getType === "function" && msg.getType() === "ai";
+    const hasToolCalls = ((msg as { tool_calls?: unknown[] }).tool_calls?.length ?? 0) > 0;
+    rewritten ??= messages.slice(0, index);
+    if (content.length > 0 || hasToolCalls) rewritten.push(withContent(msg, content));
+    else if (!isAi) rewritten.push(msg);
+  }
+  return rewritten ?? messages;
+}
+
 const DOCUMENT_NAME_MAX_LENGTH = 200;
 const DOCUMENT_NAME_DISALLOWED = /[^A-Za-z0-9_\s()[\]-]/g;
 const WHITESPACE_RUN = /\s+/g;
