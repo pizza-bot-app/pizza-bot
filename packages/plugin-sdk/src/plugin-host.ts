@@ -28,6 +28,7 @@ import {
   type PluginMaterializationStatus,
 } from "./materializer.js";
 import { restoreFlattenedUnions } from "./mcp-schema.js";
+import { configureBrowserReadTool } from "./mcp-browser-tools.js";
 import {
   evaluatePluginCompatibility,
   type PluginHostContract,
@@ -486,6 +487,7 @@ export async function connectMcpServers(
                 );
                 (tool as { description: string }).description = originalName;
               }
+              if (server === "playwright") configureBrowserReadTool(tool, originalName);
               tools[`mcp:${server}:${originalName}`] = instrumentMcpTool(
                 tool,
                 server,
