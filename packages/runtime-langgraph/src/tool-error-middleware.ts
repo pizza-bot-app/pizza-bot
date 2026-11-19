@@ -20,8 +20,8 @@ const FAILURE_GUIDANCE =
   "tell the user what failed and what would unblock it.";
 
 /**
- * In langchain@1.5.2/deepagents@1.12.1, inner wrappers turn tool failures into
- * `MiddlewareError`, which @langchain/langgraph@1.4.7 rethrows instead of handing
+ * In langchain@1.6.7/deepagents@1.17.0, inner wrappers turn tool failures into
+ * `MiddlewareError`, which @langchain/langgraph@1.7.5 rethrows instead of handing
  * to the model. This outer wrapper preserves tool-result parity and self-recovery.
  * GraphInterrupt remains control flow and must escape. Revalidate on upgrades
  * because LangGraph's error path has changed upstream.

@@ -20,7 +20,7 @@
     "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@langchain/core": "^1.2.14",
+    "@langchain/core": "^1.4.2",
     "zod": "^4.0.0"
   }
 }

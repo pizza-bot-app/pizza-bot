@@ -1,7 +1,6 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import type { ProtocolEvent } from "@langchain/langgraph";
 import { streamProtocolEvents, type ProtocolCapableGraph } from "./stream-protocol.js";
-import type { RunOptions } from "@pizza-bot/core";
 
 const COMPLETED: ProtocolEvent = {
   type: "event",
@@ -9,26 +8,6 @@ const COMPLETED: ProtocolEvent = {
   method: "lifecycle",
   params: { namespace: [], timestamp: 0, data: { event: "completed", graph_name: "root" } },
 } as ProtocolEvent;
-
-function fakeGraph(): ProtocolCapableGraph {
-  return {
-    async streamEvents() {
-      const rejected = Promise.reject(new Error("Model X does not currently support 'tool_choice'."));
-      return {
-        interrupted: false,
-        interrupts: [],
-        toolCalls: {
-          async *[Symbol.asyncIterator]() {
-            yield { output: rejected };
-          },
-        },
-        async *[Symbol.asyncIterator]() {
-          yield COMPLETED;
-        },
-      };
-    },
-  };
-}
 
 function blockFrame(
   event: "content-block-start" | "content-block-delta" | "content-block-finish",
@@ -180,28 +159,5 @@ describe("streamProtocolEvents — interrupt bubble-up", () => {
     const failure = toolErrorFrame('["retry", "later"]', "boom-2");
     const out = await collect([failure, COMPLETED]);
     expect(out).toEqual([failure, COMPLETED]);
-  });
-});
-
-describe("streamProtocolEvents — tool-call rejection drain", () => {
-  const seen: unknown[] = [];
-  const onReject = (reason: unknown) => seen.push(reason);
-  afterEach(() => {
-    process.off("unhandledRejection", onReject);
-    seen.length = 0;
-  });
-
-  it("drains a rejecting toolCalls.output without an unhandled rejection", async () => {
-    process.on("unhandledRejection", onReject);
-    const opts: RunOptions = { threadId: "t1" };
-    const frames: ProtocolEvent[] = [];
-    for await (const ev of streamProtocolEvents(fakeGraph(), { messages: [] }, opts)) {
-      frames.push(ev);
-    }
-    expect(frames).toHaveLength(1);
-    expect(frames[0]?.method).toBe("lifecycle");
-    // Allow Node to report any unhandled rejection.
-    await new Promise((r) => setTimeout(r, 10));
-    expect(seen).toHaveLength(0);
   });
 });

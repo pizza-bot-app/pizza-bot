@@ -23,7 +23,7 @@ function blockFrame(
     params: {
       namespace: ["model_request:abc"],
       node: "model_request",
-      timestamp: 0,
+      timestamp: Date.now(),
       data: { event, ...extra },
     },
   } as ProtocolEvent;
