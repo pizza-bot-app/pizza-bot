@@ -1,9 +1,11 @@
 /** In-app sign-in: a tool call without stored credentials opens the browser consent instead of failing. */
+import { ENV_KEYS } from "./env-credentials.mjs";
 
 const SETUP_GUIDE = "https://github.com/pizza-bot-app/pizza-bot/blob/main/docs/GOOGLE_WORKSPACE.md";
 
 export function createSignIn({
   clientDir,
+  envCredentials = () => undefined,
   scope,
   loadCredentials,
   saveCredentials,
@@ -51,11 +53,16 @@ export function createSignIn({
 
   return {
     async credentials() {
+      const fromEnv = envCredentials();
+      if (fromEnv) return fromEnv;
       let stored;
       try {
         stored = loadCredentials();
       } catch (err) {
-        throw new Error(`OS keychain is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+        throw new Error(
+          `OS keychain is unavailable: ${err instanceof Error ? err.message : String(err)}. On a headless or container backend, set ${ENV_KEYS.clientId}, ${ENV_KEYS.clientSecret}, and ${ENV_KEYS.refreshToken} instead; see ${SETUP_GUIDE}.`,
+          { cause: err },
+        );
       }
       if (stored) return stored;
       const previous = takeFailure();
@@ -70,6 +77,9 @@ export function createSignIn({
 
     /** Re-consents with the stored client after Google revokes or expires the refresh token. */
     async reauthorize({ clientId, clientSecret }) {
+      if (envCredentials()) {
+        return `Replace ${ENV_KEYS.refreshToken} with a fresh token from \`npm run auth -w @pizza-bot/plugin-google-workspace -- --print\`, then restart the backend.`;
+      }
       return takeFailure() + (await prompt({ clientId, clientSecret }));
     },
   };

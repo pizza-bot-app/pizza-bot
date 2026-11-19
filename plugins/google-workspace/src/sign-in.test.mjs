@@ -8,12 +8,13 @@ import { createSignIn } from "./sign-in.mjs";
 
 const CLIENT = { clientId: "id", clientSecret: "secret" };
 
-function harness({ stored = null, clientFile = { path: "/c/client.json", client: CLIENT } } = {}) {
+function harness({ stored = null, clientFile = { path: "/c/client.json", client: CLIENT }, fromEnv } = {}) {
   const calls = { consents: [], opened: [], saved: [], removed: [] };
   let finish;
   const signIn = createSignIn({
     clientDir: "/c",
     scope: ["s"],
+    envCredentials: () => fromEnv,
     loadCredentials: () => stored,
     saveCredentials: (c) => {
       calls.saved.push(c);
@@ -78,7 +79,25 @@ test("wraps keychain failures", async () => {
       throw new Error("no secret service");
     },
   });
-  await assert.rejects(signIn.credentials(), /OS keychain is unavailable: no secret service/);
+  await assert.rejects(signIn.credentials(), /OS keychain is unavailable: no secret service\. .*set GOOGLE_OAUTH_CLIENT_ID/);
+});
+
+test("environment credentials win over the keychain and never touch it", async () => {
+  const fromEnv = { ...CLIENT, refreshToken: "env" };
+  const signIn = createSignIn({
+    clientDir: "/c",
+    envCredentials: () => fromEnv,
+    loadCredentials: () => {
+      throw new Error("no secret service");
+    },
+  });
+  assert.deepEqual(await signIn.credentials(), fromEnv);
+});
+
+test("reauthorize with environment credentials asks for a new token instead of a browser consent", async () => {
+  const { signIn, calls } = harness({ fromEnv: { ...CLIENT, refreshToken: "env" } });
+  assert.match(await signIn.reauthorize({ ...CLIENT, refreshToken: "env" }), /Replace GOOGLE_OAUTH_REFRESH_TOKEN .*--print/);
+  assert.equal(calls.consents.length, 0);
 });
 
 test("reauthorize reuses the stored client without a client file", async () => {

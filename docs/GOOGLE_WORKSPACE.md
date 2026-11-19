@@ -1,6 +1,6 @@
 # Connect Pizza Bot to Gmail and Google Calendar
 
-This guide walks through giving Pizza Bot access to your Gmail and Google Calendar using the `google-workspace` plugin. The plugin is a local MCP server built on Google's official Node clients. It stores its credentials in your operating system's keychain, so nothing sensitive is written to a config file.
+This guide walks through giving Pizza Bot access to your Gmail and Google Calendar using the `google-workspace` plugin. The plugin is a local MCP server built on Google's official Node clients. It stores its credentials in your operating system's keychain, so nothing sensitive is written to a config file. When the backend runs in a container or on a headless host, it reads them from environment variables instead; see [Run the backend in a container](#run-the-backend-in-a-container-or-on-a-headless-host).
 
 **What you get**
 
@@ -210,7 +210,7 @@ The sign-in waits five minutes. If you close the tab or deny access, the next re
 
 ### Sign in from a terminal instead
 
-Use the CLI from a repository checkout when the browser can't reach Pizza Bot, for example when the backend runs in Docker or on another machine, or to grant read-only access:
+Use the CLI from a repository checkout to sign in without asking Pizza Bot first, or to grant read-only access:
 
 ```bash
 npm run auth -w @pizza-bot/plugin-google-workspace -- --client-file ~/Downloads/client_secret_<...>.json
@@ -220,6 +220,39 @@ npm run auth -w @pizza-bot/plugin-google-workspace -- --client-file ~/Downloads/
 |---|---|
 | `--read-only` | Request only `gmail.readonly` and `calendar.readonly` |
 | `--logout` | Delete the stored credentials from the keychain |
+| `--print` | Print the credentials as environment variables instead of storing them, for a [container backend](#run-the-backend-in-a-container-or-on-a-headless-host) |
+
+### Run the backend in a container or on a headless host
+
+In-app sign-in can't work when the backend runs in Docker, Kubernetes, or on another machine. A container has no OS keychain, and Google redirects your browser to `127.0.0.1`, which is your machine, not the backend. Run the consent on a machine with a browser and give the backend the result as environment variables.
+
+1. On your laptop, from a repository checkout, run the consent with `--print`:
+
+   ```bash
+   npm run auth -s -w @pizza-bot/plugin-google-workspace -- --print --client-file ~/Downloads/client_secret_<...>.json
+   ```
+
+   After you finish in the browser, it prints three lines and stores nothing:
+
+   ```
+   GOOGLE_OAUTH_CLIENT_ID=...
+   GOOGLE_OAUTH_CLIENT_SECRET=...
+   GOOGLE_OAUTH_REFRESH_TOKEN=...
+   ```
+
+   The refresh token grants access to your mail and calendar. Treat the output like a password. The prompts go to stderr, so `>> secrets.env` captures only these lines.
+
+2. Set the three variables on the backend. The plugin forwards them to its MCP server, which uses them ahead of the keychain. With Docker, pass them with `--env-file`. In Kubernetes, put them in a Secret and load it with `envFrom`:
+
+   ```yaml
+   envFrom:
+     - secretRef:
+         name: pizza-bot-secrets   # holds the three GOOGLE_OAUTH_* keys
+   ```
+
+3. Restart the backend so it picks up the new environment, enable the `google-workspace` MCP server, and ask a question from [Verify](#verify).
+
+The refresh token alone opts in. With only the client ID and secret set, the plugin uses the keychain as usual, and the `auth` CLI uses them as its client. When Google later rejects the token, which happens after 7 days while the app is in Testing, run step 1 again, replace `GOOGLE_OAUTH_REFRESH_TOKEN`, and restart. [Publishing to production](#publish-to-production-avoid-the-7-day-expiry) avoids the weekly repeat.
 
 ### Verify
 
@@ -315,7 +348,7 @@ When finished, stop both servers and delete the scratch folder.
 ## Removing access
 
 - Turn it off in Pizza Bot: disable the `email` and `calendar` skills, then the `google-workspace` MCP server. To turn it back on, enable the server and then both skills.
-- Delete the stored credentials: `npm run auth -w @pizza-bot/plugin-google-workspace -- --logout`
+- Delete the stored credentials: `npm run auth -w @pizza-bot/plugin-google-workspace -- --logout`. On a container backend, remove the `GOOGLE_OAUTH_*` variables instead.
 - Revoke the grant on Google's side at <https://myaccount.google.com/permissions>.
 - Delete the OAuth client or the whole project in the Cloud Console.
 
@@ -326,10 +359,12 @@ When finished, stop both servers and delete the scratch folder.
 | `No Google account is connected` | Save the client JSON in the folder the message names (step 7), then ask again. |
 | `Finish signing in to Google in the browser tab` | Pizza Bot is waiting for the browser sign-in (step 8). If no tab opened, use the link in the reply. |
 | `The last Google sign-in failed` | The tab was closed, access was denied, or five minutes passed. The same reply opens a fresh sign-in. |
-| No browser tab opens and the link never completes | The backend can't receive Google's redirect, as when it runs in Docker or on another machine. Use the terminal sign-in in step 8. |
+| No browser tab opens and the link never completes | The backend can't receive Google's redirect, as when it runs in Docker or on another machine. [Set the credentials in its environment](#run-the-backend-in-a-container-or-on-a-headless-host). |
 | `Google rejected the stored sign-in` | The token was revoked or expired (7 days in Testing). Finish the sign-in Pizza Bot opens. |
 | `The granted Google scopes do not allow this action` | You left a scope unticked, or used `--read-only`. Remove Pizza Bot at <https://myaccount.google.com/permissions>, then ask again and tick every scope. |
 | `Google returned no refresh token` | Google only issues one on first consent. Revoke the app at <https://myaccount.google.com/permissions> and retry. |
 | "Access blocked" or "not eligible" on the consent screen | Your account is not in the Test users list (step 5). |
-| `OS keychain is unavailable` | The host has no usable keychain, as in a headless container. The plugin needs macOS Keychain, Windows Credential Manager, or libsecret. |
+| `OS keychain is unavailable` | The host has no usable keychain, as in a headless container. [Set the credentials in its environment](#run-the-backend-in-a-container-or-on-a-headless-host), or use macOS Keychain, Windows Credential Manager, or libsecret. |
+| `GOOGLE_OAUTH_REFRESH_TOKEN is set but ... is not` | Set all three variables, or remove the refresh token to use the keychain. |
+| `Replace GOOGLE_OAUTH_REFRESH_TOKEN with a fresh token` | Google rejected the token from the environment. Run `--print` again, update the variable, and restart the backend. |
 | New client rejected for a few minutes | Google notes that client changes can take from 5 minutes to a few hours to take effect. |

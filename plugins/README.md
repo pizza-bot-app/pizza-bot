@@ -102,8 +102,8 @@ expired token reopens the consent with the stored client. While the OAuth app
 is in Testing, Google expires the refresh token after 7 days; publishing it to
 production avoids that.
 
-When the browser can't reach the backend (Docker, a remote host) or for
-read-only access, run the consent from a checkout instead:
+To sign in ahead of time or for read-only access, run the consent from a
+checkout instead:
 
 ```bash
 npm run auth -w @pizza-bot/plugin-google-workspace -- --client-file ~/Downloads/client_secret.json
@@ -112,8 +112,15 @@ npm run auth -w @pizza-bot/plugin-google-workspace -- --client-file ~/Downloads/
 `--read-only` requests only the `gmail.readonly` and `calendar.readonly`
 scopes, and `--logout` deletes the stored credentials.
 
-The manifest forwards `PIZZA_DATA_ROOT`, plus the D-Bus variables the Linux
-keychain needs, because MCP servers inherit only a minimal environment.
+A container or headless backend has no keychain, and the loopback redirect
+can't reach it. Run the consent on a laptop with `--print`, which prints
+`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
+`GOOGLE_OAUTH_REFRESH_TOKEN` instead of storing them, and set those on the
+backend (a Kubernetes Secret, for example). A set refresh token takes precedence
+over the keychain.
+
+The manifest forwards `PIZZA_DATA_ROOT`, the three `GOOGLE_OAUTH_*` variables,
+and the D-Bus variables the Linux keychain needs, because MCP servers inherit only a minimal environment.
 
 The keychain is read by the MCP subprocess itself, so this works with the
 desktop app and a standalone api-server on a host with a keychain. It does not
