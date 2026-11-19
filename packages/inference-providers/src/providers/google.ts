@@ -236,7 +236,7 @@ export class GoogleLangChainModelProvider implements ModelProvider {
 
       override invocationParams(options: this["ParsedCallOptions"]) {
         const params = super.invocationParams(options);
-        if (!params.tools) return params;
+        if (!Array.isArray(params.tools)) return params;
         return { ...params, tools: sanitizeGeminiTools(params.tools) };
       }
 
