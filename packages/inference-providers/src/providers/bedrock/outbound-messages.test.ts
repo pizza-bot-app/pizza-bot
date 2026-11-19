@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import {
+  dropBlankTextBlocksForBedrock,
   endsWithCacheIncompatibleDocument,
   sanitizeBedrockDocumentName,
   sanitizeDocumentNamesForBedrock,
@@ -276,5 +277,46 @@ describe("endsWithCacheIncompatibleDocument", () => {
     const plain = new AIMessage("noted");
     expect(endsWithCacheIncompatibleDocument([withFile, plain])).toBe(false);
     expect(endsWithCacheIncompatibleDocument([plain, withFile])).toBe(true);
+  });
+});
+
+describe("dropBlankTextBlocksForBedrock", () => {
+  it("removes blank text blocks and keeps the rest of the message", () => {
+    const msg = new AIMessage({
+      content: [
+        { type: "text", text: "" },
+        { type: "text", text: "  \n" },
+        { type: "text", text: "kept" },
+      ] as unknown as string,
+    });
+    const [out] = dropBlankTextBlocksForBedrock([msg]);
+    expect(out!.content).toEqual([{ type: "text", text: "kept" }]);
+    expect((msg.content as unknown[]).length).toBe(3);
+  });
+
+  it("drops an assistant message left with no content and no tool calls", () => {
+    const human = new HumanMessage("hi");
+    const empty = new AIMessage({ content: [{ type: "text", text: "" }] as unknown as string });
+    const next = new HumanMessage("again");
+    expect(dropBlankTextBlocksForBedrock([human, empty, next])).toEqual([human, next]);
+  });
+
+  it("keeps an assistant message that still carries tool calls", () => {
+    const msg = new AIMessage({
+      content: [{ type: "text", text: "" }] as unknown as string,
+      tool_calls: [{ id: "t1", name: "write_file", args: {} }],
+    });
+    const [out] = dropBlankTextBlocksForBedrock([msg]);
+    expect(out!.content).toEqual([]);
+  });
+
+  it("leaves a blank-only human message untouched", () => {
+    const msg = new HumanMessage({ content: [{ type: "text", text: "" }] as unknown as string });
+    expect(dropBlankTextBlocksForBedrock([msg])[0]).toBe(msg);
+  });
+
+  it("preserves references when nothing is blank", () => {
+    const msgs = [new HumanMessage("a"), new AIMessage("b")];
+    expect(dropBlankTextBlocksForBedrock(msgs)).toBe(msgs);
   });
 });
