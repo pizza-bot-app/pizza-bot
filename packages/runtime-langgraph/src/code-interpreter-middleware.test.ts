@@ -10,6 +10,8 @@ import { z } from "zod";
 import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 
 const GUEST_DEADLINE_MS = 1_500;
+/** Past the deadline plus the worker watchdog's 10s grace. */
+const SLOW_HOST_WORK_MS = GUEST_DEADLINE_MS + 11_000;
 
 interface WorkerMiddleware {
   tools: Array<{ invoke: (args: { code: string }, config: RunnableConfig) => Promise<string> }>;
@@ -126,6 +128,26 @@ describe("worker-hosted code interpreter", () => {
     expect(first).toContain("first");
     expect(second).toContain("second");
   }, WORKER_TEST_TIMEOUT_MS);
+
+  it("does not charge awaited host work to the worker watchdog", async () => {
+    // Upstream's deadline counts only guest execution, so a slow bridged call
+    // (a subagent dispatch, a paged read) must outlast deadline + grace unharmed.
+    const slow = tool(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, SLOW_HOST_WORK_MS));
+        return "done";
+      },
+      { name: "slow", description: "Takes longer than the sandbox deadline.", schema: z.object({}) },
+    );
+    const sandboxMiddleware = await sandbox(["slow"]);
+    await sandboxMiddleware.wrapModelCall(
+      { tools: [slow], systemMessage: new SystemMessage("") },
+      () => undefined,
+    );
+
+    expect(await sandboxMiddleware.tools[0]!.invoke({ code: "await tools.slow({})" }, config))
+      .toContain("done");
+  }, SLOW_HOST_WORK_MS + WORKER_TEST_TIMEOUT_MS);
 
   it("a cancelled worker's late exit does not fail its replacement", async () => {
     const { tools } = await sandbox();

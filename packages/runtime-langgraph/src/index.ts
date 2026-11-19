@@ -165,8 +165,8 @@ export function codeInterpreterOptions(hasSubagents: boolean) {
     // Deliberately above the upstream default: the sandbox exists so bulk data
     // stays inside it and only a distillate returns through this string.
     maxResultChars: 8_000,
-    // The budget must cover awaited host work — paged reads in an orchestrator or
-    // a skill worker, and subagent dispatch where it is enabled.
+    // Charged only for guest execution — awaited reads and subagent dispatch are
+    // free — and guest code holds a worker thread, not the server's.
     executionTimeoutMs: 120_000,
     subagents: hasSubagents,
     // Matches upstream's default cap on concurrent `task()` calls per REPL.
