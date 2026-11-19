@@ -45,10 +45,11 @@ function readClient() {
   const clientId = process.env[ENV_KEYS.clientId];
   const clientSecret = process.env[ENV_KEYS.clientSecret];
   if (clientId && clientSecret) return { clientId, clientSecret };
-  const existing = storedCredentials();
+  // --print writes the client to stdout, so it never copies one out of the keychain unasked.
+  const existing = values.print ? null : storedCredentials();
   if (existing) return { clientId: existing.clientId, clientSecret: existing.clientSecret };
   console.error(
-    "Provide a Desktop-app OAuth client: --client-file <client_secret.json>, or set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET.",
+    `Provide a Desktop-app OAuth client: --client-file <client_secret.json>, or set ${ENV_KEYS.clientId} and ${ENV_KEYS.clientSecret}.${values.print ? " --print does not read the keychain." : ""}`,
   );
   process.exit(1);
 }

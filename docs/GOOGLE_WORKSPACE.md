@@ -220,7 +220,7 @@ npm run auth -w @pizza-bot/plugin-google-workspace -- --client-file ~/Downloads/
 |---|---|
 | `--read-only` | Request only `gmail.readonly` and `calendar.readonly` |
 | `--logout` | Delete the stored credentials from the keychain |
-| `--print` | Print the credentials as environment variables instead of storing them, for a [container backend](#run-the-backend-in-a-container-or-on-a-headless-host) |
+| `--print` | Print the credentials as environment variables instead of storing them, for a [container backend](#run-the-backend-in-a-container-or-on-a-headless-host). Needs `--client-file` or the client variables; it never reads the client from the keychain. |
 | `--no-browser` | Approve on any other device, then paste the address it was redirected to. For hosts with no browser. |
 
 ### Run the backend in a container or on a headless host
