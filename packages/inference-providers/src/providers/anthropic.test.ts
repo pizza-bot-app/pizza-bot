@@ -296,6 +296,56 @@ function anthropicError(message: string): Response {
   });
 }
 
+describe("Anthropic refusals", () => {
+  async function streamedMessage(stopReason: string, stopDetails?: Record<string, unknown>) {
+    vi.stubGlobal("fetch", vi.fn(async () => eventStream([
+      {
+        type: "message_start",
+        message: {
+          id: "msg_1", type: "message", role: "assistant", model: "claude-opus-5",
+          content: [], stop_reason: null, stop_sequence: null,
+          usage: { input_tokens: 3, output_tokens: 0 },
+        },
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Partial" } },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: stopReason, stop_sequence: null, ...(stopDetails && { stop_details: stopDetails }) },
+        usage: { output_tokens: 2 },
+      },
+      { type: "message_stop" },
+    ])));
+    const provider = new AnthropicLangChainModelProvider({
+      apiKey: "test-key",
+      models: [{ id: "claude-opus-5", provider: "anthropic", displayName: "Claude Opus 5" }],
+    });
+    const model = await provider.buildModel("claude-opus-5");
+    return await model.streamEvents("hello");
+  }
+
+  it("keeps a streamed refusal as a refusal content block", async () => {
+    // The agent's refusal middleware only recognizes the block, not the finish reason.
+    const message = await streamedMessage("refusal", {
+      type: "refusal",
+      category: "cyber",
+      explanation: "Declined by policy.",
+    });
+
+    expect(message.contentBlocks).toEqual([
+      expect.objectContaining({ type: "text", text: "Partial" }),
+      { type: "refusal", refusal: "Declined by policy.", extras: { category: "cyber" } },
+    ]);
+  });
+
+  it("adds no refusal block to an ordinary turn", async () => {
+    const message = await streamedMessage("end_turn");
+
+    expect(message.contentBlocks.map((block) => block.type)).toEqual(["text"]);
+  });
+});
+
 async function collect<T>(stream: Promise<AsyncIterable<T>>): Promise<T[]> {
   const chunks: T[] = [];
   for await (const chunk of await stream) chunks.push(chunk);
