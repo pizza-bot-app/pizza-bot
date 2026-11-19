@@ -74,6 +74,8 @@ export interface SidecarOptions {
    */
   pluginsDir?: string;
   builtinSkillsDir?: string;
+  /** Unpacked smolvm release; only locates the binary, `PIZZA_SANDBOX` still opts in. */
+  smolvmDir?: string;
   expectedApiVersion: string;
   healthIntervalMs?: number;
   healthTimeoutMs?: number;
@@ -296,6 +298,7 @@ async function spawnOnce(
       ...(opts.builtinSkillsDir
         ? { PIZZA_BUILTIN_SKILLS_DIR: opts.builtinSkillsDir }
         : {}),
+      ...(opts.smolvmDir ? { PIZZA_SMOLVM_DIR: opts.smolvmDir } : {}),
       // The child reaps MCP servers if this supervisor dies without disconnecting.
       PIZZA_SUPERVISOR_PID: String(process.pid),
       PORT: "0",
