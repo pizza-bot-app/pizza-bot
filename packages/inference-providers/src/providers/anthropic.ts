@@ -262,12 +262,11 @@ export async function createAnthropicChatModel(
     descriptor,
     fetch: fetchFn,
   } = options;
+  // @anthropic-ai/sdk sends `apiKey` as a Bearer token; spell out both headers
+  // so each auth mode keeps its own wire format.
   const defaultHeaders = authMode === "bearer"
-    ? {
-        authorization: `Bearer ${apiKey}`,
-        "x-api-key": null,
-      }
-    : undefined;
+    ? { authorization: `Bearer ${apiKey}`, "x-api-key": null }
+    : { "x-api-key": apiKey, authorization: null };
 
   class ContextAwareChatAnthropic extends ChatAnthropic {
     override get profile() {
@@ -280,14 +279,10 @@ export async function createAnthropicChatModel(
     apiKey,
     maxTokens,
     anthropicApiUrl: baseUrl,
-    ...((defaultHeaders || fetchFn)
-      ? {
-          clientOptions: {
-            ...(defaultHeaders ? { defaultHeaders } : {}),
-            ...(fetchFn ? { fetch: fetchFn } : {}),
-          },
-        }
-      : {}),
+    clientOptions: {
+      defaultHeaders,
+      ...(fetchFn ? { fetch: fetchFn } : {}),
+    },
   });
 }
 

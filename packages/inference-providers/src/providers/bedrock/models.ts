@@ -32,9 +32,9 @@ export const REASONING_REQUEST_FIELDS = {
 export type BedrockToolChoiceValue = "auto" | "any" | "tool";
 
 /**
- * @langchain/aws@1.4.2 recognizes only older Claude ids and rejects forced
- * `tool_choice` client-side. Claude 5.5 models accept only `auto`; earlier
- * Claude families accept auto/any/tool. Remove when the SDK matcher covers these ids.
+ * @langchain/aws infers auto/any/tool for every Claude 5 id, but Claude 5.5
+ * models accept only `auto`; earlier Claude families accept all three. Remove
+ * when the SDK matcher distinguishes 5.5.
  */
 export function supportedToolChoiceValues(modelId: string): BedrockToolChoiceValue[] | undefined {
   if (/claude-[a-z]+-5-5/.test(modelId)) return ["auto"];

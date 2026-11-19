@@ -21,7 +21,7 @@ function attachmentIdOf(block: unknown): string | undefined {
 }
 
 /**
- * @langchain/aws@1.4.2 accepts `source_type: "base64"` for Bedrock attachments;
+ * @langchain/aws@1.5.2 accepts `source_type: "base64"` for Bedrock attachments;
  * its camelCase multimodal shape fails. Revalidate the shape on provider upgrades.
  */
 function inlinedBlock(mimeType: string, data: string, name?: string): AnyBlock {
