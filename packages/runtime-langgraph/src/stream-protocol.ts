@@ -59,19 +59,6 @@ function toResumePayload(cmd: ResumeCommand): { decisions: unknown[] } {
 interface GraphRunLike extends AsyncIterable<ProtocolEvent> {
   readonly interrupted: boolean;
   readonly interrupts: ReadonlyArray<{ readonly interruptId: string; readonly payload: unknown }>;
-  // The raw-frame consumer must handle these projections' rejected promises.
-  readonly toolCalls?: AsyncIterable<ToolCallLike>;
-  readonly subagents?: AsyncIterable<SubagentRunLike>;
-}
-
-interface ToolCallLike {
-  readonly output?: Promise<unknown>;
-}
-
-interface SubagentRunLike {
-  readonly output?: Promise<unknown>;
-  readonly toolCalls?: AsyncIterable<ToolCallLike>;
-  readonly subagents?: AsyncIterable<SubagentRunLike>;
 }
 
 export interface ProtocolCapableGraph {
@@ -103,8 +90,6 @@ export async function* streamProtocolEvents(
     ...(opts.signal ? { signal: opts.signal } : {}),
   };
   const stream = await graph.streamEvents(input, options);
-  // Attach rejection handlers before iteration so tool errors remain in-band.
-  drainProjectionRejections(stream);
   const reindexer = new ContentBlockReindexer();
   for await (const event of stream) {
     if (isInterruptBubbleUpFrame(event)) continue;
@@ -153,45 +138,8 @@ function isSerializedInterrupts(message: string): boolean {
 }
 
 /**
- * LangChain's tool-call transformer rejects an unconsumed `output` promise for
- * each `tool-error`, including errors inside nested subagent projections. Node
- * treats those as unhandled even though the errors also arrive in-band. Drain
- * the optional projections until upstream removes this parallel rejection
- * channel; revalidate on LangChain upgrades.
- */
-function drainProjectionRejections(run: SubagentRunLike): void {
-  void run.output?.catch(() => {});
-  if (run.toolCalls) {
-    void drainToolCalls(run.toolCalls);
-  }
-  if (run.subagents) {
-    void drainSubagents(run.subagents);
-  }
-}
-
-async function drainToolCalls(toolCalls: AsyncIterable<ToolCallLike>): Promise<void> {
-  try {
-    for await (const call of toolCalls) {
-      void call.output?.catch(() => {});
-    }
-  } catch {
-    // Run failures are authoritative on the protocol lifecycle channel.
-  }
-}
-
-async function drainSubagents(subagents: AsyncIterable<SubagentRunLike>): Promise<void> {
-  try {
-    for await (const subagent of subagents) {
-      drainProjectionRejections(subagent);
-    }
-  } catch {
-    // Run failures are authoritative on the protocol lifecycle channel.
-  }
-}
-
-/**
  * Bedrock adaptive thinking can omit a signature-only block at raw index 0, while
- * @langchain/langgraph-sdk@1.9.25 expects dense indices and crashes on the hole.
+ * @langchain/langgraph-sdk expects dense indices (its message assembly dereferences every block) and crashes on the hole.
  * Reindex by `namespace::node` and reset at both message boundaries. Remove only
  * after the SDK accepts sparse block arrays or Bedrock emits the omitted block.
  */
