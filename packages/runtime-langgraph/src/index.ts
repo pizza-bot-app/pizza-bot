@@ -321,14 +321,16 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   });
 
   const middleware: unknown[] = [
+    // Subagents get outputTruncationMiddleware's notice instead; this one retries
+    // cut-off tool calls and flags the turn for the human. It comes first because
+    // afterModel hooks run in reverse and a jump skips the rest, so the model-call
+    // counter must already have run when it retries.
+    truncatedTurnMiddleware(),
     ...runLimitMiddleware({
       ...AGENT_RUN_LIMITS.orchestrator,
       toolCalls: deps.maxToolCalls ?? AGENT_RUN_LIMITS.orchestrator.toolCalls,
     }),
     toolErrorRecoveryMiddleware(),
-    // Subagents get outputTruncationMiddleware (an agent-facing notice) instead;
-    // this one is for the human, so it belongs to the orchestrator alone.
-    truncatedTurnMiddleware(),
     currentDateTimeMiddleware(),
   ];
   if (deps.localFolders) {
