@@ -22,48 +22,57 @@ if (values.logout) {
   process.exit(0);
 }
 
-const { clientId, clientSecret } = readClient();
 const scope = values["read-only"] ? SCOPES.readOnly : SCOPES.readWrite;
-let refreshToken;
-try {
-  refreshToken = await consent();
-} catch (err) {
-  console.error(`Google sign-in failed: ${describe(err)}`);
-  process.exit(1);
-}
+const explicit = explicitClient();
+
+// Separate paths keep a keychain-held secret from ever reaching stdout.
 if (values.print) {
+  const client = explicit ?? missingClient(" --print does not read the keychain.");
+  const refreshToken = await signIn(client);
   // stdout carries only the env lines, so the output can be redirected into a Secret's env file.
   console.error(`Granted ${scope.length} scopes. Set these on the backend; they are secrets:\n`);
-  console.log(`${ENV_KEYS.clientId}=${clientId}\n${ENV_KEYS.clientSecret}=${clientSecret}\n${ENV_KEYS.refreshToken}=${refreshToken}`);
+  console.log(`${ENV_KEYS.clientId}=${client.clientId}\n${ENV_KEYS.clientSecret}=${client.clientSecret}\n${ENV_KEYS.refreshToken}=${refreshToken}`);
 } else {
-  saveCredentials({ clientId, clientSecret, refreshToken });
+  const client = explicit ?? storedClient() ?? missingClient("");
+  const refreshToken = await signIn(client);
+  saveCredentials({ ...client, refreshToken });
   console.error(`Stored credentials in the OS keychain (${scope.length} scopes). Enable the google-workspace MCP server in Pizza Bot.`);
 }
 
-function readClient() {
+function explicitClient() {
   if (values["client-file"]) return readClientFile(values["client-file"]);
   const clientId = process.env[ENV_KEYS.clientId];
   const clientSecret = process.env[ENV_KEYS.clientSecret];
-  if (clientId && clientSecret) return { clientId, clientSecret };
-  // --print writes the client to stdout, so it never copies one out of the keychain unasked.
-  const existing = values.print ? null : storedCredentials();
-  if (existing) return { clientId: existing.clientId, clientSecret: existing.clientSecret };
+  return clientId && clientSecret ? { clientId, clientSecret } : undefined;
+}
+
+function storedClient() {
+  try {
+    const stored = loadCredentials();
+    return stored ? { clientId: stored.clientId, clientSecret: stored.clientSecret } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function missingClient(note) {
   console.error(
-    `Provide a Desktop-app OAuth client: --client-file <client_secret.json>, or set ${ENV_KEYS.clientId} and ${ENV_KEYS.clientSecret}.${values.print ? " --print does not read the keychain." : ""}`,
+    `Provide a Desktop-app OAuth client: --client-file <client_secret.json>, or set ${ENV_KEYS.clientId} and ${ENV_KEYS.clientSecret}.${note}`,
   );
   process.exit(1);
 }
 
-function storedCredentials() {
+async function signIn(client) {
   try {
-    return loadCredentials();
-  } catch {
-    return null;
+    return await consent(client);
+  } catch (err) {
+    console.error(`Google sign-in failed: ${describe(err)}`);
+    process.exit(1);
   }
 }
 
-async function consent() {
-  const { url, refreshToken: pending } = await startConsent({ clientId, clientSecret, scope });
+async function consent(client) {
+  const { url, refreshToken: pending } = await startConsent({ ...client, scope });
   console.error(`Open this URL to grant access:\n\n${url}\n`);
   if (!values["no-browser"]) {
     openBrowser(url);
