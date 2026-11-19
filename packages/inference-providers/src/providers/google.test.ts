@@ -276,6 +276,48 @@ describe("Google Gemini model discovery", () => {
   });
 });
 
+describe("Google Vertex AI routing", () => {
+  async function requestedUrl(options: { project?: string; location?: string }): Promise<string> {
+    const fetchFn = vi.fn().mockResolvedValue(Response.json({
+      candidates: [{ content: { role: "model", parts: [{ text: "hi" }] }, finishReason: "STOP" }],
+    }));
+    vi.stubGlobal("fetch", fetchFn);
+    try {
+      const provider = new GoogleLangChainModelProvider({
+        apiKey: "test-key",
+        platform: "gcp",
+        ...options,
+        models: [{ id: "gemini-4-neon", provider: "google", displayName: "Gemini 4 Neon" }],
+      });
+      const model = await provider.buildModel("gemini-4-neon");
+      await model.invoke("hello").catch(() => undefined);
+      const request = fetchFn.mock.calls[0]?.[0] as Request | string | URL;
+      return request instanceof Request ? request.url : String(request);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  it("uses the Vertex AI Express endpoint when no project is set", async () => {
+    expect(await requestedUrl({})).toMatch(
+      /^https:\/\/aiplatform\.googleapis\.com\/v1\/publishers\/google\/models\/gemini-4-neon:/,
+    );
+  });
+
+  it("qualifies the endpoint with the project and the global location by default", async () => {
+    // Express resolves to us-central1, which does not serve models offered only on global.
+    expect(await requestedUrl({ project: "my-project" })).toMatch(
+      /^https:\/\/aiplatform\.googleapis\.com\/v1\/projects\/my-project\/locations\/global\/publishers\/google\/models\/gemini-4-neon:/,
+    );
+  });
+
+  it("routes a multi-region location to its regional endpoint", async () => {
+    expect(await requestedUrl({ project: "my-project", location: "us" })).toMatch(
+      /^https:\/\/aiplatform\.us\.rep\.googleapis\.com\/v1\/projects\/my-project\/locations\/us\//,
+    );
+  });
+});
+
 describe("Google Gemini error translation", () => {
   it("does not blame credentials when the API is blocked for the key", () => {
     const blocked = Object.assign(
