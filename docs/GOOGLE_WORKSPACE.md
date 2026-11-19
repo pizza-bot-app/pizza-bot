@@ -221,18 +221,28 @@ npm run auth -w @pizza-bot/plugin-google-workspace -- --client-file ~/Downloads/
 | `--read-only` | Request only `gmail.readonly` and `calendar.readonly` |
 | `--logout` | Delete the stored credentials from the keychain |
 | `--print` | Print the credentials as environment variables instead of storing them, for a [container backend](#run-the-backend-in-a-container-or-on-a-headless-host) |
+| `--no-browser` | Approve on any other device, then paste the address it was redirected to. For hosts with no browser. |
 
 ### Run the backend in a container or on a headless host
 
-In-app sign-in can't work when the backend runs in Docker, Kubernetes, or on another machine. A container has no OS keychain, and Google redirects your browser to `127.0.0.1`, which is your machine, not the backend. Run the consent on a machine with a browser and give the backend the result as environment variables.
+In-app sign-in can't work when the backend runs in Docker, Kubernetes, or on another machine. A container has no OS keychain, and Google redirects your browser to `127.0.0.1`, which is your machine, not the backend. Run the consent from a repository checkout and give the backend the result as environment variables. Google's device-code flow is no alternative: it does not allow the Gmail or Calendar scopes.
 
-1. On your laptop, from a repository checkout, run the consent with `--print`:
+1. Run the consent with `--print`. On a laptop with a browser:
 
    ```bash
    npm run auth -s -w @pizza-bot/plugin-google-workspace -- --print --client-file ~/Downloads/client_secret_<...>.json
    ```
 
-   After you finish in the browser, it prints three lines and stores nothing:
+   On a host with no browser, add `--no-browser`. Open the printed URL on any device, such as your phone, and approve. That browser then fails to load a `http://127.0.0.1:<port>/?…` page; paste its full address at the prompt. Instead of copying the client JSON to the host, you can export `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` from the client's page in the console and drop `--client-file`:
+
+   ```bash
+   read -rp "Client ID: " GOOGLE_OAUTH_CLIENT_ID
+   read -rsp "Client secret: " GOOGLE_OAUTH_CLIENT_SECRET; echo
+   export GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET
+   npm run auth -s -w @pizza-bot/plugin-google-workspace -- --print --no-browser >> secrets.env
+   ```
+
+   Once you approve, it prints three lines and stores nothing:
 
    ```
    GOOGLE_OAUTH_CLIENT_ID=...
@@ -364,6 +374,7 @@ When finished, stop both servers and delete the scratch folder.
 | `The granted Google scopes do not allow this action` | You left a scope unticked, or used `--read-only`. Remove Pizza Bot at <https://myaccount.google.com/permissions>, then ask again and tick every scope. |
 | `Google returned no refresh token` | Google only issues one on first consent. Revoke the app at <https://myaccount.google.com/permissions> and retry. |
 | "Access blocked" or "not eligible" on the consent screen | Your account is not in the Test users list (step 5). |
+| `Google sign-in failed: invalid_client` | The client secret doesn't match the client ID, or the client is new. Copy the secret again (Desktop secrets start with `GOCSPX-`), or wait a few minutes. |
 | `OS keychain is unavailable` | The host has no usable keychain, as in a headless container. [Set the credentials in its environment](#run-the-backend-in-a-container-or-on-a-headless-host), or use macOS Keychain, Windows Credential Manager, or libsecret. |
 | `GOOGLE_OAUTH_REFRESH_TOKEN is set but ... is not` | Set all three variables, or remove the refresh token to use the keychain. |
 | `Replace GOOGLE_OAUTH_REFRESH_TOKEN with a fresh token` | Google rejected the token from the environment. Run `--print` again, update the variable, and restart the backend. |

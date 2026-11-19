@@ -113,7 +113,8 @@ npm run auth -w @pizza-bot/plugin-google-workspace -- --client-file ~/Downloads/
 scopes, and `--logout` deletes the stored credentials.
 
 A container or headless backend has no keychain, and the loopback redirect
-can't reach it. Run the consent on a laptop with `--print`, which prints
+can't reach it. Run the consent with `--print` (plus `--no-browser` on a host
+with no browser, to approve on another device and paste the redirect), which prints
 `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
 `GOOGLE_OAUTH_REFRESH_TOKEN` instead of storing them, and set those on the
 backend (a Kubernetes Secret, for example). A set refresh token takes precedence

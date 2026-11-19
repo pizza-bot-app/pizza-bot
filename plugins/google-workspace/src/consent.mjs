@@ -76,6 +76,21 @@ export async function startConsent({ clientId, clientSecret, scope, timeoutMs = 
   return { url, refreshToken };
 }
 
+/** Hands the address a remote browser was redirected to back to this process's loopback listener. */
+export async function deliverRedirect(consentUrl, pasted) {
+  const origin = new URL(new URL(consentUrl).searchParams.get("redirect_uri")).origin;
+  let target;
+  try {
+    target = new URL(pasted.trim());
+  } catch {
+    throw new Error("That is not a URL. Paste the full address from the browser's address bar.");
+  }
+  if (target.origin !== origin) {
+    throw new Error(`Expected an address starting with ${origin}; this sign-in's port changes every run.`);
+  }
+  await fetch(target);
+}
+
 export function openBrowser(url) {
   const [cmd, args] =
     process.platform === "darwin"

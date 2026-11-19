@@ -131,3 +131,14 @@ test("startConsent's loopback listener rejects a mismatched state", async () => 
   assert.equal(res.status, 400);
   await rejected;
 });
+
+test("deliverRedirect forwards a pasted address to the listener and rejects another origin", async () => {
+  const { deliverRedirect, startConsent } = await import("./consent.mjs");
+  const { url, refreshToken } = await startConsent({ ...CLIENT, scope: ["s"], timeoutMs: 5_000 });
+  const origin = new URL(new URL(url).searchParams.get("redirect_uri")).origin;
+  await assert.rejects(deliverRedirect(url, "not a url"), /not a URL/);
+  await assert.rejects(deliverRedirect(url, "http://127.0.0.1:1/?code=c&state=x"), /Expected an address starting with/);
+  const rejected = assert.rejects(refreshToken, /OAuth state mismatch/);
+  await deliverRedirect(url, `  ${origin}/?code=c&state=wrong\n`);
+  await rejected;
+});
