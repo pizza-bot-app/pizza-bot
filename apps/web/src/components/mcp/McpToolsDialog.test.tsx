@@ -29,7 +29,7 @@ describe("McpServerCard tool count", () => {
       <McpServerCard server={server({ status: "error", toolCount: 0 })} onGetTools={vi.fn()} />,
     );
     expect(html).not.toContain("mcp-tools-link");
-    expect(html).toContain("Not connected");
+    expect(html).toContain("Failed to connect");
   });
 
   it("pluralises the count correctly", () => {
