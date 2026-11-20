@@ -8,6 +8,7 @@ import { OpenAiLangChainModelProvider } from "./providers/openai.js";
 import { OpenRouterLangChainModelProvider } from "./providers/openrouter.js";
 import { RequestyLangChainModelProvider } from "./providers/requesty.js";
 import { OpperLangChainModelProvider } from "./providers/opper.js";
+import { UberLlmLangChainModelProvider } from "./providers/uberllm.js";
 import { OllamaLangChainModelProvider } from "./providers/ollama.js";
 
 /** Resolve saved secret references before a provider can build its first model. */
@@ -27,6 +28,7 @@ export async function registerBuiltinProviders(registry: ModelRegistry, configs?
     new OpenRouterLangChainModelProvider(),
     new RequestyLangChainModelProvider(),
     new OpperLangChainModelProvider(),
+    new UberLlmLangChainModelProvider(),
     new OllamaLangChainModelProvider(),
   ];
   for (const provider of providers) {
