@@ -24,7 +24,8 @@ export interface SandboxOptions {
 
 /**
  * Grace past the guest deadline before a silent worker counts as wedged. The
- * deadline is wall-clock, so time the guest spends awaiting host work counts.
+ * deadline charges only guest execution, so the watchdog stops while a bridged
+ * host call is outstanding.
  */
 const WORKER_RESPONSE_GRACE_MS = 10_000;
 
@@ -102,6 +103,35 @@ interface SandboxSession {
   config: RunnableConfig;
   pendingEvals: Map<number, { resolve: (text: string) => void; reject: (error: Error) => void }>;
   idleTimer?: ReturnType<typeof setTimeout>;
+  hostCallsInFlight: number;
+  watchdog?: Watchdog | undefined;
+}
+
+/** A deadline that only runs while `resume`d, so awaited host work is not charged to it. */
+class Watchdog {
+  private remainingMs: number;
+  private startedAt = 0;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(
+    budgetMs: number,
+    private readonly onExpire: () => void,
+  ) {
+    this.remainingMs = budgetMs;
+  }
+
+  resume(): void {
+    if (this.timer !== undefined) return;
+    this.startedAt = Date.now();
+    this.timer = setTimeout(this.onExpire, this.remainingMs);
+  }
+
+  pause(): void {
+    if (this.timer === undefined) return;
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    this.remainingMs = Math.max(0, this.remainingMs - (Date.now() - this.startedAt));
+  }
 }
 
 interface SessionConfigurable {
@@ -169,7 +199,10 @@ export async function createWorkerCodeInterpreterMiddleware(
     session: SandboxSession,
     message: Extract<WorkerToHost, { kind: "tool-call" | "task-call" }>,
   ): Promise<void> {
+    session.hostCallsInFlight++;
+    session.watchdog?.pause();
     const reply = (payload: HostToWorker) => {
+      if (--session.hostCallsInFlight === 0) session.watchdog?.resume();
       try {
         session.worker.postMessage(payload);
       } catch {
@@ -247,6 +280,7 @@ export async function createWorkerCodeInterpreterMiddleware(
       taskTool,
       config,
       pendingEvals: new Map(),
+      hostCallsInFlight: 0,
     };
     // A terminated worker exits after its key may already hold a replacement.
     const retire = (reason: Error) => {
@@ -286,7 +320,8 @@ export async function createWorkerCodeInterpreterMiddleware(
     const id = ++nextEvalId;
     return new Promise<string>((resolve, reject) => {
       const settle = () => {
-        clearTimeout(watchdog);
+        watchdog.pause();
+        if (session.watchdog === watchdog) session.watchdog = undefined;
         config.signal?.removeEventListener("abort", onAbort);
         session.pendingEvals.delete(id);
         if (session.pendingEvals.size === 0 && sessions.get(key) === session) {
@@ -301,11 +336,15 @@ export async function createWorkerCodeInterpreterMiddleware(
         disposeSession(key, new Error("the run was cancelled"));
         reject(new Error("the sandbox run was cancelled"));
       };
-      const watchdog = setTimeout(() => {
+      const watchdog = new Watchdog(options.executionTimeoutMs + WORKER_RESPONSE_GRACE_MS, () => {
         settle();
         disposeSession(key);
         reject(new Error("the sandbox worker stopped responding and was restarted"));
-      }, options.executionTimeoutMs + WORKER_RESPONSE_GRACE_MS);
+      });
+      // Evals in a session are serialized, so any host call in flight is this eval's
+      // or one a finished eval detached; either way the worker is waiting, not wedged.
+      session.watchdog = watchdog;
+      if (session.hostCallsInFlight === 0) watchdog.resume();
       session.pendingEvals.set(id, {
         resolve: (text) => {
           settle();

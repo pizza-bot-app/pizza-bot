@@ -264,9 +264,9 @@ in `core/src/protocol-types.ts`:
   flag on every call, so it refuses the write and names why, whereas the bridged
   list is fixed when the graph compiles and would freeze a live gate. Two sandbox
   bounds are pinned here: `maxResultChars`, raised because a distillate is all that
-  should come back through that string, and `executionTimeoutMs`, which has to
-  cover awaited host work — paged reads and subagent dispatch — rather than a
-  synchronous computation. The rest (`maxPtcCalls`, the memory and stack ceilings)
+  should come back through that string, and `executionTimeoutMs`, which upstream
+  charges only for guest execution, so awaited paged reads and subagent dispatch
+  do not count against it; the worker watchdog pauses for them too. The rest (`maxPtcCalls`, the memory and stack ceilings)
   deliberately track upstream's defaults and will move with a `@langchain/quickjs`
   bump.
 - **Model context limits** are resolved by each inference-provider adapter from
