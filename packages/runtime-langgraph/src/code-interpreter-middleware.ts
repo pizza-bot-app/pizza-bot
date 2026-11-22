@@ -318,8 +318,8 @@ export async function createWorkerCodeInterpreterMiddleware(
         reject(new Error("the sandbox worker stopped responding and was restarted"));
       });
       // Evals in a session are serialized, so a host call already in flight was
-      // detached by an earlier eval that timed out. Until it settles this eval runs
-      // unwatched: calls carry no eval id to tell them apart from this eval's own.
+      // detached by an earlier eval that ended (timed out or failed) before it
+      // settled. Until it does this eval runs unwatched: calls carry no eval id.
       session.watchdog = watchdog;
       if (session.hostCallsInFlight === 0) watchdog.resume();
       session.pendingEvals.set(id, {

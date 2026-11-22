@@ -331,7 +331,8 @@ describe("Google Vertex AI routing", () => {
   });
 
   it("ignores the project on Google AI Studio", async () => {
-    expect(await requestedUrl({ project: "my-project" }, "constructor", "gai")).toMatch(
+    // An invalid project proves the Vertex-only gate: it is neither validated nor used.
+    expect(await requestedUrl({ project: "not/a/project" }, "constructor", "gai")).toMatch(
       /^https:\/\/generativelanguage\.googleapis\.com\//,
     );
   });
