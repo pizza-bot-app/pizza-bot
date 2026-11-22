@@ -339,6 +339,15 @@ describe("Anthropic refusals", () => {
     ]);
   });
 
+  it("keeps a refusal that arrives without stop details", async () => {
+    const message = await streamedMessage("refusal");
+
+    expect(message.contentBlocks).toEqual([
+      expect.objectContaining({ type: "text", text: "Partial" }),
+      { type: "refusal", refusal: "" },
+    ]);
+  });
+
   it("adds no refusal block to an ordinary turn", async () => {
     const message = await streamedMessage("end_turn");
 

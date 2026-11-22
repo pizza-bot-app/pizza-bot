@@ -166,7 +166,7 @@ export function codeInterpreterOptions(hasSubagents: boolean) {
     // stays inside it and only a distillate returns through this string.
     maxResultChars: 8_000,
     // Charged only for guest execution — awaited reads and subagent dispatch are
-    // free — and guest code holds a worker thread, not the server's.
+    // free — and a long budget is safe because guest code runs on a worker thread.
     executionTimeoutMs: 120_000,
     subagents: hasSubagents,
     // Matches upstream's default cap on concurrent `task()` calls per REPL.

@@ -277,7 +277,11 @@ describe("Google Gemini model discovery", () => {
 });
 
 describe("Google Vertex AI routing", () => {
-  async function requestedUrl(options: { project?: string; location?: string }): Promise<string> {
+  async function requestedUrl(
+    options: { project?: string; location?: string },
+    via: "constructor" | "settings" = "constructor",
+    platform: "gai" | "gcp" = "gcp",
+  ): Promise<string> {
     const fetchFn = vi.fn().mockResolvedValue(Response.json({
       candidates: [{ content: { role: "model", parts: [{ text: "hi" }] }, finishReason: "STOP" }],
     }));
@@ -285,10 +289,13 @@ describe("Google Vertex AI routing", () => {
     try {
       const provider = new GoogleLangChainModelProvider({
         apiKey: "test-key",
-        platform: "gcp",
-        ...options,
+        platform,
+        ...(via === "constructor" ? options : {}),
         models: [{ id: "gemini-4-neon", provider: "google", displayName: "Gemini 4 Neon" }],
       });
+      if (via === "settings") {
+        provider.configure({ method: "api-key", values: { apiKey: "test-key", platform, ...options } });
+      }
       const model = await provider.buildModel("gemini-4-neon");
       await model.invoke("hello").catch(() => undefined);
       const request = fetchFn.mock.calls[0]?.[0] as Request | string | URL;
@@ -315,6 +322,34 @@ describe("Google Vertex AI routing", () => {
     expect(await requestedUrl({ project: "my-project", location: "us" })).toMatch(
       /^https:\/\/aiplatform\.us\.rep\.googleapis\.com\/v1\/projects\/my-project\/locations\/us\//,
     );
+  });
+
+  it("applies the project and location from saved settings", async () => {
+    expect(await requestedUrl({ project: "my-project", location: "us-east1" }, "settings")).toMatch(
+      /^https:\/\/us-east1-aiplatform\.googleapis\.com\/v1\/projects\/my-project\/locations\/us-east1\//,
+    );
+  });
+
+  it("ignores the project on Google AI Studio", async () => {
+    // An invalid project proves the Vertex-only gate: it is neither validated nor used.
+    expect(await requestedUrl({ project: "not/a/project" }, "constructor", "gai")).toMatch(
+      /^https:\/\/generativelanguage\.googleapis\.com\//,
+    );
+  });
+
+  it.each([
+    { location: "evil.example#" },
+    { location: "x@evil.com/" },
+    { project: "my-project/../other" },
+  ])("rejects a location or project that would change the endpoint: %o", async (bad) => {
+    const provider = new GoogleLangChainModelProvider({
+      apiKey: "test-key",
+      platform: "gcp",
+      project: "my-project",
+      ...bad,
+      models: [{ id: "gemini-4-neon", provider: "google", displayName: "Gemini 4 Neon" }],
+    });
+    await expect(provider.buildModel("gemini-4-neon")).rejects.toThrow(/Invalid Vertex AI/);
   });
 });
 
