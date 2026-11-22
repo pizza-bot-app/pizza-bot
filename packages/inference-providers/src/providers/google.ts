@@ -256,6 +256,11 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     // from us-central1, where models offered only on `global` or a multi-region
     // are not found. The same API key authenticates the project-qualified URL.
     const vertexProject = platform === "gcp" ? this.project : undefined;
+    if (vertexProject) {
+      // Both values are spliced into the endpoint's hostname and path, which receive the API key.
+      assertVertexSegment("project ID", vertexProject);
+      assertVertexSegment("location", this.location);
+    }
     class ThoughtSignatureSafeChatGoogle extends ChatGoogle {
       constructor(fields: ConstructorParameters<typeof ChatGoogle>[0]) {
         super(fields);
@@ -570,6 +575,14 @@ function validPlatform(value: string | undefined): GooglePlatformSetting | undef
   return value === "auto" || value === "gai" || value === "gcp"
     ? value
     : undefined;
+}
+
+function assertVertexSegment(name: string, value: string): void {
+  if (!/^[a-z0-9-]+$/.test(value)) {
+    throw new Error(
+      `Invalid Vertex AI ${name} "${value}": use only lowercase letters, digits, and hyphens.`,
+    );
+  }
 }
 
 function nonEmpty(value: string | undefined): string | undefined {

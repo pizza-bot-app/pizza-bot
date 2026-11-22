@@ -13,6 +13,7 @@ import { isCommand } from "@langchain/langgraph";
 import { SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY } from "deepagents";
 import type { EvalWorkerData, HostToWorker, WorkerToHost } from "./eval-worker-protocol.js";
 import { asResponseFormat } from "./structured-response-middleware.js";
+import { Watchdog } from "./sandbox-watchdog.js";
 
 export interface SandboxOptions {
   ptc: string[];
@@ -25,7 +26,8 @@ export interface SandboxOptions {
 /**
  * Grace past the guest deadline before a silent worker counts as wedged. The
  * deadline charges only guest execution, so the watchdog stops while a bridged
- * host call is outstanding.
+ * host call is outstanding; a host call that never settles is bounded only by
+ * the run's abort signal, as the same tool called outside the sandbox would be.
  */
 const WORKER_RESPONSE_GRACE_MS = 10_000;
 
@@ -107,33 +109,6 @@ interface SandboxSession {
   watchdog?: Watchdog | undefined;
 }
 
-/** A deadline that only runs while `resume`d, so awaited host work is not charged to it. */
-class Watchdog {
-  private remainingMs: number;
-  private startedAt = 0;
-  private timer: ReturnType<typeof setTimeout> | undefined;
-
-  constructor(
-    budgetMs: number,
-    private readonly onExpire: () => void,
-  ) {
-    this.remainingMs = budgetMs;
-  }
-
-  resume(): void {
-    if (this.timer !== undefined) return;
-    this.startedAt = Date.now();
-    this.timer = setTimeout(this.onExpire, this.remainingMs);
-  }
-
-  pause(): void {
-    if (this.timer === undefined) return;
-    clearTimeout(this.timer);
-    this.timer = undefined;
-    this.remainingMs = Math.max(0, this.remainingMs - (Date.now() - this.startedAt));
-  }
-}
-
 interface SessionConfigurable {
   thread_id?: string;
   checkpoint_ns?: string;
@@ -141,6 +116,7 @@ interface SessionConfigurable {
 
 export async function createWorkerCodeInterpreterMiddleware(
   options: SandboxOptions,
+  { workerGraceMs = WORKER_RESPONSE_GRACE_MS }: { workerGraceMs?: number } = {},
 ): Promise<unknown> {
   const {
     createCodeInterpreterMiddleware,
@@ -336,13 +312,14 @@ export async function createWorkerCodeInterpreterMiddleware(
         disposeSession(key, new Error("the run was cancelled"));
         reject(new Error("the sandbox run was cancelled"));
       };
-      const watchdog = new Watchdog(options.executionTimeoutMs + WORKER_RESPONSE_GRACE_MS, () => {
+      const watchdog = new Watchdog(options.executionTimeoutMs + workerGraceMs, () => {
         settle();
         disposeSession(key);
         reject(new Error("the sandbox worker stopped responding and was restarted"));
       });
-      // Evals in a session are serialized, so any host call in flight is this eval's
-      // or one a finished eval detached; either way the worker is waiting, not wedged.
+      // Evals in a session are serialized, so a host call already in flight was
+      // detached by an earlier eval that timed out. Until it settles this eval runs
+      // unwatched: calls carry no eval id to tell them apart from this eval's own.
       session.watchdog = watchdog;
       if (session.hostCallsInFlight === 0) watchdog.resume();
       session.pendingEvals.set(id, {

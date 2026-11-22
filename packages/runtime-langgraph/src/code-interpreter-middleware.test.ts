@@ -10,8 +10,9 @@ import { z } from "zod";
 import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 
 const GUEST_DEADLINE_MS = 1_500;
-/** Past the deadline plus the worker watchdog's 10s grace. */
-const SLOW_HOST_WORK_MS = GUEST_DEADLINE_MS + 11_000;
+/** Shortened for the slow-host test; still covers a warm worker's eval round-trip under CI load. */
+const WORKER_GRACE_MS = 3_000;
+const SLOW_HOST_WORK_MS = GUEST_DEADLINE_MS + WORKER_GRACE_MS + 1_000;
 
 interface WorkerMiddleware {
   tools: Array<{ invoke: (args: { code: string }, config: RunnableConfig) => Promise<string> }>;
@@ -50,7 +51,7 @@ async function sandbox(ptc: string[] = []): Promise<WorkerMiddleware> {
     executionTimeoutMs: GUEST_DEADLINE_MS,
     subagents: false,
     maxSubagentConcurrency: 32,
-  })) as WorkerMiddleware;
+  }, { workerGraceMs: WORKER_GRACE_MS })) as WorkerMiddleware;
   return middleware;
 }
 
@@ -144,6 +145,8 @@ describe("worker-hosted code interpreter", () => {
       { tools: [slow], systemMessage: new SystemMessage("") },
       () => undefined,
     );
+    // Worker startup is charged to the watchdog, so spawn it before the timed eval.
+    await sandboxMiddleware.tools[0]!.invoke({ code: "0" }, config);
 
     expect(await sandboxMiddleware.tools[0]!.invoke({ code: "await tools.slow({})" }, config))
       .toContain("done");

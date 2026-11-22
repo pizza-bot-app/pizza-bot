@@ -266,9 +266,11 @@ in `core/src/protocol-types.ts`:
   bounds are pinned here: `maxResultChars`, raised because a distillate is all that
   should come back through that string, and `executionTimeoutMs`, which upstream
   charges only for guest execution, so awaited paged reads and subagent dispatch
-  do not count against it; the worker watchdog pauses for them too. The rest (`maxPtcCalls`, the memory and stack ceilings)
-  deliberately track upstream's defaults and will move with a `@langchain/quickjs`
-  bump.
+  do not count against it; the worker watchdog pauses for them too, so a bridged
+  call that never settles is bounded only by the run's abort signal, exactly as
+  the same tool called outside the sandbox would be. The rest (`maxPtcCalls`, the
+  memory and stack ceilings) deliberately track upstream's defaults and will move
+  with a `@langchain/quickjs` bump.
 - **Model context limits** are resolved by each inference-provider adapter from
   effective local configuration or provider metadata, with models.dev filling
   missing catalog fields. The adapter publishes the same available limit as

@@ -1,7 +1,6 @@
 /**
- * Restores the `refusal` content block that `@langchain/anthropic`'s v1 stream
- * converter drops: it reduces `stop_reason: "refusal"` to `content_filter` and
- * discards `stop_details`, so the agent's refusal middleware never fires.
+ * Restores the `refusal` block `@langchain/anthropic`'s v1 stream converter drops
+ * (it keeps only a `content_filter` finish reason), which the refusal middleware needs.
  * TODO: remove once https://github.com/langchain-ai/langchainjs/issues/12268 ships.
  */
 import type { ChatModelStreamEvent } from "@langchain/core/language_models/event";
@@ -14,11 +13,7 @@ interface RawStreamEvent {
   delta?: { stop_reason?: unknown; stop_details?: unknown };
 }
 
-/**
- * Follows a refusal `message_delta` with a marker carrying its `stop_details`.
- * The marker travels inside the same call's stream, so concurrent calls on one
- * model instance cannot see each other's refusals.
- */
+/** Follows a refusal `message_delta` with an in-stream marker, so concurrent calls cannot share it. */
 export function markRefusalStops<S extends AsyncIterable<unknown>>(stream: S): S {
   const source = stream as AsyncIterable<RawStreamEvent>;
   const marked = (async function* () {
