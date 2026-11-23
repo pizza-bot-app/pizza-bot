@@ -730,7 +730,8 @@ from state, and the model is asked again in the same run with a transient
 system-prompt instruction to use smaller calls. While that retry runs, the
 `cutOffToolCalls` state channel is non-empty and the web shows "Retrying with
 smaller edits…" in place of the vanished turn; after two retries the turn ends
-with the truncated-turn banner.
+with the "Response was cut off" banner. A reply the provider's content filter
+leaves empty gets a matching notice through the same `blankTurn` channel.
 
 The Bedrock Converse shim subclasses `ChatBedrockConverse` and strips prior
 reasoning blocks only at its three model-call entry points. This is intentionally below

@@ -1,8 +1,8 @@
-/** Two policies for a model reply that stops at the output-token limit: a notice the agent reads (subagents), and for the orchestrator a silent retry of a cut-off tool call plus a state flag the human sees. */
+/** Two policies for a model reply that stops at the output-token limit: a notice the agent reads (subagents), and for the orchestrator a silent retry of a cut-off tool call plus a state flag the human sees, which also covers a reply the content filter blanked. */
 import { AIMessage, RemoveMessage, type BaseMessage } from "@langchain/core/messages";
 import { createMiddleware } from "langchain";
 import { z } from "zod";
-import { CUT_OFF_TOOL_CALLS_CHANNEL, TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
+import { BLANK_TURN_CHANNEL, CUT_OFF_TOOL_CALLS_CHANNEL, type BlankTurnReason } from "@pizza-bot/core";
 
 export const OUTPUT_TRUNCATION_NOTICE =
   "\n\n[OUTPUT_TRUNCATED: This task result is incomplete because the worker " +
@@ -27,6 +27,15 @@ const OUTPUT_LIMIT_REASONS = new Set([
   "max_output_tokens",
   "token_limit",
 ]);
+// Spellings across providers: Bedrock `content_filtered`/`guardrail_intervened`,
+// Anthropic `refusal`, OpenAI `content_filter`, Google `SAFETY`.
+const CONTENT_FILTER_REASONS = new Set([
+  "content_filter",
+  "content_filtered",
+  "guardrail_intervened",
+  "refusal",
+  "safety",
+]);
 const REASON_KEYS = [
   "finish_reason",
   "finishReason",
@@ -34,14 +43,19 @@ const REASON_KEYS = [
   "stopReason",
 ] as const;
 
-function reachedOutputLimit(message: AIMessage): boolean {
-  for (const key of REASON_KEYS) {
+function stopReasons(message: AIMessage): string[] {
+  return REASON_KEYS.flatMap((key) => {
     const value = message.response_metadata[key];
-    if (typeof value !== "string") continue;
-    const normalized = value.trim().toLowerCase().replaceAll("-", "_");
-    if (OUTPUT_LIMIT_REASONS.has(normalized)) return true;
-  }
-  return false;
+    return typeof value === "string" ? [value.trim().toLowerCase().replaceAll("-", "_")] : [];
+  });
+}
+
+function reachedOutputLimit(message: AIMessage): boolean {
+  return stopReasons(message).some((reason) => OUTPUT_LIMIT_REASONS.has(reason));
+}
+
+function contentFiltered(message: AIMessage): boolean {
+  return stopReasons(message).some((reason) => CONTENT_FILTER_REASONS.has(reason));
 }
 
 function markTruncated(message: AIMessage): AIMessage {
@@ -90,8 +104,8 @@ export function outputTruncationMiddleware() {
   });
 }
 
-const truncatedTurnState = z.object({
-  [TRUNCATED_TURN_CHANNEL]: z.boolean().optional(),
+const blankTurnState = z.object({
+  [BLANK_TURN_CHANNEL]: z.enum(["length", "content_filter"]).nullable().optional(),
   cutOffRetries: z.number().optional(),
   [CUT_OFF_TOOL_CALLS_CHANNEL]: z.array(z.string()).optional(),
 });
@@ -105,11 +119,11 @@ const truncatedTurnState = z.object({
  * again with a hidden instruction; the web shows a retry status meanwhile, and
  * only past the retry cap does the human get the banner.
  */
-export function truncatedTurnMiddleware() {
+export function blankTurnMiddleware() {
   return createMiddleware({
-    name: "truncatedTurn",
-    stateSchema: truncatedTurnState,
-    beforeAgent: () => ({ [TRUNCATED_TURN_CHANNEL]: false, cutOffRetries: 0, [CUT_OFF_TOOL_CALLS_CHANNEL]: [] }),
+    name: "blankTurn",
+    stateSchema: blankTurnState,
+    beforeAgent: () => ({ [BLANK_TURN_CHANNEL]: null, cutOffRetries: 0, [CUT_OFF_TOOL_CALLS_CHANNEL]: [] }),
     wrapModelCall: (request, handler) => {
       const names = request.state[CUT_OFF_TOOL_CALLS_CHANNEL];
       if (!names?.length) return handler(request);
@@ -128,22 +142,24 @@ export function truncatedTurnMiddleware() {
             messages: [new RemoveMessage({ id: last.id })],
             cutOffRetries: retries + 1,
             [CUT_OFF_TOOL_CALLS_CHANNEL]: cutOffToolCallNames(last),
-            [TRUNCATED_TURN_CHANNEL]: false,
+            [BLANK_TURN_CHANNEL]: null,
             jumpTo: "model",
           };
         }
-        return { [TRUNCATED_TURN_CHANNEL]: isTruncatedTurn(last), [CUT_OFF_TOOL_CALLS_CHANNEL]: [] };
+        return { [BLANK_TURN_CHANNEL]: blankTurnReason(last), [CUT_OFF_TOOL_CALLS_CHANNEL]: [] };
       },
     },
   });
 }
 
-export function isTruncatedTurn(message: BaseMessage | undefined): boolean {
-  if (!message || !AIMessage.isInstance(message)) return false;
-  // A length-limited tool call still routes to the tool. The user needs the
-  // banner when nothing visible arrived, or when the cut-off call never ran.
-  if (message.tool_calls?.length) return false;
-  return reachedOutputLimit(message) && (!hasVisibleText(message) || hasCutOffToolCall(message));
+export function blankTurnReason(message: BaseMessage | undefined): BlankTurnReason | null {
+  if (!message || !AIMessage.isInstance(message)) return null;
+  // A stopped tool call still routes to the tool. The user needs the banner
+  // when nothing visible arrived, or when a cut-off call never ran.
+  if (message.tool_calls?.length) return null;
+  if (reachedOutputLimit(message) && (!hasVisibleText(message) || hasCutOffToolCall(message))) return "length";
+  if (contentFiltered(message) && !hasVisibleText(message)) return "content_filter";
+  return null;
 }
 
 function hasVisibleText(message: AIMessage): boolean {

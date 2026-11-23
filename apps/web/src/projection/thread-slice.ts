@@ -1,6 +1,7 @@
 /** Framework-free per-thread render state. */
 import type { UIMessageLike } from "./adapter.js";
 import type { UsageInfo } from "./messages.js";
+import type { BlankTurnReason } from "@pizza-bot/core";
 
 export type StreamStatus = "idle" | "streaming" | "error" | "interrupted";
 
@@ -52,10 +53,10 @@ export interface ThreadSlice {
    */
   usage?: UsageInfo | undefined;
   /**
-   * The orchestrator's own turn ended at the token limit with no visible text.
-   * The run still completes with `success`, so this is not an `errorText`.
+   * Why the orchestrator's own turn left the user nothing usable. The run still
+   * completes with `success`, so this is not an `errorText`.
    */
-  truncated: boolean;
+  blankTurn: BlankTurnReason | null;
   /**
    * The orchestrator dropped a reply cut off mid tool call and is asking the
    * model again, so the turn that just vanished from the feed is being redone.

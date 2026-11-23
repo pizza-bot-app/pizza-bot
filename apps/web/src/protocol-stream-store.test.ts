@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { CUT_OFF_TOOL_CALLS_CHANNEL, TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
+import { CUT_OFF_TOOL_CALLS_CHANNEL, BLANK_TURN_CHANNEL } from "@pizza-bot/core";
 interface FakeController {
   initialThreadId?: string;
   isLoading: boolean;
@@ -529,35 +529,35 @@ describe("ProtocolStreamStore steering-enqueue", () => {
     });
   });
 
-  it("surfaces the truncated-turn flag from values, without marking the run an error", async () => {
+  it("surfaces the blank-turn reason from values, without marking the run an error", async () => {
     await store.attach(TID, false);
     await store.send(TID, "summarize the thread");
     await flush();
 
-    last.rootValues = { [TRUNCATED_TURN_CHANNEL]: true };
+    last.rootValues = { [BLANK_TURN_CHANNEL]: "content_filter" };
     last.isLoading = false;
     last.notify();
 
     expect(store.getSlice(TID)).toMatchObject({
       status: "idle",
       errorText: undefined,
-      truncated: true,
+      blankTurn: "content_filter",
     });
   });
 
-  it("clears the truncated-turn flag once a later turn publishes false", async () => {
+  it("clears the blank-turn reason once a later turn publishes null", async () => {
     await store.attach(TID, false);
     await store.send(TID, "summarize the thread");
     await flush();
-    last.rootValues = { [TRUNCATED_TURN_CHANNEL]: true };
+    last.rootValues = { [BLANK_TURN_CHANNEL]: "content_filter" };
     last.isLoading = false;
     last.notify();
-    expect(store.getSlice(TID).truncated).toBe(true);
+    expect(store.getSlice(TID).blankTurn).toBe("content_filter");
 
-    last.rootValues = { [TRUNCATED_TURN_CHANNEL]: false };
+    last.rootValues = { [BLANK_TURN_CHANNEL]: null };
     last.notify();
 
-    expect(store.getSlice(TID).truncated).toBe(false);
+    expect(store.getSlice(TID).blankTurn).toBeNull();
   });
 
   it("reports a cut-off retry while the run is still streaming", async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ASSISTANT_ID, CUT_OFF_TOOL_CALLS_CHANNEL, PIZZA_BOT_AGENT, TRUNCATED_TURN_CHANNEL, type RunInput, type RunOptions, type ThreadState, type ThreadStateValues } from "@pizza-bot/core";
+import { ASSISTANT_ID, CUT_OFF_TOOL_CALLS_CHANNEL, PIZZA_BOT_AGENT, BLANK_TURN_CHANNEL, type RunInput, type RunOptions, type ThreadState, type ThreadStateValues } from "@pizza-bot/core";
 import { createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
 import { AIMessage, type AIMessageFields } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -70,6 +70,13 @@ function reasoningOnlyTruncatedTurn(): ScriptedTurn {
   };
 }
 
+function emptyFilteredTurn(): ScriptedTurn {
+  return {
+    events: [{ event: "message-start" }, { event: "message-finish", reason: "content_filter" }],
+    message: new AIMessage({ content: [], response_metadata: { finish_reason: "content_filter" } }),
+  };
+}
+
 function plainTextTurn(text: string): ScriptedTurn {
   return {
     events: [
@@ -123,20 +130,26 @@ async function runThroughRealSdk(
   }
 }
 
-describe("a truncated orchestrator turn reaches the real SDK rootStore", () => {
-  it("commits the truncated-turn flag as true when the turn ends at the token limit with no text", async () => {
+describe("a blank orchestrator turn reaches the real SDK rootStore", () => {
+  it("commits the blank-turn reason as length when the turn ends at the token limit with no text", async () => {
     const snapshot = await runThroughRealSdk(
       new NativeStreamModel([reasoningOnlyTruncatedTurn()]),
-      "t-truncated",
+      "t-length",
     );
-    expect((snapshot.values as ThreadStateValues)[TRUNCATED_TURN_CHANNEL]).toBe(true);
+    expect((snapshot.values as ThreadStateValues)[BLANK_TURN_CHANNEL]).toBe("length");
     expect(snapshot.isLoading).toBe(false);
     expect(snapshot.error).toBeUndefined();
   });
 
-  it("commits the truncated-turn flag as false for a normal text turn", async () => {
+  it("commits the blank-turn reason as content_filter when the provider blocks the reply", async () => {
+    const snapshot = await runThroughRealSdk(new NativeStreamModel([emptyFilteredTurn()]), "t-filtered");
+    expect((snapshot.values as ThreadStateValues)[BLANK_TURN_CHANNEL]).toBe("content_filter");
+    expect(snapshot.error).toBeUndefined();
+  });
+
+  it("commits the blank-turn reason as null for a normal text turn", async () => {
     const snapshot = await runThroughRealSdk(new NativeStreamModel([plainTextTurn("All done.")]), "t-normal");
-    expect((snapshot.values as ThreadStateValues)[TRUNCATED_TURN_CHANNEL]).toBe(false);
+    expect((snapshot.values as ThreadStateValues)[BLANK_TURN_CHANNEL]).toBeNull();
   });
 
   it("leaves no trace of a cut-off tool call that was silently retried", async () => {
@@ -149,7 +162,7 @@ describe("a truncated orchestrator turn reaches the real SDK rootStore", () => {
     expect(rendered).not.toContain("edit_file");
     expect(rendered).not.toContain("unfinished");
     expect(rendered).toContain("Report updated.");
-    expect((snapshot.values as ThreadStateValues)[TRUNCATED_TURN_CHANNEL]).toBe(false);
+    expect((snapshot.values as ThreadStateValues)[BLANK_TURN_CHANNEL]).toBeNull();
     expect(snapshot.error).toBeUndefined();
   });
 

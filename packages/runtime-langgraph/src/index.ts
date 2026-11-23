@@ -32,7 +32,7 @@ import type { ProtocolEvent, StateSnapshot } from "@langchain/langgraph";
 import { modelCallLimitMiddleware, toolCallLimitMiddleware } from "langchain";
 import { buildBackend } from "./backend.js";
 import { toolErrorRecoveryMiddleware } from "./tool-error-middleware.js";
-import { outputTruncationMiddleware, truncatedTurnMiddleware } from "./output-truncation-middleware.js";
+import { outputTruncationMiddleware, blankTurnMiddleware } from "./output-truncation-middleware.js";
 import { subagentFinalizationMiddleware } from "./subagent-finalization-middleware.js";
 import { structuredResponseMiddleware } from "./structured-response-middleware.js";
 import { attachmentInlineMiddleware } from "./attachment-inline-middleware.js";
@@ -327,7 +327,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
     // cut-off tool calls and flags the turn for the human. It comes first because
     // afterModel hooks run in reverse and a jump skips the rest, so the model-call
     // counter must already have run when it retries.
-    truncatedTurnMiddleware(),
+    blankTurnMiddleware(),
     ...runLimitMiddleware({
       ...AGENT_RUN_LIMITS.orchestrator,
       toolCalls: deps.maxToolCalls ?? AGENT_RUN_LIMITS.orchestrator.toolCalls,

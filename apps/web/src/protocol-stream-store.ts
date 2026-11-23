@@ -5,7 +5,7 @@ import {
   type HitlDecision,
   type AttachmentMeta,
   type ThreadStateValues,
-  TRUNCATED_TURN_CHANNEL,
+  BLANK_TURN_CHANNEL,
 } from "@pizza-bot/core";
 import {
   buildBatchResumeCommand,
@@ -41,7 +41,7 @@ const EMPTY_SLICE: ThreadSlice = {
   attached: false,
   queued: [],
   usage: undefined,
-  truncated: false,
+  blankTurn: null,
   retryingCutOff: false,
 };
 
@@ -389,7 +389,7 @@ export class ProtocolStreamStore {
     const errorText = status === "error" ? errorMessage(surfacedError) : undefined;
     const errorCode = errorText !== undefined ? classifyError(surfacedError) : undefined;
     const values = root.values as ThreadStateValues | undefined;
-    const truncated = values?.[TRUNCATED_TURN_CHANNEL] === true;
+    const blankTurn = values?.[BLANK_TURN_CHANNEL] ?? null;
     // The channel outlives a stopped run until the next run resets it.
     const retryingCutOff = root.isLoading && (values?.[CUT_OFF_TOOL_CALLS_CHANNEL]?.length ?? 0) > 0;
 
@@ -403,7 +403,7 @@ export class ProtocolStreamStore {
       status,
       errorText,
       errorCode,
-      truncated,
+      blankTurn,
       retryingCutOff,
       ...(e.runId ? { runId: e.runId } : { runId: undefined }),
       attached: e.hydrationStatus === "ready",
@@ -815,7 +815,7 @@ function sliceEqual(a: ProtocolThreadSlice, b: ProtocolThreadSlice): boolean {
     a.status === b.status &&
     a.errorText === b.errorText &&
     a.errorCode === b.errorCode &&
-    a.truncated === b.truncated &&
+    a.blankTurn === b.blankTurn &&
     a.retryingCutOff === b.retryingCutOff &&
     a.runId === b.runId &&
     a.attached === b.attached &&

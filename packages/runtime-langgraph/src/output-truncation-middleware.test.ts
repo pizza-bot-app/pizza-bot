@@ -9,14 +9,14 @@ import {
 } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { createSubAgent } from "deepagents";
-import { TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
+import { BLANK_TURN_CHANNEL } from "@pizza-bot/core";
 import {
   OUTPUT_TRUNCATION_NOTICE,
-  isTruncatedTurn,
+  blankTurnMiddleware,
+  blankTurnReason,
   MAX_CUT_OFF_RETRIES,
   outputTruncationMiddleware,
   toolCallCutOffInstruction,
-  truncatedTurnMiddleware,
 } from "./output-truncation-middleware.js";
 
 interface TestRequest {
@@ -209,9 +209,9 @@ function reasoningOnly(finishReason: string): AIMessage {
   } as unknown as AIMessageFields);
 }
 
-describe("isTruncatedTurn", () => {
-  it("is true for a reasoning-only turn that stopped at the token limit", () => {
-    expect(isTruncatedTurn(reasoningOnly("length"))).toBe(true);
+describe("blankTurnReason", () => {
+  it("is length for a reasoning-only turn that stopped at the token limit", () => {
+    expect(blankTurnReason(reasoningOnly("length"))).toBe("length");
   });
 
   it("recognizes Bedrock's provider-native stop reason", () => {
@@ -219,10 +219,35 @@ describe("isTruncatedTurn", () => {
       content: [{ type: "reasoning", reasoning: "…", index: 0 }],
       response_metadata: { stopReason: "max_tokens" },
     } as unknown as AIMessageFields);
-    expect(isTruncatedTurn(message)).toBe(true);
+    expect(blankTurnReason(message)).toBe("length");
   });
 
-  it("is false when the limit was hit but some text still reached the user", () => {
+  it("is content_filter for an empty reply the provider's filter blocked", () => {
+    const message = new AIMessage({
+      content: [],
+      response_metadata: { finish_reason: "content_filter", output_version: "v1" },
+    } as unknown as AIMessageFields);
+    expect(blankTurnReason(message)).toBe("content_filter");
+  });
+
+  it.each(["content_filtered", "guardrail_intervened", "refusal", "SAFETY"])(
+    "recognizes the %s spelling of a filtered reply",
+    (stopReason) => {
+      expect(blankTurnReason(new AIMessage({ content: "", response_metadata: { stopReason } }))).toBe(
+        "content_filter",
+      );
+    },
+  );
+
+  it("is null for a filtered reply that still carries visible text", () => {
+    expect(
+      blankTurnReason(
+        new AIMessage({ content: "I can't help with that.", response_metadata: { finish_reason: "content_filter" } }),
+      ),
+    ).toBeNull();
+  });
+
+  it("is null when the limit was hit but some text still reached the user", () => {
     const message = new AIMessage({
       content: [
         { type: "reasoning", reasoning: "…", index: 0 },
@@ -230,35 +255,35 @@ describe("isTruncatedTurn", () => {
       ],
       response_metadata: { finish_reason: "length" },
     } as unknown as AIMessageFields);
-    expect(isTruncatedTurn(message)).toBe(false);
+    expect(blankTurnReason(message)).toBeNull();
   });
 
-  it("is false for a string reply cut short — the user still sees text", () => {
+  it("is null for a string reply cut short — the user still sees text", () => {
     expect(
-      isTruncatedTurn(new AIMessage({ content: "partial", response_metadata: { finish_reason: "length" } })),
-    ).toBe(false);
+      blankTurnReason(new AIMessage({ content: "partial", response_metadata: { finish_reason: "length" } })),
+    ).toBeNull();
   });
 
-  it("is false for a reasoning-only turn that ended normally", () => {
-    expect(isTruncatedTurn(reasoningOnly("stop"))).toBe(false);
+  it("is null for a reasoning-only turn that ended normally", () => {
+    expect(blankTurnReason(reasoningOnly("stop"))).toBeNull();
   });
 
-  it("is false for a length-limited tool call, which still routes to the tool", () => {
+  it("is null for a length-limited tool call, which still routes to the tool", () => {
     const message = new AIMessage({
       content: "",
       response_metadata: { finish_reason: "length" },
       tool_calls: [{ id: "call-1", name: "lookup", args: {} }],
     });
-    expect(isTruncatedTurn(message)).toBe(false);
+    expect(blankTurnReason(message)).toBeNull();
   });
 
-  it("is false for anything but an AI message", () => {
-    expect(isTruncatedTurn(new HumanMessage("hi"))).toBe(false);
-    expect(isTruncatedTurn(undefined)).toBe(false);
+  it("is null for anything but an AI message", () => {
+    expect(blankTurnReason(new HumanMessage("hi"))).toBeNull();
+    expect(blankTurnReason(undefined)).toBeNull();
   });
 });
 
-describe("truncatedTurnMiddleware", () => {
+describe("blankTurnMiddleware", () => {
   interface HookState {
     messages: BaseMessage[];
     cutOffRetries?: number;
@@ -268,7 +293,7 @@ describe("truncatedTurnMiddleware", () => {
     systemMessage: SystemMessage;
     state: { cutOffToolCalls?: string[] };
   }
-  const middleware = truncatedTurnMiddleware() as unknown as {
+  const middleware = blankTurnMiddleware() as unknown as {
     beforeAgent: () => Record<string, unknown>;
     afterModel: { canJumpTo: string[]; hook: (state: HookState) => Record<string, unknown> };
     wrapModelCall: (request: ModelRequestLike, handler: (r: ModelRequestLike) => Promise<AIMessage>) => Promise<AIMessage>;
@@ -297,7 +322,7 @@ describe("truncatedTurnMiddleware", () => {
       jumpTo: "model",
       cutOffRetries: 1,
       cutOffToolCalls: ["edit_file"],
-      [TRUNCATED_TURN_CHANNEL]: false,
+      [BLANK_TURN_CHANNEL]: null,
     });
     const [removal] = update.messages as BaseMessage[];
     expect(RemoveMessage.isInstance(removal)).toBe(true);
@@ -320,13 +345,13 @@ describe("truncatedTurnMiddleware", () => {
 
     expect(update).not.toHaveProperty("jumpTo");
     expect(update).not.toHaveProperty("messages");
-    expect(update[TRUNCATED_TURN_CHANNEL]).toBe(true);
+    expect(update[BLANK_TURN_CHANNEL]).toBe("length");
   });
 
   it("shows the banner past the cap even when some text arrived with the cut-off call", () => {
     const turn = cutOffTurn({ content: [{ type: "text", text: "Editing the report." }, cutOffEdit] } as Partial<AIMessageFields>);
 
-    expect(afterModel({ messages: [turn], cutOffRetries: MAX_CUT_OFF_RETRIES })[TRUNCATED_TURN_CHANNEL]).toBe(true);
+    expect(afterModel({ messages: [turn], cutOffRetries: MAX_CUT_OFF_RETRIES })[BLANK_TURN_CHANNEL]).toBe("length");
   });
 
   it.each([
@@ -344,6 +369,10 @@ describe("truncatedTurnMiddleware", () => {
         tool_calls: [{ id: "call-2", name: "read_file", args: {} }],
         invalid_tool_calls: [{ id: "call-1", name: "edit_file", args: "{", error: "bad json" }],
       }),
+    ],
+    [
+      "an empty reply the content filter blocked",
+      new AIMessage({ id: "a", content: [], response_metadata: { finish_reason: "content_filter", output_version: "v1" } } as unknown as AIMessageFields),
     ],
   ])("does not retry %s", (_label, turn) => {
     const update = afterModel({ messages: [turn] });
@@ -374,19 +403,25 @@ describe("truncatedTurnMiddleware", () => {
 
   it("clears the flag and the retry budget when a run starts", () => {
     expect(middleware.beforeAgent()).toEqual({
-      [TRUNCATED_TURN_CHANNEL]: false,
+      [BLANK_TURN_CHANNEL]: null,
       cutOffRetries: 0,
       cutOffToolCalls: [],
     });
   });
 
-  it("writes the flag from the latest model reply on every call, false included", () => {
+  it("writes the reason from the latest model reply on every call, null included", () => {
     expect(afterModel({ messages: [new HumanMessage("go"), reasoningOnly("length")] })).toEqual({
-      [TRUNCATED_TURN_CHANNEL]: true,
+      [BLANK_TURN_CHANNEL]: "length",
+      cutOffToolCalls: [],
+    });
+    expect(
+      afterModel({ messages: [new HumanMessage("go"), new AIMessage({ content: "", response_metadata: { finish_reason: "content_filter" } })] }),
+    ).toEqual({
+      [BLANK_TURN_CHANNEL]: "content_filter",
       cutOffToolCalls: [],
     });
     expect(afterModel({ messages: [new HumanMessage("go"), new AIMessage("done")] })).toEqual({
-      [TRUNCATED_TURN_CHANNEL]: false,
+      [BLANK_TURN_CHANNEL]: null,
       cutOffToolCalls: [],
     });
   });
