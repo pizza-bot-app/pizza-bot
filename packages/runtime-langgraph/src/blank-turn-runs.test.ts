@@ -1,9 +1,9 @@
-/** Drives the real graph to pin that the truncated-turn flag describes the run that just finished, not the last model call ever. */
+/** Drives the real graph to pin that the blank-turn reason describes the run that just finished, not the last model call ever. */
 import { describe, expect, it } from "vitest";
 import { AIMessage, type AIMessageFields, type BaseMessage } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { MemorySaver } from "@langchain/langgraph";
-import { TRUNCATED_TURN_CHANNEL, type RunInput, type RunOptions } from "@pizza-bot/core";
+import { BLANK_TURN_CHANNEL, type RunInput, type RunOptions } from "@pizza-bot/core";
 import { createPizzaBotAgent, type LangGraphAgent } from "./index.js";
 import { MAX_CUT_OFF_RETRIES, toolCallCutOffInstruction } from "./output-truncation-middleware.js";
 
@@ -61,11 +61,11 @@ async function runTurn(agent: LangGraphAgent, threadId: string, signal?: AbortSi
   }
 }
 
-async function truncatedFlag(agent: LangGraphAgent, threadId: string): Promise<unknown> {
-  return (await agent.getState(threadId)).values[TRUNCATED_TURN_CHANNEL];
+async function blankTurn(agent: LangGraphAgent, threadId: string): Promise<unknown> {
+  return (await agent.getState(threadId)).values[BLANK_TURN_CHANNEL];
 }
 
-describe("truncated-turn flag across runs", () => {
+describe("blank-turn reason across runs", () => {
   it("does not survive into a run that is stopped before the model replies", async () => {
     let onEntered!: () => void;
     const modelEntered = new Promise<void>((resolve) => (onEntered = resolve));
@@ -73,10 +73,10 @@ describe("truncated-turn flag across runs", () => {
       model: new ScriptedModel([{ message: reasoningOnlyTruncated() }, { hangUntilAbort: { onEntered } }]),
       checkpointer: new MemorySaver(),
     });
-    const threadId = `truncated_${Math.random().toString(36).slice(2)}`;
+    const threadId = `blank_${Math.random().toString(36).slice(2)}`;
 
     await runTurn(agent, threadId);
-    expect(await truncatedFlag(agent, threadId)).toBe(true);
+    expect(await blankTurn(agent, threadId)).toBe("length");
 
     const controller = new AbortController();
     const stoppedRun = runTurn(agent, threadId, controller.signal);
@@ -84,7 +84,7 @@ describe("truncated-turn flag across runs", () => {
     await modelEntered;
     controller.abort();
     await stoppedRun;
-    expect(await truncatedFlag(agent, threadId)).toBe(false);
+    expect(await blankTurn(agent, threadId)).toBeNull();
   }, 30_000);
 
   it("is cleared by a later normal turn", async () => {
@@ -92,26 +92,26 @@ describe("truncated-turn flag across runs", () => {
       model: new ScriptedModel([{ message: reasoningOnlyTruncated() }, { message: new AIMessage("All done.") }]),
       checkpointer: new MemorySaver(),
     });
-    const threadId = `truncated_${Math.random().toString(36).slice(2)}`;
+    const threadId = `blank_${Math.random().toString(36).slice(2)}`;
 
     await runTurn(agent, threadId);
-    expect(await truncatedFlag(agent, threadId)).toBe(true);
+    expect(await blankTurn(agent, threadId)).toBe("length");
 
     await runTurn(agent, threadId);
-    expect(await truncatedFlag(agent, threadId)).toBe(false);
+    expect(await blankTurn(agent, threadId)).toBeNull();
   }, 30_000);
 
   it("silently retries a cut-off tool call within the same run", async () => {
     const model = new ScriptedModel([{ message: cutOffEdit() }, { message: new AIMessage("Report updated.") }]);
     const agent = await createPizzaBotAgent("Help the user.", { model, checkpointer: new MemorySaver() });
-    const threadId = `truncated_${Math.random().toString(36).slice(2)}`;
+    const threadId = `blank_${Math.random().toString(36).slice(2)}`;
 
     await runTurn(agent, threadId);
 
     const messages = await threadMessages(agent, threadId);
     expect(messages.map((m) => m.getType())).toEqual(["human", "ai"]);
     expect(messages[1]!.text).toBe("Report updated.");
-    expect(await truncatedFlag(agent, threadId)).toBe(false);
+    expect(await blankTurn(agent, threadId)).toBeNull();
     expect(model.inputs).toHaveLength(2);
     expect(systemText(model.inputs[1]!)).toContain(toolCallCutOffInstruction(["edit_file"]));
     expect(model.inputs[1]!.some(hasInvalidToolCall)).toBe(false);
@@ -120,7 +120,7 @@ describe("truncated-turn flag across runs", () => {
   it("counts each silent retry as a model call", async () => {
     const model = new ScriptedModel([{ message: cutOffEdit() }, { message: new AIMessage("Report updated.") }]);
     const agent = await createPizzaBotAgent("Help the user.", { model, checkpointer: new MemorySaver() });
-    const threadId = `truncated_${Math.random().toString(36).slice(2)}`;
+    const threadId = `blank_${Math.random().toString(36).slice(2)}`;
 
     await runTurn(agent, threadId);
 
@@ -134,7 +134,7 @@ describe("truncated-turn flag across runs", () => {
       { message: new AIMessage("Anything else?") },
     ]);
     const agent = await createPizzaBotAgent("Help the user.", { model, checkpointer: new MemorySaver() });
-    const threadId = `truncated_${Math.random().toString(36).slice(2)}`;
+    const threadId = `blank_${Math.random().toString(36).slice(2)}`;
 
     await runTurn(agent, threadId);
     await runTurn(agent, threadId);
@@ -147,12 +147,12 @@ describe("truncated-turn flag across runs", () => {
       Array.from({ length: MAX_CUT_OFF_RETRIES + 1 }, () => ({ message: cutOffEdit() })),
     );
     const agent = await createPizzaBotAgent("Help the user.", { model, checkpointer: new MemorySaver() });
-    const threadId = `truncated_${Math.random().toString(36).slice(2)}`;
+    const threadId = `blank_${Math.random().toString(36).slice(2)}`;
 
     await runTurn(agent, threadId);
 
     expect(model.inputs).toHaveLength(MAX_CUT_OFF_RETRIES + 1);
-    expect(await truncatedFlag(agent, threadId)).toBe(true);
+    expect(await blankTurn(agent, threadId)).toBe("length");
     const messages = await threadMessages(agent, threadId);
     expect(messages.filter(hasInvalidToolCall)).toHaveLength(1);
   }, 30_000);

@@ -62,16 +62,18 @@ export interface SerializedMessage {
   [k: string]: unknown;
 }
 
-/** State channel the orchestrator's truncatedTurnMiddleware writes; the web store reads it by this key. */
-export const TRUNCATED_TURN_CHANNEL = "truncatedTurn";
+/** State channel the orchestrator's blankTurnMiddleware writes; the web store reads it by this key. */
+export const BLANK_TURN_CHANNEL = "blankTurn";
+
+/** Why the orchestrator's turn left the user nothing usable: the output-token limit, or the provider's content filter. */
+export type BlankTurnReason = "length" | "content_filter";
 
 /** Tool calls the orchestrator is silently retrying after an output-limit cut-off; empty once a reply is not cut off. */
 export const CUT_OFF_TOOL_CALLS_CHANNEL = "cutOffToolCalls";
 
 export interface ThreadStateValues {
   messages?: SerializedMessage[];
-  /** The run ended at `finish_reason: "length"` with no visible text. */
-  [TRUNCATED_TURN_CHANNEL]?: boolean;
+  [BLANK_TURN_CHANNEL]?: BlankTurnReason | null;
   [CUT_OFF_TOOL_CALLS_CHANNEL]?: string[];
   [channel: string]: unknown;
 }
