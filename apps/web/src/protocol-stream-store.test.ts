@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
+import { CUT_OFF_TOOL_CALLS_CHANNEL, TRUNCATED_TURN_CHANNEL } from "@pizza-bot/core";
 interface FakeController {
   initialThreadId?: string;
   isLoading: boolean;
@@ -558,6 +558,30 @@ describe("ProtocolStreamStore steering-enqueue", () => {
     last.notify();
 
     expect(store.getSlice(TID).truncated).toBe(false);
+  });
+
+  it("reports a cut-off retry while the run is still streaming", async () => {
+    await store.attach(TID, false);
+    await store.send(TID, "rewrite the report");
+    await flush();
+
+    last.rootValues = { [CUT_OFF_TOOL_CALLS_CHANNEL]: ["edit_file"] };
+    last.isLoading = true;
+    last.notify();
+
+    expect(store.getSlice(TID)).toMatchObject({ status: "streaming", retryingCutOff: true });
+  });
+
+  it("stops reporting a cut-off retry once the run settles, even if the channel is stale", async () => {
+    await store.attach(TID, false);
+    await store.send(TID, "rewrite the report");
+    await flush();
+
+    last.rootValues = { [CUT_OFF_TOOL_CALLS_CHANNEL]: ["edit_file"] };
+    last.isLoading = false;
+    last.notify();
+
+    expect(store.getSlice(TID).retryingCutOff).toBe(false);
   });
 
   it("clears a prior run error once the next run resolves", async () => {

@@ -65,10 +65,14 @@ export interface SerializedMessage {
 /** State channel the orchestrator's truncatedTurnMiddleware writes; the web store reads it by this key. */
 export const TRUNCATED_TURN_CHANNEL = "truncatedTurn";
 
+/** Tool calls the orchestrator is silently retrying after an output-limit cut-off; empty once a reply is not cut off. */
+export const CUT_OFF_TOOL_CALLS_CHANNEL = "cutOffToolCalls";
+
 export interface ThreadStateValues {
   messages?: SerializedMessage[];
   /** The run ended at `finish_reason: "length"` with no visible text. */
   [TRUNCATED_TURN_CHANNEL]?: boolean;
+  [CUT_OFF_TOOL_CALLS_CHANNEL]?: string[];
   [channel: string]: unknown;
 }
 
