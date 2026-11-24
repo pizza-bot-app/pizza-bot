@@ -1,6 +1,7 @@
 /** Runtime-neutral agent inputs, state, dependencies, and handles. */
 import type {
   NormalizedMessage,
+  InputResponseCommand,
   ResumeCommand,
   RunStatus,
   ThreadStateValues,
@@ -69,7 +70,12 @@ export interface RuntimeDeps {
 
 export type RunInput =
   | { messages: NormalizedMessage[] }
-  | { command: ResumeCommand };
+  | { command: ResumeCommand | InputResponseCommand }
+  /**
+   * Seeds a graph run's `input` state. With `continueFromCheckpoint`, a thread
+   * that already has a checkpoint resumes it and the seed is used only when none exists.
+   */
+  | { graphInput: Record<string, unknown>; continueFromCheckpoint?: boolean };
 
 export interface RunOptions {
   threadId: string;

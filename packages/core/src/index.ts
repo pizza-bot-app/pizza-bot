@@ -13,3 +13,5 @@ export * from "./trigger.js";
 export * from "./settings.js";
 export * from "./thread-activity.js";
 export * from "./local-folder.js";
+export * from "./graph-spec.js";
+export * from "./graph-template.js";
