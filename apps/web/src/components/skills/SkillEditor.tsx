@@ -190,9 +190,10 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
             {declaredTools.map((ref) => (
               <ToolChip key={ref} tool={describeGrantedTool(ref, tools)}>
                 {ref.startsWith("mcp:") && (
-                  <label className="skill-tool-approval">
+                  <label className="skill-tool-approval" title="Pause for your approval before this tool runs">
                     <input
                       type="checkbox"
+                      aria-label={`Ask first before running ${ref}`}
                       checked={interruptOn[ref] !== undefined && interruptOn[ref] !== false}
                       onChange={(event) =>
                         setInterruptOn((previous) => {
@@ -206,7 +207,7 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
                         })
                       }
                     />
-                    Approval
+                    Ask first
                   </label>
                 )}
                 <button

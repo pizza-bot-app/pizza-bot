@@ -68,5 +68,7 @@ describe("SkillEditor", () => {
     expect(html).toMatch(/<code>eval<\/code><span class="tool-source">Built-in<\/span>/);
     expect(html).toMatch(/<code>read_file<\/code><span class="tool-source">fs<\/span>/);
     expect(html).toMatch(/<code>list_\*<\/code><span class="tool-source">fs<\/span><span class="tool-chip-count">2 tools<\/span>/);
+    expect(html).toContain('aria-label="Ask first before running mcp:fs:read_file"');
+    expect(html).not.toContain(">Approval<");
   });
 });
