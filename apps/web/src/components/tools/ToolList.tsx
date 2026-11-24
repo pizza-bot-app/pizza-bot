@@ -67,8 +67,8 @@ export function ToolRow({
 }) {
   const note = included
     ? included.asksFirst
-      ? `Included in ${included.by}, which asks first`
-      : `Included in ${included.by}; add it to ask first for just this tool`
+      ? `Already granted by ${included.by}, which pauses for your approval before it runs`
+      : `Already granted by ${included.by}. Add it to pause for your approval before just this tool runs`
     : undefined;
   const body = (
     <>

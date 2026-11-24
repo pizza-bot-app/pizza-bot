@@ -198,7 +198,7 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
                       className="skill-tool-approval"
                       title={
                         coveredBy
-                          ? `Asks first via ${coveredBy}`
+                          ? `On because ${coveredBy} pauses for your approval before this tool runs`
                           : "Pause for your approval before this tool runs"
                       }
                     >
@@ -206,7 +206,7 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
                         type="checkbox"
                         aria-label={
                           coveredBy
-                            ? `Ask first before running ${ref}, on because ${coveredBy} asks first`
+                            ? `Ask first before running ${ref}, on because ${coveredBy} pauses for your approval before this tool runs`
                             : `Ask first before running ${ref}`
                         }
                         checked={coveredBy !== undefined || asksFirst(ref)}

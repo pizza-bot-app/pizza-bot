@@ -16,12 +16,12 @@ describe("ToolRow", () => {
   it("blocks a tool whose covering wildcard already asks first", () => {
     const html = row(true);
     expect(html).toContain("disabled");
-    expect(html).toContain("Included in mcp:playwright:browser*, which asks first");
+    expect(html).toContain("Already granted by mcp:playwright:browser*, which pauses for your approval before it runs");
   });
 
   it("keeps a covered tool addable so it can ask first on its own", () => {
     const html = row(false);
     expect(html).not.toContain("disabled");
-    expect(html).toContain("Included in mcp:playwright:browser*; add it to ask first for just this tool");
+    expect(html).toContain("Already granted by mcp:playwright:browser*. Add it to pause for your approval before just this tool runs");
   });
 });

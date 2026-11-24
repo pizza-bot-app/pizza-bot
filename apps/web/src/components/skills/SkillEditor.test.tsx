@@ -99,9 +99,9 @@ describe("SkillEditor", () => {
 
     expect(html).toMatch(/aria-label="Ask first before running mcp:fs:\*" checked=""\/>/);
     expect(html).toMatch(
-      /aria-label="Ask first before running mcp:fs:read_file, on because mcp:fs:\* asks first" disabled="" checked=""\/>/,
+      /aria-label="Ask first before running mcp:fs:read_file, on because mcp:fs:\* pauses for your approval before this tool runs" disabled="" checked=""\/>/,
     );
-    expect(html).toContain('title="Asks first via mcp:fs:*"');
+    expect(html).toContain('title="On because mcp:fs:* pauses for your approval before this tool runs"');
   });
 });
 
