@@ -21,6 +21,8 @@ export interface SandboxOptions {
   executionTimeoutMs: number;
   subagents: boolean;
   maxSubagentConcurrency: number;
+  /** Subagents whose tools pause for approval; task() refuses them, since a pause can't suspend guest code. */
+  approvalGatedSubagents?: readonly string[];
 }
 
 /**
@@ -126,7 +128,9 @@ export async function createWorkerCodeInterpreterMiddleware(
     DEFAULT_MAX_STACK_SIZE,
   } = await import("@langchain/quickjs");
 
-  const upstream = createCodeInterpreterMiddleware(options);
+  const { approvalGatedSubagents = [], ...upstreamOptions } = options;
+  const gatedSubagents = new Set(approvalGatedSubagents);
+  const upstream = createCodeInterpreterMiddleware(upstreamOptions);
   const template = upstream.tools?.[0];
   if (upstream.tools?.length !== 1 || template === undefined) {
     throw new Error(
@@ -205,6 +209,11 @@ export async function createWorkerCodeInterpreterMiddleware(
       }
       const taskTool = session.taskTool;
       if (!taskTool) throw new Error("subagent dispatch is not available in this sandbox");
+      if (gatedSubagents.has(message.subagentType)) {
+        throw new Error(
+          `subagent "${message.subagentType}" asks for approval before some tool calls, and an approval can't pause sandboxed code. Delegate it with the task tool directly.`,
+        );
+      }
       const responseSchema = message.responseSchema;
       if (responseSchema !== undefined) validateResponseSchema(responseSchema);
       const args = { description: message.description, subagent_type: message.subagentType };

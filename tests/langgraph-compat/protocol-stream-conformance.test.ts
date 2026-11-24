@@ -561,4 +561,65 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       expect.stringContaining("fact b"),
     ]);
   });
+
+  it("task() from eval refuses a skill whose tools need approval", async () => {
+    // A pause inside the bridge can't suspend guest code: the run would finish and
+    // leave behind an approval that resumes nothing.
+    let sends = 0;
+    const sendTool = tool(() => {
+      sends++;
+      return "sent";
+    }, { name: "mailer__send", description: "send mail", schema: z.object({}) });
+    const agent = await createPizzaBotAgent(PIZZA_BOT_AGENT.systemPrompt, {
+      model: new ScriptedModel([
+        new AIMessage({
+          content: "",
+          tool_calls: [{
+            id: "eval-gated-1",
+            name: "eval",
+            args: {
+              code: `try { await task({ description: "send the mail", subagentType: "specialist" }) } catch (e) { console.log("refused: " + e.message) }`,
+            },
+            type: "tool_call",
+          }],
+        }),
+        new AIMessage({
+          content: "",
+          tool_calls: [{ id: "send-1", name: "mailer__send", args: {}, type: "tool_call" }],
+        }),
+        new AIMessage({ content: "Done." }),
+      ]),
+      tools: { "mcp:mailer:send": sendTool },
+      catalog: { mailer: ["send"] },
+      skills: skillCatalog(
+        "specialist",
+        "Sends mail.",
+        "Send the mail.",
+        ["mcp:mailer:send"],
+        { "mcp:mailer:send": { allowedDecisions: ["approve", "reject"] } },
+      ),
+      checkpointer: new MemorySaver(),
+    });
+
+    const events: ProtocolEvent[] = [];
+    for await (const ev of agent.streamProtocol(
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "send it" }] }] },
+      { threadId: `proto_eval_gated_${Math.random().toString(36).slice(2)}` },
+    )) {
+      events.push(ev);
+    }
+
+    const evalResult = events
+      .filter((e) => channelOf(e) === "tools")
+      .map((e) => e.params.data as { event?: string; tool_call_id?: string })
+      .filter((d) => d.tool_call_id === "eval-gated-1" && d.event === "tool-finished")
+      .map((d) => JSON.stringify(d))
+      .join("");
+    expect(evalResult).toContain("refused: subagent \\\"specialist\\\" asks for approval");
+    expect(events.some((e) => channelOf(e) === "input.requested")).toBe(false);
+    expect(events.some(
+      (e) => channelOf(e) === "tools" && (e.params.data as { tool_name?: string }).tool_name === "task",
+    )).toBe(false);
+    expect(sends).toBe(0);
+  });
 });

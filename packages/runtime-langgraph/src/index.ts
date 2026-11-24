@@ -174,9 +174,15 @@ export function codeInterpreterOptions(hasSubagents: boolean) {
   } as const;
 }
 
-async function codeInterpreterMiddleware(hasSubagents: boolean): Promise<unknown> {
+async function codeInterpreterMiddleware(
+  hasSubagents: boolean,
+  approvalGatedSubagents: readonly string[] = [],
+): Promise<unknown> {
   try {
-    return await createWorkerCodeInterpreterMiddleware(codeInterpreterOptions(hasSubagents));
+    return await createWorkerCodeInterpreterMiddleware({
+      ...codeInterpreterOptions(hasSubagents),
+      approvalGatedSubagents,
+    });
   } catch (error) {
     if ((error as { code?: unknown } | null)?.code !== "ERR_MODULE_NOT_FOUND") throw error;
     throw new Error(
@@ -370,7 +376,10 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
     subagents: subagents ?? [],
   }));
   // The sandbox's task() global only has somewhere to dispatch when subagents exist.
-  middleware.push(await codeInterpreterMiddleware(Boolean(subagents?.length)));
+  middleware.push(await codeInterpreterMiddleware(
+    Boolean(subagents?.length),
+    (subagents ?? []).filter((subagent) => subagent.interruptOn).map((subagent) => subagent.name),
+  ));
 
   const params: Record<string, unknown> = {
     systemPrompt,
