@@ -1,12 +1,15 @@
 # Extending Pizza Bot
 
-Pizza Bot combines MCP servers, Agent Skills, and plugins:
+Pizza Bot combines MCP servers, agents, Agent Skills, and plugins:
 
 - **MCP servers** expose tools.
-- **Skills** turn instructions and a scoped tool set into delegatable subagents.
-- **Plugins** package MCP servers and skills for installation and distribution.
+- **Agents** are specialist subagents Pizza Bot delegates to, each with its own
+  instructions, model, tools, skills, and approvals.
+- **Skills** are playbooks an agent reads on demand.
+- **Plugins** package MCP servers, agents, and skills for installation and
+  distribution.
 
-All three can be managed from the application UI.
+All of them can be managed from the application UI.
 
 ## MCP servers
 
@@ -45,50 +48,85 @@ Startup connects to at most three servers concurrently and gives each attempt
 `PIZZA_MCP_STARTUP_CONCURRENCY` and
 `PIZZA_MCP_CONNECTION_TIMEOUT_MS`.
 
-## Skills
+## Agents
 
-Pizza Bot is the conversation agent; each enabled, ready skill becomes a
-tool-scoped subagent that Pizza Bot can invoke through the `task` tool. The skill's
-name and description guide routing, its `SKILL.md` body supplies the subagent
-instructions, and its declared tools define the complete tool surface.
+Pizza Bot is the conversation agent. Each enabled, ready agent becomes a
+DeepAgents subagent that Pizza Bot can invoke through the `task` tool, in its own
+context, with exactly the tools it declares. An agent is one Markdown file in the
+Claude Code subagent layout: frontmatter, then the system prompt.
 
-User skills live under `<PIZZA_DATA_ROOT>/skills/<id>/SKILL.md`. They can
-override a Built-in or Plugin skill with the same id without modifying the
-original. Deleting an override reveals the Built-in or Plugin skill again.
-A `<id>` entry may be a symlink to a folder, for example to keep skills in a git
-repo; linked skills are read-only in the app (edit them at the source), and
-Unlink removes only the link. A skill linked in while Pizza Bot is running
-appears after a restart (#217). A minimal MCP-backed skill looks like:
+User agents live at `<PIZZA_DATA_ROOT>/agents/<id>.md`, and a plugin ships them
+from the directory its manifest names in `agents`. A user agent overrides a plugin
+agent with the same id.
 
 ```markdown
 ---
 name: release-check
-description: Check release readiness and report blockers.
+description: Checks release readiness and reports blockers grouped by owner. Decides on its own which checks to run; returns a readiness verdict and the blocker list.
+model: anthropic:claude-haiku-4-5
 tools:
   - mcp:release-tools:check_release
----
-
-1. Run the release check.
-2. Group blockers by owner.
-3. Return a concise readiness report.
-```
-
-A skill becomes callable only after all of its declared MCP servers and tools
-are enabled and connected. Loading or unavailable skills remain visible but are
-omitted from the subagent list until their dependencies recover. Newly ready
-skills become available on the next turn.
-
-Use `interruptOn` in the frontmatter to require human approval for a tool. The
-allowed decisions drive the application's approval card:
-
-```yaml
+  - mcp:release-tools:publish_release
+skills:
+  - release-policy
 interruptOn:
   "mcp:release-tools:publish_release":
     allowedDecisions:
       - approve
       - edit
       - reject
+---
+
+Run the release check, group blockers by owner, and return a concise readiness
+report. Publish only when the user asks.
 ```
+
+- `model` is a provider-qualified id from the model picker. Omit it, or use
+  `inherit`, to run on the conversation's model. A model that cannot be resolved
+  makes the agent unavailable rather than silently switching models.
+- `tools` lists `mcp:<server>:<tool>` refs (`mcp:<server>:*` and prefix patterns
+  match many) and `builtin:eval` for the sandboxed interpreter. It is the agent's
+  complete tool surface beyond the filesystem.
+- `skills` mounts skills on the agent's own skills middleware.
+- `interruptOn` pauses a granted MCP tool for a human decision.
+- `metadata.display-name` sets the name shown in the UI.
+
+An agent becomes callable only after every declared MCP server and tool is
+enabled and connected, every mounted skill is enabled, and its model resolves.
+Loading or unavailable agents stay visible but are left out of the `task` roster
+until they recover.
+
+### Write the description for two readers
+
+The `description` is the only part of an agent Pizza Bot sees before delegating,
+so it does two jobs:
+
+1. **Selection**: when should this agent be picked? Name the domain and the
+   phrases a user would actually say ("my notes", "my vault").
+2. **Expectation**: what does the agent decide for itself, and what does it
+   return? Without this, Pizza Bot guesses by writing a spec into the dispatch:
+   an output format or a time range the user never asked for.
+
+A live ablation measured 36% shorter dispatches from adding one "decides X
+itself, returns Y" sentence, and it stopped one request from being split across
+redundant subagents. Describe only what the agent really does.
+
+## Skills
+
+Skills follow the [Agent Skills](https://agentskills.io) format: a
+`SKILL.md` with `name` and `description` frontmatter plus optional sibling files.
+User skills live under `<PIZZA_DATA_ROOT>/skills/<id>/SKILL.md`. They can
+override a Built-in or Plugin skill with the same id without modifying the
+original; deleting an override reveals the Built-in or Plugin skill again.
+A `<id>` entry may be a symlink to a folder, for example to keep skills in a git
+repo; linked skills are read-only in the app (edit them at the source), and
+Unlink removes only the link. A skill linked in while Pizza Bot is running
+appears after a restart (#217).
+
+A skill carries no tools. Mount it on an agent with `skills:` to pair it with
+the tools it needs; a skill no agent mounts is available to Pizza Bot itself.
+A user skill whose frontmatter still declares `tools` or `interruptOn` is
+converted on startup or import into an agent of the same id that mounts it.
 
 See the [skills guide](../skills/README.md) for catalog precedence, Built-in
 skills, Plugin skills, sibling resources, and editing behavior.
@@ -96,10 +134,10 @@ skills, Plugin skills, sibling resources, and editing behavior.
 ## Plugins
 
 The **Plugins** screen installs ZIP bundles containing
-`.claude-plugin/plugin.json`. Plugins may contribute MCP servers and skills;
+`.claude-plugin/plugin.json`. Plugins may contribute MCP servers, agents, and skills;
 their MCP commands and optional materializers execute with the current user's
-permissions. A custom skill can replace a plugin-provided skill with the same
-id; removing the customization restores the plugin skill. Plugin MCP server
+permissions. A custom agent or skill can replace a plugin-provided one with the
+same id; removing the customization restores the plugin version. Plugin MCP server
 definitions remain part of the installed bundle. Install only sources you
 trust.
 

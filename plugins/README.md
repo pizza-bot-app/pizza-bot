@@ -13,22 +13,26 @@ The **Plugins** page installs a plugin from a ZIP containing a directory with
 `.claude-plugin/plugin.json` into `<data-root>/plugins` and reloads it live —
 no server restart. Only plugins installed there are removable through the UI;
 plugins shipped with the app or dropped into an external directory are
-read-only. The install and removal reconnect MCP servers and re-scan skills in
-place.
+read-only. The install and removal reconnect MCP servers and re-scan agents and
+skills in place.
 
 Plugins use a supported subset of the Claude Code plugin format. Most are
-declarative bundles that contribute two resource kinds:
+declarative bundles that contribute three resource kinds:
 
 - **MCP servers** — a `.mcp.json` in Claude Code's `{ mcpServers }` shape. Tools
   convert to LangChain tools the runtime consumes directly. String fields expand
   `${CLAUDE_PLUGIN_ROOT}`/`${PLUGIN_ROOT}` (the plugin's on-disk dir) and
   `${ENV_VAR}` (from the environment) at load time, so secrets stay out of the
   committed manifest. Set `enabled: false` on an entry to ship it disabled;
-  skills that depend on it stay off until the user enables the server, unless
-  the user has toggled the skill itself.
-- **Agent Skills** — one `SKILL.md` per capability under `skills/<id>/`. The
-  runtime compiles each into a tool-scoped worker only after all of its declared
-  tools are ready. See [../skills/README.md](../skills/README.md).
+  agents that depend on it stay off until the user enables the server, unless
+  the user has toggled the agent itself.
+- **Agents** — one `<id>.md` per subagent under the manifest's `agents`
+  directory, in the Claude Code subagent layout plus `interruptOn`. The runtime
+  compiles each into a subagent only after all of its declared tools are ready.
+  Requires the `agents/v1` capability. See
+  [../docs/EXTENDING.md](../docs/EXTENDING.md#agents).
+- **Agent Skills** — one `SKILL.md` per playbook under `skills/<id>/`, mounted by
+  the agents that list them. See [../skills/README.md](../skills/README.md).
 
 A manifest lives at `<plugin>/.claude-plugin/plugin.json`. Unsupported fields
 (such as `commands` or a `pizzaBot.ui` block) are parsed and dropped rather than
@@ -61,27 +65,28 @@ them.
   "version": "1.2.0",
   "engines": { "pizzaBot": ">=1.0.0 <2.0.0" },
   "capabilities": {
-    "required": ["mcp-servers/v1", "skills/v1"],
+    "required": ["mcp-servers/v1", "agents/v1", "skills/v1"],
     "optional": ["mcp-apps/v1"]
   }
 }
 ```
 
-Skill and MCP server references retain their existing local identifiers for
+Agent, skill, and MCP server references retain their existing local identifiers for
 configuration compatibility. Every registered contribution also has a
 `<plugin-name>/<local-id>` identity; new contribution kinds must use that
 plugin-qualified identity as their canonical key.
 
 The complete [MCP status example](../examples/plugins/mcp-status) is a small,
 self-contained reference plugin with a manifest, MCP server, and matching
-skill. It has no install step or external dependencies, so it can be copied or
+agent. It has no install step or external dependencies, so it can be copied or
 zipped as-is when starting a plugin.
 
 ## Bundled Plugins
 
 `google-workspace` gives Pizza Bot Gmail and Google Calendar access through a
 local stdio MCP server built on the official `@googleapis/gmail` and
-`@googleapis/calendar` clients, with `email` and `calendar` skills. Gmail is
+`@googleapis/calendar` clients, and a `google-workspace` agent that mounts its
+`email` and `calendar` skills. Gmail is
 search, read, and draft-only: the server has no send, delete, or modify tools,
 though the `gmail.compose` scope Google grants would permit sending. Use
 `--read-only` to withhold it.
@@ -89,7 +94,7 @@ Calendar can list, find free time, and create events (attendees are not
 notified unless `sendUpdates: "all"`).
 
 The plugin ships with its MCP server disabled, so it starts no subprocess and
-offers no skills until you enable the `google-workspace` server after setup.
+offers no agent until you enable the `google-workspace` server after setup.
 Setup needs a Google Cloud project and a Desktop-app OAuth client.
 [Google Workspace plugin setup](../docs/GOOGLE_WORKSPACE.md) walks through it
 with screenshots. Save the client JSON in `<data-root>/google-workspace/` and
@@ -129,8 +134,8 @@ use the desktop `safeStorage` secret store and is not configurable from
 Settings.
 
 `playwright-mcp` provides browser automation through a locked
-`@playwright/mcp` dependency and a matching `browser-automation` Agent Skill.
-The skill uses accessibility snapshots for interaction and omits Playwright
+`@playwright/mcp` dependency and a matching `browser-automation` agent.
+The agent uses accessibility snapshots for interaction and omits Playwright
 MCP's RCE-equivalent unsafe-code tool.
 
 The launcher uses an installed Chrome, Edge, or Chromium when it finds one.

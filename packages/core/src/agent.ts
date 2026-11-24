@@ -31,16 +31,15 @@ const PIZZA_BOT_BASE_PROMPT = [
 
 /** Delegation guidance is included only when the `task` tool is registered. */
 const PIZZA_BOT_SUBAGENT_PROMPT = [
-  "Specialized capabilities are exposed as skill-scoped workers through the " +
-    "`task` tool. Pick a worker from the names and descriptions in that tool and " +
-    "delegate directly without reading its SKILL.md first; the worker already " +
-    "receives its full skill instructions and scoped tools. Delegate heavy or " +
-    "noisy work so it stays out of this conversation; handle trivial requests " +
-    "yourself.",
+  "Specialized capabilities are exposed as workers through the `task` tool, each " +
+    "with its own instructions, tools, and skills. Pick a worker from the names and " +
+    "descriptions in that tool and delegate directly; the worker already has " +
+    "everything it needs. Delegate heavy or noisy work so it stays out of this " +
+    "conversation; handle trivial requests yourself.",
   // Live probes show this repeats the task tool's notes but still changes
   // behavior: without it, dispatches get paraphrased and reports get restyled.
-  "When you delegate you are ROUTING, not rewriting. The worker's skill already " +
-    "defines its procedure, its output format, and how much detail to return, so " +
+  "When you delegate you are ROUTING, not rewriting. The worker's instructions already " +
+    "define its procedure, its output format, and how much detail to return, so " +
     "`description` carries the user's request in the user's own words — copy it " +
     "verbatim whenever it stands on its own. Add only what the worker cannot see " +
     "for itself: relevant earlier turns, results you already gathered, and exact " +
@@ -52,7 +51,7 @@ const PIZZA_BOT_SUBAGENT_PROMPT = [
   "Wait for the result, then RELAY the worker's report as the body of your reply. " +
     "Reproduce its content and formatting — tables, lists, labelled lines such as " +
     "`Recommendation:` or `Confidence:` — rather than re-summarizing, reordering, " +
-    "or restyling it; that shape is part of the worker's skill and the user is " +
+    "or restyling it; that shape is part of the worker's design and the user is " +
     "meant to see it. Add your own words only to connect several reports or to " +
     "flag something the user must act on, and keep each worker's report intact " +
     "under its own heading. The report reaches the user only through your reply, " +
@@ -91,7 +90,7 @@ export const PIZZA_BOT_AGENT = {
   avatar: "🍕",
   description:
     "Your orchestrator assistant. Answers directly, and delegates specialized " +
-    "work to a skill-scoped subagent when a request matches one.",
+    "work to a specialist subagent when a request matches one.",
   // Feature-gated prompt sections are added by the runtime composition root.
   systemPrompt: pizzaBotSystemPrompt({ memories: false, subagents: true }),
   suggestedPrompts: [

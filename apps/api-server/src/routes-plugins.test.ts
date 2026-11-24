@@ -69,6 +69,7 @@ describe("plugin routes", () => {
       tools: {},
       catalog: {},
       skills: new Map(),
+      agents: new Map(),
       materializations: {
         "external-bundle": {
           state: "synced",
@@ -158,6 +159,7 @@ describe("plugin routes", () => {
       tools: {},
       catalog: {},
       skills: new Map(),
+      agents: new Map(),
       materializations: {},
     } satisfies LoadedPlugins;
     const host = {

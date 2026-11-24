@@ -1,49 +1,74 @@
-import type { SkillInterruptOn } from "@pizza-bot/core";
+import type { InterruptOnPolicy } from "@pizza-bot/core";
 
 export interface SkillDraft {
   name: string;
   description: string;
   body: string;
-  declaredTools: string[];
-  interruptOn: SkillInterruptOn;
 }
 
-export interface SkillGeneratorTool {
+export interface AgentDraft extends SkillDraft {
+  declaredTools: string[];
+  interruptOn: InterruptOnPolicy;
+}
+
+export interface GeneratorTool {
   ref: string;
   description: string;
 }
 
-// Bedrock Converse rejects the tool_choice required by structured output.
-// The caller parses and validates raw JSON and filters tools against the catalog.
-export function buildSkillGeneratorPrompt(tools: readonly SkillGeneratorTool[]): string {
+const JSON_ONLY = [
+  "Return ONLY a single JSON object — no markdown, no prose, no code fences —",
+  "with exactly these fields:",
+];
+
+// Bedrock Converse rejects the tool_choice required by structured output, so the
+// callers parse and validate raw JSON instead.
+export function buildSkillGeneratorPrompt(): string {
+  return [
+    "You author Agent Skills for a chat app called Pizza Bot. A skill is a",
+    "reusable, step-by-step playbook an agent reads on demand when a task matches",
+    "it. Given a short description of what the user wants a skill to do, produce",
+    "a complete skill definition.",
+    "",
+    ...JSON_ONLY,
+    "",
+    '- "name": a short, human-friendly skill name (2–4 words).',
+    '- "description": one or two sentences describing what the skill does and',
+    "  when to use it. This is the DISCOVERY signal an agent reads to decide",
+    "  whether to load this skill, so make it specific.",
+    '- "body": the SKILL.md instructions in Markdown (roughly 100–400 words):',
+    "  a clear, numbered or sectioned playbook covering the goal and the steps.",
+    "",
+    "Output must be valid JSON parseable by JSON.parse.",
+  ].join("\n");
+}
+
+export function buildAgentGeneratorPrompt(tools: readonly GeneratorTool[]): string {
   const toolList =
     tools.length > 0
       ? tools.map(({ ref, description }) => `- ${ref}: ${description}`).join("\n")
       : '(no tools are currently available — return an empty "tools" array)';
 
   return [
-    "You author Agent Skills for a chat app called Pizza Bot. A skill is a",
-    "reusable, step-by-step playbook the assistant loads on demand when a task",
-    "matches it. Given a short description of what the user wants a skill to do,",
-    "produce a complete skill definition.",
+    "You design specialist subagents for a chat app called Pizza Bot. The main",
+    "assistant delegates a request to a subagent when the request matches its",
+    "description; the subagent works in its own context with only its own tools",
+    "and returns one report. Given a short description of the specialist the user",
+    "wants, produce a complete subagent definition.",
     "",
-    "Return ONLY a single JSON object — no markdown, no prose, no code fences —",
-    "with exactly these fields:",
+    ...JSON_ONLY,
     "",
-    '- "name": a short, human-friendly skill name (2–4 words).',
-    '- "description": one or two sentences describing what the skill does and',
-    "  when to use it. This is the DISCOVERY signal the assistant reads to decide",
-    "  whether to load this skill, so make it specific.",
-    '- "body": the SKILL.md instructions in Markdown (roughly 100–400 words).',
-    "  Write a clear, numbered or sectioned playbook the assistant follows when",
-    "  it invokes the skill. Cover the goal, the steps, and how to use any tools.",
-    '- "tools": an array of tool reference strings the skill needs, chosen ONLY',
-    "  from the available tools listed below. Pick the minimal set that fits the",
-    "  skill's purpose, but do not omit a relevant tool when the requested workflow",
-    "  needs it to take action or retrieve information. The selected tools will be",
-    "  pre-populated in the skill editor.",
-    "  Use a `mcp:server:*` wildcard only when the skill genuinely",
-    "  needs most of a server's tools. If none are relevant, use [].",
+    '- "name": a short, human-friendly name (2–4 words).',
+    '- "description": one or two sentences saying what the subagent handles, what',
+    "  it decides for itself, and what it returns. This is the ROUTING signal the",
+    "  main assistant reads, so make it specific.",
+    '- "body": the subagent\'s system prompt in Markdown (roughly 100–400 words):',
+    "  its goal, its procedure, how to use its tools, and the shape of its report.",
+    '- "tools": an array of tool reference strings the subagent needs, chosen ONLY',
+    "  from the available tools listed below. Pick the minimal set that fits, but",
+    "  do not omit a tool the workflow needs to take action or retrieve information.",
+    "  Use a `mcp:server:*` wildcard only when the subagent genuinely needs most of",
+    "  a server's tools. If none are relevant, use [].",
     "",
     "Available tools:",
     toolList,
@@ -84,23 +109,32 @@ export function parseSkillDraftJson(text: string): Record<string, unknown> {
   throw new Error("model reply did not contain a JSON object");
 }
 
-export function normalizeSkillDraft(
-  raw: Record<string, unknown>,
-  tools: readonly SkillGeneratorTool[],
-): SkillDraft {
+export function normalizeSkillDraft(raw: Record<string, unknown>): SkillDraft {
   const str = (v: unknown): string => (typeof v === "string" ? v : "");
   const name = str(raw.name).trim() || "New Skill";
+  return {
+    name,
+    description: str(raw.description).trim() || name,
+    body: str(raw.body).trim(),
+  };
+}
+
+export function normalizeAgentDraft(
+  raw: Record<string, unknown>,
+  tools: readonly GeneratorTool[],
+): AgentDraft {
   const allowed = new Set(tools.map(({ ref }) => ref));
   const declaredTools = Array.isArray(raw.tools)
     ? [...new Set(raw.tools.filter((t): t is string => typeof t === "string" && allowed.has(t)))]
     : [];
-  const interruptOn: SkillInterruptOn = {};
+  const interruptOn: InterruptOnPolicy = {};
   for (const ref of declaredTools) {
     if (requiresApproval(ref)) {
       interruptOn[ref] = { allowedDecisions: ["approve", "edit", "reject"] };
     }
   }
-
+  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  const name = str(raw.name).trim() || "New Agent";
   return {
     name,
     description: str(raw.description).trim() || name,

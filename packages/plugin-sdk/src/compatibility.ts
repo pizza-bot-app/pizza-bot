@@ -7,6 +7,7 @@ import { satisfies, valid, validRange } from "semver";
 export const PLUGIN_HOST_CAPABILITIES = [
   "mcp-servers/v1",
   "skills/v1",
+  "agents/v1",
   "materializer/v1",
 ] as const satisfies readonly PluginCapabilityId[];
 

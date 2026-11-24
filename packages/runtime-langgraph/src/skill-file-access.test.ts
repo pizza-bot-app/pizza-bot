@@ -6,7 +6,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import type { SkillCatalog } from "@pizza-bot/core";
+import type { AgentCatalog, SkillCatalog } from "@pizza-bot/core";
 import { createPizzaBotAgent } from "./index.js";
 
 const REFERENCE_CONTENT = "The reference oven temperature is 500 F.";
@@ -15,6 +15,7 @@ const HIDDEN_MARKER = "hidden-skill-only-marker";
 class SkillFileReadingModel extends BaseChatModel<Record<string, never>> {
   private call = 0;
   delegationResult = "";
+  skillReadResult = "";
   readResult = "";
   workerSystemPrompt = "";
 
@@ -40,7 +41,7 @@ class SkillFileReadingModel extends BaseChatModel<Record<string, never>> {
           name: "task",
           args: {
             description: "Read the bundled oven reference and return its contents.",
-            subagent_type: "reader",
+            subagent_type: "cook",
           },
           type: "tool_call",
         }],
@@ -52,29 +53,46 @@ class SkillFileReadingModel extends BaseChatModel<Record<string, never>> {
           ? item.content
           : JSON.stringify(item.content))
         .join("\n");
-      message = new AIMessage({
-        content: "",
-        tool_calls: [{
-          id: "read-reference",
-          name: "read_file",
-          args: { path: "/skills/reader/references/oven.txt" },
-          type: "tool_call",
-        }],
-      });
+      message = readFile("read-skill", "/skills/reader/SKILL.md");
+    } else if (call === 2) {
+      this.skillReadResult = lastToolContent(messages);
+      message = readFile("read-reference", "/skills/reader/references/oven.txt");
     } else {
-      const toolMessage = [...messages].reverse().find(ToolMessage.isInstance);
-      const toolContent = toolMessage?.content ?? "";
-      const content = typeof toolContent === "string"
-        ? toolContent
-        : JSON.stringify(toolContent);
-      if (call === 2) this.readResult = content;
-      if (call === 3) this.delegationResult = content;
+      const content = lastToolContent(messages);
+      if (call === 3) this.readResult = content;
+      if (call === 4) this.delegationResult = content;
       message = new AIMessage({ content });
     }
 
     return { generations: [{ message, text: String(message.content) }] };
   }
 }
+
+function readFile(id: string, path: string): AIMessage {
+  return new AIMessage({
+    content: "",
+    tool_calls: [{ id, name: "read_file", args: { file_path: path }, type: "tool_call" }],
+  });
+}
+
+function lastToolContent(messages: BaseMessage[]): string {
+  const toolContent = [...messages].reverse().find(ToolMessage.isInstance)?.content ?? "";
+  return typeof toolContent === "string" ? toolContent : JSON.stringify(toolContent);
+}
+
+const agents: AgentCatalog = new Map([[
+  "cook",
+  {
+    id: "cook",
+    name: "Cook",
+    description: "Answers oven questions.",
+    systemPrompt: "Answer oven questions using your skills.",
+    source: "user",
+    declaredTools: [],
+    skills: ["reader"],
+    interruptOn: {},
+  },
+]]);
 
 const skills: SkillCatalog = new Map([
   [
@@ -84,8 +102,6 @@ const skills: SkillCatalog = new Map([
       name: "Reader",
       description: "Reads its bundled oven reference.",
       source: "user",
-      declaredTools: [],
-      interruptOn: {},
       files: [
         {
           path: "/skills/reader/SKILL.md",
@@ -112,8 +128,6 @@ const skills: SkillCatalog = new Map([
       name: "Hidden",
       description: HIDDEN_MARKER,
       source: "user",
-      declaredTools: [],
-      interruptOn: {},
       files: [{
         path: "/skills/hidden/SKILL.md",
         content: [
@@ -130,9 +144,9 @@ const skills: SkillCatalog = new Map([
 ]);
 
 describe("subagent files", () => {
-  it("reads its sibling reference without rereading its own skill", async () => {
+  it("discloses only its mounted skills and reads their files through the backend", async () => {
     const model = new SkillFileReadingModel({});
-    const agent = await createPizzaBotAgent("Delegate this request.", { model, skills });
+    const agent = await createPizzaBotAgent("Delegate this request.", { model, agents, skills });
 
     for await (const _ of agent.streamProtocol(
       {
@@ -147,14 +161,12 @@ describe("subagent files", () => {
       // Drain the stream so delegated work completes.
     }
 
+    expect(model.workerSystemPrompt).toContain("Answer oven questions using your skills.");
+    expect(model.workerSystemPrompt).toContain("/skills/reader/SKILL.md");
+    expect(model.workerSystemPrompt).toContain("Reads its bundled oven reference.");
+    expect(model.workerSystemPrompt).not.toContain(HIDDEN_MARKER);
+    expect(model.skillReadResult).toContain("Read /skills/reader/references/oven.txt before answering.");
     expect(model.readResult).toContain(REFERENCE_CONTENT);
     expect(model.delegationResult).toContain(REFERENCE_CONTENT);
-    expect(model.workerSystemPrompt).toContain("/skills/reader/references/oven.txt");
-    expect(model.workerSystemPrompt).not.toContain("/skills/reader/SKILL.md");
-    expect(model.workerSystemPrompt).not.toContain("## Skills System");
-    expect(
-      model.workerSystemPrompt.match(/Read \/skills\/reader\/references\/oven\.txt/g),
-    ).toHaveLength(1);
-    expect(model.workerSystemPrompt).not.toContain(HIDDEN_MARKER);
   });
 });

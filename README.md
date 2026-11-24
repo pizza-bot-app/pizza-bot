@@ -48,8 +48,8 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
   work from the global Unread and Action queues.
 - **Resume real work.** Checkpointed runs survive client disconnects, and cron or
   webhook triggers can start work without an open conversation.
-- **Delegate to specialists.** Skills become tool-scoped subagents whose progress
-  appears in the Activity panel.
+- **Delegate to specialists.** Agents you design, each with its own model, tools,
+  and skills, run as subagents whose progress appears in the Activity panel.
 - **Bring your model provider.** Amazon Bedrock, Anthropic, Google Gemini,
   OpenAI, OpenRouter, Requesty, Opper, and Ollama are supported.
 - **Keep control of consequential actions.** Human-in-the-loop approvals,
@@ -119,12 +119,12 @@ environment-variable references.
 
 ## Extend it
 
-Add MCP servers from the UI or `<PIZZA_DATA_ROOT>/.mcp.json`. Add Agent Skills
-under `<PIZZA_DATA_ROOT>/skills`, or install plugins that package MCP servers and
-skills together. Skills become available after their declared tools are enabled
-and connected. A custom skill can replace a Built-in or Plugin skill with the
-same id without modifying the original; removing the customization reveals the
-Built-in or Plugin version again. The Built-in **Pizza Bot Guide** can explain
+Add MCP servers from the UI or `<PIZZA_DATA_ROOT>/.mcp.json`. Design agents under
+`<PIZZA_DATA_ROOT>/agents` and Agent Skills under `<PIZZA_DATA_ROOT>/skills`, or
+install plugins that package MCP servers, agents, and skills together. An agent
+becomes available after its declared tools are enabled and connected. A custom
+agent or skill can replace a Plugin or Built-in one with the same id without
+modifying the original; removing the customization reveals the original again. The Built-in **Pizza Bot Guide** can explain
 features, suggest workflows, help with setup, and point to project documentation.
 
 See [Extending Pizza Bot](docs/EXTENDING.md) for configuration, environment

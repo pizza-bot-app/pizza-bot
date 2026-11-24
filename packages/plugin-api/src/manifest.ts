@@ -108,6 +108,7 @@ export const pluginManifestSchema = z.object({
   license: z.string().optional(),
   keywords: z.array(z.string()).optional(),
   skills: z.union([z.string(), z.array(z.string())]).optional(),
+  agents: z.union([z.string(), z.array(z.string())]).optional(),
   mcpServers: z
     .union([z.string(), z.record(z.string(), mcpServerEntrySchema)])
     .optional(),

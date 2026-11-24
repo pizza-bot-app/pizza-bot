@@ -14,8 +14,6 @@ function skillCatalog(...ids: string[]): SkillCatalog {
       name: id,
       description: `${id} description`,
       source: "user",
-      declaredTools: [],
-      interruptOn: {},
       files: [{
         path: `/skills/${id}/SKILL.md`,
         content: `---\nname: ${id}\ndescription: ${id} description\n---\n\n# ${id}`,
@@ -97,12 +95,12 @@ describe("GraphManager", () => {
     expect(registry.agent).not.toBe(first);
   });
 
-  it("rebuilds when skill availability context changes", async () => {
+  it("rebuilds when agent availability context changes", async () => {
     const registry = await createRegistry(skillCatalog("plain"));
     const first = registry.agent;
     await registry.replaceCapabilities({
       skills: new Map(),
-      skillAvailability: [{
+      agentAvailability: [{
         id: "obsidian",
         name: "Obsidian",
         status: "loading",
