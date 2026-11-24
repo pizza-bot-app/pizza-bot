@@ -152,13 +152,13 @@ function McpServerDetail({
   };
 
   const enabledDependents =
-    selected?.dependentSkills.filter((skill) => skill.enabled) ?? [];
-  const dependentNames = enabledDependents.map((skill) => skill.name).join(", ");
+    selected?.dependentAgents.filter((agent) => agent.enabled) ?? [];
+  const dependentNames = enabledDependents.map((agent) => agent.name).join(", ");
   const blockedReason =
     selected?.enabled && enabledDependents.length > 0 ? `Required by ${dependentNames}.` : undefined;
   const deleteBlockedReason =
     enabledDependents.length > 0
-      ? `Required by ${dependentNames}. Disable ${enabledDependents.length === 1 ? "that skill" : "those skills"} first.`
+      ? `Required by ${dependentNames}. Disable ${enabledDependents.length === 1 ? "that agent" : "those agents"} first.`
       : undefined;
 
   const requestDelete = (server: McpServerRow) =>
@@ -188,7 +188,7 @@ function McpServerDetail({
   const reconnectControl = selected ? (
     <McpReconnectControl server={selected} onReconnect={onReconnect} />
   ) : undefined;
-  const dependents = selected ? <McpDependents skills={selected.dependentSkills} /> : undefined;
+  const dependents = selected ? <McpDependents agents={selected.dependentAgents} /> : undefined;
 
   if (selection?.mode === "new") {
     return <McpServerEditor key="new" server={null} onSave={handleSave} onCancel={leaveEditor} />;
