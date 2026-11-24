@@ -10,6 +10,7 @@ afterEach(() => {
 });
 
 describe("lazy Streamdown plugins", () => {
+  // Cold-importing the four renderer graphs can exceed the 5s default under full-suite load.
   it("enhances a rendered message after the shared plugin bundle loads", async () => {
     const { loadStreamdownPlugins } = await import("./streamdown-plugins.js");
     const plugins = await loadStreamdownPlugins();
@@ -22,7 +23,7 @@ describe("lazy Streamdown plugins", () => {
     expect(html).toContain("animate-spin");
     expect(html).not.toContain('data-language="mermaid"');
     expect(html).not.toContain("graph TD");
-  });
+  }, 30_000);
 
   it("keeps basic Markdown rendering available when an enhanced chunk fails", async () => {
     vi.doMock("@streamdown/mermaid", () => {
