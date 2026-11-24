@@ -80,8 +80,8 @@ export function describeGrantedTool(ref: string, catalog: ToolCatalogInfo): Gran
 
 /**
  * Turns a search ending in `*` into grantable patterns: `list_*` is tried on every
- * server, a full `mcp:<server>:list_*` on its own. Patterns matching nothing are
- * dropped because the runtime rejects a skill whose wildcard grant is empty.
+ * server, `<server>:list_*` or `mcp:<server>:list_*` on that server only. Patterns
+ * matching nothing are dropped because the runtime rejects an empty wildcard grant.
  */
 export function patternSuggestions(
   query: string,
@@ -89,7 +89,11 @@ export function patternSuggestions(
 ): { suggestions: PatternSuggestion[]; error?: string } {
   const q = query.trim();
   if (!q.includes("*")) return { suggestions: [] };
-  const refs = q.startsWith("mcp:") ? [q] : catalog.servers.map((s) => `mcp:${s.server}:${q}`);
+  const qualified = q.startsWith("mcp:") ? q : q.includes(":") ? `mcp:${q}` : undefined;
+  if (qualified !== undefined && qualified.split(":").length !== 3) {
+    return { suggestions: [], error: "Patterns look like <server>:<prefix>* or mcp:<server>:<prefix>*." };
+  }
+  const refs = qualified !== undefined ? [qualified] : catalog.servers.map((s) => `mcp:${s.server}:${q}`);
   const names = namesBySource(catalog);
   const suggestions: PatternSuggestion[] = [];
   try {
@@ -99,12 +103,7 @@ export function patternSuggestions(
     }
   } catch (err) {
     if (!(err instanceof InvalidWildcardError)) throw err;
-    return {
-      suggestions: [],
-      error: q.startsWith("mcp:") && q.split(":").length !== 3
-        ? "Patterns look like mcp:<server>:<prefix>*."
-        : "A * can only go at the end of a pattern.",
-    };
+    return { suggestions: [], error: "A * can only go at the end of a pattern." };
   }
   return { suggestions };
 }

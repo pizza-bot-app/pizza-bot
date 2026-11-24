@@ -89,8 +89,12 @@ describe("patternSuggestions", () => {
     expect(patternSuggestions("read_*", catalog).suggestions.map((s) => s.ref)).toEqual(["mcp:files:read_*"]);
   });
 
-  it("scopes a full ref to its server", () => {
+  it("scopes a full ref or server:pattern shorthand to that server", () => {
     expect(patternSuggestions("mcp:mail:list_*", catalog).suggestions.map((s) => s.ref)).toEqual(["mcp:mail:list_*"]);
+    expect(patternSuggestions("mail:list_*", catalog).suggestions.map((s) => s.ref)).toEqual(["mcp:mail:list_*"]);
+    expect(patternSuggestions("files:*", catalog).suggestions).toEqual([
+      { ref: "mcp:files:*", source: "files", matches: ["list_directory", "list_allowed_directories", "read_file"] },
+    ]);
   });
 
   it("explains a misplaced *", () => {
@@ -98,6 +102,12 @@ describe("patternSuggestions", () => {
       suggestions: [],
       error: "A * can only go at the end of a pattern.",
     });
-    expect(patternSuggestions("mcp:list_*", catalog).error).toBe("Patterns look like mcp:<server>:<prefix>*.");
+    expect(patternSuggestions("mcp:list_*", catalog).error).toBe(
+      "Patterns look like <server>:<prefix>* or mcp:<server>:<prefix>*.",
+    );
+    expect(patternSuggestions("a:b:c*", catalog).error).toBe(
+      "Patterns look like <server>:<prefix>* or mcp:<server>:<prefix>*.",
+    );
+    expect(patternSuggestions("files:*_file", catalog).error).toBe("A * can only go at the end of a pattern.");
   });
 });
