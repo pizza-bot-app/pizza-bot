@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ToolCatalogInfo } from "@/api-client";
-import { describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "./tool-catalog.js";
+import { coveringAskRef, describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "./tool-catalog.js";
 
 const catalog: ToolCatalogInfo = {
   builtins: [{ ref: "builtin:eval", name: "eval", description: "Evaluate expressions." }],
@@ -109,5 +109,24 @@ describe("patternSuggestions", () => {
       "Patterns look like <server>:<prefix>* or mcp:<server>:<prefix>*.",
     );
     expect(patternSuggestions("files:*_file", catalog).error).toBe("A * can only go at the end of a pattern.");
+  });
+});
+
+describe("coveringAskRef", () => {
+  const declared = ["mcp:files:*", "mcp:files:list_*", "mcp:files:read_file", "mcp:mail:list_folders"];
+
+  it("finds a broader asking wildcard on the same server", () => {
+    const asks = (ref: string) => ref === "mcp:files:*";
+    expect(coveringAskRef("mcp:files:read_file", declared, asks)).toBe("mcp:files:*");
+    expect(coveringAskRef("mcp:files:list_*", declared, asks)).toBe("mcp:files:*");
+    expect(coveringAskRef("mcp:files:*", declared, asks)).toBeUndefined();
+    expect(coveringAskRef("mcp:mail:list_folders", declared, asks)).toBeUndefined();
+  });
+
+  it("ignores wildcards that don't ask or don't cover the ref", () => {
+    const asks = (ref: string) => ref === "mcp:files:list_*";
+    expect(coveringAskRef("mcp:files:read_file", declared, asks)).toBeUndefined();
+    expect(coveringAskRef("mcp:files:*", declared, asks)).toBeUndefined();
+    expect(coveringAskRef("mcp:files:list_directory", [...declared, "mcp:files:list_directory"], asks)).toBe("mcp:files:list_*");
   });
 });

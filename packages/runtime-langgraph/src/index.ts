@@ -24,6 +24,9 @@ import {
   type SkillCatalogEntry,
   type Logger,
   type ToolCatalog,
+  type HitlDecision,
+  type SkillInterruptConfig,
+  type SkillInterruptOn,
   BUILTIN_EVAL_TOOL_REF,
   DEFAULT_SETTINGS,
 } from "@pizza-bot/core";
@@ -92,20 +95,38 @@ function runLimitMiddleware(limits: RunLimits): unknown[] {
   return middleware;
 }
 
+/** What `true` grants in the upstream HITL middleware. */
+const DEFAULT_HITL_DECISIONS: readonly HitlDecision[] = ["approve", "edit", "reject", "respond"];
+
+/** The decisions both configs allow; never empty, so an overlap can't silently stop asking. */
+function narrowInterruptConfig(
+  a: SkillInterruptConfig,
+  b: SkillInterruptConfig,
+): SkillInterruptConfig {
+  if (a === false) return b;
+  if (b === false) return a;
+  if (a === true && b === true) return true;
+  const decisions = (c: true | { allowedDecisions: HitlDecision[] }) =>
+    c === true ? DEFAULT_HITL_DECISIONS : c.allowedDecisions;
+  const shared = decisions(a).filter((d) => decisions(b).includes(d));
+  return { allowedDecisions: shared.length > 0 ? shared : ["approve", "reject"] };
+}
+
 /**
  * MCP tools are bound under their server-prefixed executable name
  * (`<server>__<tool>`), but the HITL middleware matches `interruptOn` keys
  * against that live tool name. Expand wildcard refs and requalify every concrete
- * tool so approval policy follows the same resolution rules as tool grants.
+ * tool so approval policy follows the same resolution rules as tool grants. A tool
+ * asks first if any ref covering it does; `false` never cancels another ref's ask.
  */
-function qualifyInterruptOn<T>(
-  interruptOn: Record<string, T> | undefined,
+function qualifyInterruptOn(
+  interruptOn: SkillInterruptOn | undefined,
   catalog: ToolCatalog | undefined,
   who: string,
   logger?: Logger,
-): Record<string, T> | undefined {
+): SkillInterruptOn | undefined {
   if (!interruptOn) return interruptOn;
-  const out: Record<string, T> = {};
+  const out: SkillInterruptOn = {};
   for (const [ref, config] of Object.entries(interruptOn)) {
     if (config === false) continue;
     if (!ref.startsWith("mcp:")) {
@@ -123,7 +144,9 @@ function qualifyInterruptOn<T>(
       logger?.warn(`${who}: invalid interruptOn tool ref "${badRef}" — skipping`);
     }
     for (const concreteRef of expanded) {
-      out[executableToolName(concreteRef)] = config;
+      const name = executableToolName(concreteRef);
+      const previous = out[name];
+      out[name] = previous === undefined ? config : narrowInterruptConfig(previous, config);
     }
   }
   return out;

@@ -71,4 +71,35 @@ describe("SkillEditor", () => {
     expect(html).toContain('aria-label="Ask first before running mcp:fs:read_file"');
     expect(html).not.toContain(">Approval<");
   });
+
+  it("locks Ask first on for a tool an asking wildcard already covers", () => {
+    const html = renderToStaticMarkup(
+      <AppToastProvider>
+        <SkillEditor
+          skill={{
+            id: "files",
+            name: "Files",
+            description: "Reads files.",
+            body: "Read files.",
+            files: [],
+            source: "user",
+            declaredTools: ["mcp:fs:*", "mcp:fs:read_file"],
+            interruptOn: { "mcp:fs:*": true },
+          }}
+          tools={{
+            builtins: [],
+            servers: [{ server: "fs", wildcard: "mcp:fs:*", tools: [{ ref: "mcp:fs:read_file", name: "read_file" }] }],
+          }}
+          onSave={vi.fn()}
+          onGenerate={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      </AppToastProvider>,
+    );
+
+    expect(html).toMatch(/aria-label="Ask first before running mcp:fs:\*" checked=""\/>/);
+    expect(html).toMatch(/aria-label="Ask first before running mcp:fs:read_file" disabled="" checked=""\/>/);
+    expect(html).toContain('title="Asks first via mcp:fs:*"');
+  });
 });
+

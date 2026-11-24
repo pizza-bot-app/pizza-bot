@@ -99,6 +99,64 @@ describe("resolveSkillSubagents", () => {
     });
   });
 
+  it("asks first for a tool if any overlapping ref asks, keeping only the decisions they share", async () => {
+    const resolved = await resolveSkillSubagents(
+      catalog(skill(
+        "notes",
+        ["mcp:notes:*", "mcp:notes:list_*", "mcp:notes:delete_note"],
+        {
+          "mcp:notes:*": { allowedDecisions: ["approve", "edit", "reject"] },
+          "mcp:notes:list_*": false,
+          "mcp:notes:delete_note": { allowedDecisions: ["approve", "reject", "respond"] },
+        },
+      )),
+      {
+        tools: {
+          "mcp:notes:list_notes": { name: "notes__list_notes" },
+          "mcp:notes:read_note": { name: "notes__read_note" },
+          "mcp:notes:delete_note": { name: "notes__delete_note" },
+        },
+        catalog: { notes: ["list_notes", "read_note", "delete_note"] },
+      },
+    );
+
+    expect(resolved![0]!.interruptOn).toEqual({
+      notes__list_notes: { allowedDecisions: ["approve", "edit", "reject"] },
+      notes__read_note: { allowedDecisions: ["approve", "edit", "reject"] },
+      notes__delete_note: { allowedDecisions: ["approve", "reject"] },
+    });
+  });
+
+  it("narrows true to the explicit decisions and never leaves an overlap with none", async () => {
+    const resolved = await resolveSkillSubagents(
+      catalog(skill(
+        "notes",
+        ["mcp:notes:*"],
+        {
+          "mcp:notes:*": true,
+          "mcp:notes:read_note": { allowedDecisions: ["edit"] },
+          "mcp:notes:delete_note": { allowedDecisions: ["approve", "edit"] },
+          "mcp:notes:list_*": { allowedDecisions: ["respond"] },
+          "mcp:notes:list_notes": { allowedDecisions: ["edit"] },
+        },
+      )),
+      {
+        tools: {
+          "mcp:notes:list_notes": { name: "notes__list_notes" },
+          "mcp:notes:read_note": { name: "notes__read_note" },
+          "mcp:notes:delete_note": { name: "notes__delete_note" },
+        },
+        catalog: { notes: ["list_notes", "read_note", "delete_note"] },
+      },
+    );
+
+    expect(resolved![0]!.interruptOn).toEqual({
+      notes__list_notes: { allowedDecisions: ["approve", "reject"] },
+      notes__read_note: { allowedDecisions: ["edit"] },
+      notes__delete_note: { allowedDecisions: ["approve", "edit"] },
+    });
+  });
+
   it("adds eval only to a skill that declares it", async () => {
     const resolved = await resolveSkillSubagents(
       catalog(skill("analyst", [BUILTIN_EVAL_TOOL_REF])),

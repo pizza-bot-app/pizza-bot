@@ -6,7 +6,7 @@ import { L } from "../../lexicon.js";
 import { slugify } from "../../lib/utils.js";
 import { prepareSkillFiles } from "./skill-editor-files.js";
 import { useAppToast } from "../AppToast.js";
-import { describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "../tools/tool-catalog.js";
+import { coveringAskRef, describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "../tools/tool-catalog.js";
 import { ToolChip, ToolFilterInput, ToolRow, ToolSourceTag } from "../tools/ToolList.js";
 
 export interface SkillEditorProps {
@@ -46,6 +46,8 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const asksFirst = (ref: string) => interruptOn[ref] !== undefined && interruptOn[ref] !== false;
 
   const canSave = name.trim() !== "" && description.trim() !== "" && !saving;
 
@@ -187,46 +189,57 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
             {declaredTools.length === 0 && (
               <span className="field-hint">No tools declared.</span>
             )}
-            {declaredTools.map((ref) => (
-              <ToolChip key={ref} tool={describeGrantedTool(ref, tools)}>
-                {ref.startsWith("mcp:") && (
-                  <label className="skill-tool-approval" title="Pause for your approval before this tool runs">
-                    <input
-                      type="checkbox"
-                      aria-label={`Ask first before running ${ref}`}
-                      checked={interruptOn[ref] !== undefined && interruptOn[ref] !== false}
-                      onChange={(event) =>
-                        setInterruptOn((previous) => {
-                          const next = { ...previous };
-                          if (event.target.checked) {
-                            next[ref] = { allowedDecisions: ["approve", "edit", "reject"] };
-                          } else {
-                            delete next[ref];
-                          }
-                          return next;
-                        })
+            {declaredTools.map((ref) => {
+              const coveredBy = coveringAskRef(ref, declaredTools, asksFirst);
+              return (
+                <ToolChip key={ref} tool={describeGrantedTool(ref, tools)}>
+                  {ref.startsWith("mcp:") && (
+                    <label
+                      className="skill-tool-approval"
+                      title={
+                        coveredBy
+                          ? `Asks first via ${coveredBy}`
+                          : "Pause for your approval before this tool runs"
                       }
-                    />
-                    Ask first
-                  </label>
-                )}
-                <button
-                  type="button"
-                  className="resource-tool-chip-x"
-                  aria-label={`Remove ${ref}`}
-                  onClick={() => {
-                    setDeclaredTools((prev) => prev.filter((r) => r !== ref));
-                    setInterruptOn((previous) => {
-                      const next = { ...previous };
-                      delete next[ref];
-                      return next;
-                    });
-                  }}
-                >
-                  <X size={12} />
-                </button>
-              </ToolChip>
-            ))}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={`Ask first before running ${ref}`}
+                        checked={coveredBy !== undefined || asksFirst(ref)}
+                        disabled={coveredBy !== undefined}
+                        onChange={(event) =>
+                          setInterruptOn((previous) => {
+                            const next = { ...previous };
+                            if (event.target.checked) {
+                              next[ref] = { allowedDecisions: ["approve", "edit", "reject"] };
+                            } else {
+                              delete next[ref];
+                            }
+                            return next;
+                          })
+                        }
+                      />
+                      Ask first
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    className="resource-tool-chip-x"
+                    aria-label={`Remove ${ref}`}
+                    onClick={() => {
+                      setDeclaredTools((prev) => prev.filter((r) => r !== ref));
+                      setInterruptOn((previous) => {
+                        const next = { ...previous };
+                        delete next[ref];
+                        return next;
+                      });
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                </ToolChip>
+              );
+            })}
           </div>
           <ToolPicker
             catalog={tools}

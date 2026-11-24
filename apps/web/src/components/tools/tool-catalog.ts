@@ -107,3 +107,22 @@ export function patternSuggestions(
   }
   return { suggestions };
 }
+
+/**
+ * A declared wildcard that already makes `ref` ask first, if any. The runtime ORs
+ * overlapping asks, so the editor shows a covered tool's box as checked and locked.
+ */
+export function coveringAskRef(
+  ref: string,
+  declared: readonly string[],
+  asks: (ref: string) => boolean,
+): string | undefined {
+  const [, server, name = ""] = ref.split(":");
+  const own = name.endsWith("*") ? name.slice(0, -1) : name;
+  return declared.find((other) => {
+    if (other === ref || !asks(other) || !isWildcard(other)) return false;
+    const [, otherServer, pattern = ""] = other.split(":");
+    if (otherServer !== server || !pattern.endsWith("*")) return false;
+    return own.startsWith(pattern.slice(0, -1));
+  });
+}

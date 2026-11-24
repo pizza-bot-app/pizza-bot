@@ -1837,6 +1837,7 @@ textarea.resource-systemprompt { font-size: 13px; line-height: 1.55; }
   color: var(--dim); font-size: 11px; cursor: pointer;
 }
 .skill-tool-approval input { margin: 0; }
+.skill-tool-approval:has(input:disabled) { cursor: default; }
 .resource-tool-chip-x {
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px; border: 0; border-radius: 50%; cursor: pointer;
