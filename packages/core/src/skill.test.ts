@@ -317,6 +317,16 @@ describe("parseDeclaredTools", () => {
     ).toEqual(["mcp:outlook:send_email", "mcp:srv:tool__x", "Bash(git add:*)", "Read"]);
   });
 
+  it("keeps an unbalanced permission rule whole and tokenizes adversarial input quickly", () => {
+    expect(parseDeclaredTools({ "allowed-tools": "Read Bash(git add" })).toEqual([
+      "Read",
+      "Bash(git add",
+    ]);
+    const start = performance.now();
+    parseDeclaredTools({ "allowed-tools": "!(".repeat(50_000) });
+    expect(performance.now() - start).toBeLessThan(1_000);
+  });
+
   it("translates comma-separated and list allowed-tools, keeping unknown entries verbatim", () => {
     expect(parseDeclaredTools({ "allowed-tools": "Read, mcp__cal__list_events" })).toEqual([
       "Read",

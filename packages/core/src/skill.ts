@@ -218,11 +218,26 @@ function listItems(raw: unknown, separator: RegExp): string[] {
 
 /**
  * Claude Code permission rules such as `Bash(git add:*)` contain spaces, so a
- * string `allowed-tools` is tokenized with parentheses kept whole.
+ * string `allowed-tools` is tokenized with parentheses kept whole. A single
+ * linear scan, not a regex: this parses untrusted frontmatter.
  */
 function allowedToolItems(raw: unknown): string[] {
   if (typeof raw !== "string") return listItems(raw, /[,\s]+/);
-  return [...raw.matchAll(/[^\s,()]+(?:\([^)]*\))?/g)].map((match) => match[0]);
+  const items: string[] = [];
+  let current = "";
+  let depth = 0;
+  for (const ch of raw) {
+    if (depth === 0 && (ch === "," || ch.trim() === "")) {
+      if (current) items.push(current);
+      current = "";
+      continue;
+    }
+    if (ch === "(") depth += 1;
+    else if (ch === ")" && depth > 0) depth -= 1;
+    current += ch;
+  }
+  if (current) items.push(current);
+  return items;
 }
 
 /** `mcp__<server>__<tool>` splits at the first `__` so tool names may contain `__`. */
