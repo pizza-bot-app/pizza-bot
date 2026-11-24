@@ -347,3 +347,46 @@ describe("trigger routes: run now (manual)", () => {
     expect(ran).toHaveLength(0);
   });
 });
+
+describe("trigger routes: graph targets", () => {
+  const json = (body: unknown) => ({
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  it("creates a promptless cron trigger for a known graph and rejects an unknown one", async () => {
+    const store = memStore();
+    const app = new Hono();
+    app.route("/", triggerRoutes(store, fakeService(store).service, async (id) => id === "digest"));
+
+    const created = await app.request("/triggers", {
+      method: "POST",
+      ...json({ id: "g1", kind: "cron", cron: "0 9 * * *", graphId: "digest" }),
+    });
+    expect(created.status).toBe(201);
+    expect(store.get("g1")?.graphId).toBe("digest");
+
+    const unknown = await app.request("/triggers", {
+      method: "POST",
+      ...json({ kind: "cron", cron: "0 9 * * *", graphId: "nope" }),
+    });
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toMatchObject({ detail: "graph nope does not exist" });
+  });
+
+  it("clearing the graph target requires the prompt back", async () => {
+    const store = memStore();
+    const app = new Hono();
+    app.route("/", triggerRoutes(store, fakeService(store).service, async () => true));
+    store.create({ id: "g1", kind: "cron", cron: "0 9 * * *", graphId: "digest", enabled: true });
+
+    const cleared = await app.request("/triggers/g1", { method: "PATCH", ...json({ graphId: "" }) });
+    expect(cleared.status).toBe(400);
+    const restored = await app.request("/triggers/g1", {
+      method: "PATCH",
+      ...json({ graphId: "", prompt: "summarize" }),
+    });
+    expect(restored.status).toBe(200);
+    expect(store.get("g1")?.graphId).toBeUndefined();
+  });
+});

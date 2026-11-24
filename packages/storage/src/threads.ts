@@ -20,6 +20,8 @@ export interface ThreadRecord {
   parentCheckpointId?: string;
   /** Model selected for this conversation; set on its first model turn. */
   modelId?: string;
+  /** Set at creation for a graph run; the thread's checkpoints belong to that graph. */
+  graphId?: string;
   lastMessage?: string;
   lastMessageRole?: string;
 }
@@ -35,6 +37,7 @@ interface ThreadRow {
   unread: number;
   awaiting_action: number;
   model_id: string | null;
+  graph_id: string | null;
   created_at: string;
   last_activity_at: string;
   last_message: string | null;
@@ -50,6 +53,7 @@ export interface NewThreadInput {
   parentThreadId?: string;
   parentCheckpointId?: string;
   modelId?: string;
+  graphId?: string;
   createdAt?: string;
 }
 
@@ -104,6 +108,9 @@ export class ThreadStore {
     if (!columns.some((column) => column.name === "folder_id")) {
       this.db.exec("ALTER TABLE threads ADD COLUMN folder_id TEXT");
     }
+    if (!columns.some((column) => column.name === "graph_id")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN graph_id TEXT");
+    }
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_threads_folder ON threads (folder_id)");
   }
 
@@ -127,16 +134,17 @@ export class ThreadStore {
         ? { parentCheckpointId: input.parentCheckpointId }
         : {}),
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      ...(input.graphId !== undefined ? { graphId: input.graphId } : {}),
     };
     this.db
       .prepare(
         `INSERT INTO threads
            (thread_id, title, folder_id, parent_thread_id, parent_checkpoint_id, source, pinned, unread,
-            awaiting_action, model_id, created_at, last_activity_at, last_message,
+            awaiting_action, model_id, graph_id, created_at, last_activity_at, last_message,
             last_message_role)
          VALUES
            (@thread_id, @title, @folder_id, @parent_thread_id, @parent_checkpoint_id, @source, @pinned, @unread,
-            @awaiting_action, @model_id, @created_at, @last_activity_at, @last_message,
+            @awaiting_action, @model_id, @graph_id, @created_at, @last_activity_at, @last_message,
             @last_message_role)`,
       )
       .run(toRow(rec));
@@ -237,6 +245,7 @@ function toThread(row: ThreadRow): ThreadRecord {
   if (row.parent_thread_id !== null) rec.parentThreadId = row.parent_thread_id;
   if (row.parent_checkpoint_id !== null) rec.parentCheckpointId = row.parent_checkpoint_id;
   if (row.model_id !== null) rec.modelId = row.model_id;
+  if (row.graph_id !== null) rec.graphId = row.graph_id;
   if (row.last_message !== null) rec.lastMessage = row.last_message;
   if (row.last_message_role !== null) rec.lastMessageRole = row.last_message_role;
   return rec;
@@ -254,6 +263,7 @@ function toRow(rec: ThreadRecord): ThreadRow {
     unread: rec.unread ? 1 : 0,
     awaiting_action: rec.awaitingAction ? 1 : 0,
     model_id: rec.modelId ?? null,
+    graph_id: rec.graphId ?? null,
     created_at: rec.createdAt,
     last_activity_at: rec.lastActivityAt,
     last_message: rec.lastMessage ?? null,

@@ -28,6 +28,7 @@ function fakeHost(
     modelId: "fake:model",
     readiness,
     whenReady: async () => {},
+    threadGraph: async () => host.agent,
     skillsDirectory: async () => null,
     listMcpServers: async () => [],
     listProviders: async () => [

@@ -466,3 +466,76 @@ describe("TriggerService: automations gate and recovery", () => {
     svc.stop();
   });
 });
+
+describe("TriggerService: graph targets", () => {
+  it("delivers a webhook body as graph input and selects the graph", () => {
+    const store = memStore();
+    store.create({ id: "hook", kind: "webhook", name: "Inbound", graphId: "triage", enabled: true, webhookSecret: "k" });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, { log: () => {} });
+
+    const result = svc.invokeWebhook("hook", { prompt: "not a prompt here", user: "ada" });
+
+    expect(result).toBeDefined();
+    expect(m.starts).toHaveLength(1);
+    const { input, opts } = m.starts[0]!;
+    expect(input).toEqual({
+      graphInput: {
+        trigger: expect.objectContaining({ id: "hook", name: "Inbound", reason: "webhook" }),
+        body: { prompt: "not a prompt here", user: "ada" },
+      },
+    });
+    expect(opts?.configurable).toMatchObject({ graph_id: "triage", source: "trigger" });
+  });
+
+  it("continues a crash-orphaned graph occurrence on its own thread", () => {
+    const store = memStore();
+    store.create({ id: "t", kind: "cron", graphId: "digest", enabled: true, cron: "0 * * * *" });
+    const now = Date.parse("2026-07-05T12:10:00.000Z");
+    store.createOccurrence({
+      id: "orphan",
+      triggerId: "t",
+      scheduledAt: new Date(now).toISOString(),
+      reason: "manual",
+      now: new Date(now).toISOString(),
+    });
+    store.beginOccurrence("orphan", new Date(now).toISOString(), 3);
+    store.attachRun("orphan", "thread_prev", "run_prev", "running", new Date(now).toISOString());
+
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, { now: () => now, log: () => {} });
+    svc.start();
+
+    expect(m.starts).toHaveLength(1);
+    expect(m.starts[0]).toMatchObject({
+      threadId: "thread_prev",
+      input: { graphInput: { trigger: { id: "t" } }, continueFromCheckpoint: true },
+    });
+    expect(store.getOccurrence("orphan")).toMatchObject({ threadId: "thread_prev", attempt: 2 });
+    svc.stop();
+  });
+
+  it("keeps a paused occurrence waiting when a resume fails without leaving the pause", async () => {
+    const store = memStore();
+    store.create({ id: "t", kind: "webhook", graphId: "g", enabled: true, webhookSecret: "k" });
+    const m = mockLauncher();
+    let paused = true;
+    const svc = new TriggerService(m.launcher, store, { log: () => {}, awaitsInput: async () => paused });
+    svc.start();
+    const { handle } = svc.invokeWebhook("t", { a: 1 })!;
+    const occurrenceId = store.occurrences("t")[0]!.id;
+
+    m.emitRunEnd(handle, "interrupted");
+    expect(store.getOccurrence(occurrenceId)?.status).toBe("waiting");
+
+    const refused = { ...handle, runId: "run_refused" };
+    m.emitRunEnd(refused, "error");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getOccurrence(occurrenceId)?.status).toBe("waiting");
+
+    paused = false;
+    m.emitRunEnd({ ...handle, runId: "run_resumed" }, "success");
+    expect(store.getOccurrence(occurrenceId)?.status).toBe("succeeded");
+    svc.stop();
+  });
+});
