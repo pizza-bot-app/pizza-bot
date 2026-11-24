@@ -52,20 +52,28 @@ export function ToolRow({
   clampDescription = false,
   onSelect,
   selectLabel,
-  includedIn,
+  included,
 }: {
   name: string;
   description?: string;
   clampDescription?: boolean;
   onSelect?: () => void;
   selectLabel?: string;
-  /** A granted wildcard that already covers this row, which makes it unselectable. */
-  includedIn?: string;
+  /**
+   * A granted wildcard that already covers this row. Adding the row only matters to
+   * ask first for it alone, so it's blocked when the wildcard already asks first.
+   */
+  included?: { by: string; asksFirst: boolean };
 }) {
+  const note = included
+    ? included.asksFirst
+      ? `Included in ${included.by}, which asks first`
+      : `Included in ${included.by}; add it to ask first for just this tool`
+    : undefined;
   const body = (
     <>
       <code className="tool-row-name">{name}</code>
-      {includedIn && <span className="tool-row-included">Included in {includedIn}</span>}
+      {note && <span className="tool-row-included">{note}</span>}
       {description && (
         <p className={`tool-row-desc${clampDescription ? " tool-row-desc-clamp" : ""}`}>{description}</p>
       )}
@@ -78,8 +86,8 @@ export function ToolRow({
           type="button"
           className="tool-row-btn"
           onClick={onSelect}
-          aria-label={includedIn ? `${selectLabel}, included in ${includedIn}` : selectLabel}
-          disabled={includedIn !== undefined}
+          aria-label={note ? `${selectLabel}. ${note}` : selectLabel}
+          disabled={included?.asksFirst === true}
         >
           {body}
         </button>

@@ -248,6 +248,7 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
           <ToolPicker
             catalog={tools}
             declared={declaredTools}
+            asksFirst={asksFirst}
             onAdd={(ref) => setDeclaredTools((prev) => (prev.includes(ref) ? prev : [...prev, ref]))}
           />
         </div>
@@ -333,10 +334,12 @@ function updateFile(
 function ToolPicker({
   catalog,
   declared,
+  asksFirst,
   onAdd,
 }: {
   catalog: ToolCatalogInfo;
   declared: string[];
+  asksFirst: (ref: string) => boolean;
   onAdd: (ref: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -363,10 +366,15 @@ function ToolPicker({
   }
 
   const taken = new Set(declared);
+  // An asking wildcard wins over a non-asking one, since only it blocks the row.
+  const includedBy = (ref: string) => {
+    const by = coveringWildcard(ref, declared.filter(asksFirst)) ?? coveringWildcard(ref, declared);
+    return by ? { by, asksFirst: asksFirst(by) } : undefined;
+  };
   const { suggestions, error } = patternSuggestions(query, catalog);
   const patterns = suggestions
     .filter((p) => !taken.has(p.ref))
-    .map((p) => ({ ...p, includedIn: coveringWildcard(p.ref, declared) }));
+    .map((p) => ({ ...p, included: includedBy(p.ref) }));
   const q = query.replace(/\*/g, "").trim().toLowerCase();
   const visibleGroups = groups
     .map((group) => {
@@ -375,13 +383,13 @@ function ToolPicker({
       return {
         ...group,
         total: group.tools.length,
-        tools: shown.map((t) => ({ ...t, includedIn: coveringWildcard(t.ref, declared) })),
+        tools: shown.map((t) => ({ ...t, included: includedBy(t.ref) })),
       };
     })
     .filter((group) => group.tools.length > 0);
   const firstAddable =
-    patterns.find((p) => !p.includedIn)?.ref ??
-    visibleGroups.flatMap((g) => g.tools).find((t) => !t.includedIn)?.ref;
+    patterns.find((p) => !p.included?.asksFirst)?.ref ??
+    visibleGroups.flatMap((g) => g.tools).find((t) => !t.included?.asksFirst)?.ref;
   const empty = patterns.length === 0 && visibleGroups.length === 0;
 
   return (
@@ -414,7 +422,7 @@ function ToolPicker({
                   clampDescription
                   onSelect={() => add(p.ref)}
                   selectLabel={`Add ${p.ref}`}
-                  includedIn={p.includedIn}
+                  included={p.included}
                 />
               ))}
             </ul>
@@ -439,7 +447,7 @@ function ToolPicker({
                   clampDescription
                   onSelect={() => add(tool.ref)}
                   selectLabel={`Add ${tool.ref}`}
-                  includedIn={tool.includedIn}
+                  included={tool.included}
                 />
               ))}
             </ul>
