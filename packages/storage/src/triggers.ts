@@ -12,6 +12,7 @@ import type {
 interface TriggerRow {
   id: string;
   kind: string;
+  name: string | null;
   prompt: string | null;
   enabled: number;
   cron: string | null;
@@ -94,6 +95,12 @@ export class TriggerStore {
         ON trigger_occurrences (run_id)
         WHERE run_id IS NOT NULL;
     `);
+    const columns = this.db
+      .prepare<[], { name: string }>("PRAGMA table_info(triggers)")
+      .all();
+    if (!columns.some((column) => column.name === "name")) {
+      this.db.exec("ALTER TABLE triggers ADD COLUMN name TEXT");
+    }
   }
 
   /** The shared database handle is owned by `openAppDatabase`. */
@@ -104,6 +111,7 @@ export class TriggerStore {
     const row: TriggerRow = {
       id: def.id,
       kind: def.kind,
+      name: normalizeName(def.name),
       prompt: def.prompt ?? null,
       enabled: def.enabled === false ? 0 : 1,
       cron: def.cron ?? null,
@@ -116,10 +124,10 @@ export class TriggerStore {
     this.db
       .prepare(
         `INSERT INTO triggers
-           (id, kind, prompt, enabled, cron, timezone, webhook_secret,
+           (id, kind, name, prompt, enabled, cron, timezone, webhook_secret,
             created_at, last_run_at, last_thread_id)
          VALUES
-           (@id, @kind, @prompt, @enabled, @cron, @timezone, @webhook_secret,
+           (@id, @kind, @name, @prompt, @enabled, @cron, @timezone, @webhook_secret,
             @created_at, @last_run_at, @last_thread_id)`,
       )
       .run(row);
@@ -163,7 +171,7 @@ export class TriggerStore {
     this.db
       .prepare(
         `UPDATE triggers SET
-           kind = @kind, prompt = @prompt, enabled = @enabled,
+           kind = @kind, name = @name, prompt = @prompt, enabled = @enabled,
            cron = @cron, timezone = @timezone, webhook_secret = @webhook_secret,
            last_run_at = @last_run_at, last_thread_id = @last_thread_id
          WHERE id = @id`,
@@ -171,6 +179,7 @@ export class TriggerStore {
       .run({
         id,
         kind: merged.kind,
+        name: normalizeName(merged.name),
         prompt: merged.prompt ?? null,
         enabled: merged.enabled === false ? 0 : 1,
         cron: merged.cron ?? null,
@@ -395,6 +404,12 @@ export class TriggerStore {
   }
 }
 
+/** A blank name clears it, so the UI falls back to describing the trigger. */
+function normalizeName(name: string | undefined): string | null {
+  const trimmed = name?.trim();
+  return trimmed ? trimmed : null;
+}
+
 function toTrigger(row: TriggerRow): TriggerDef {
   const def: TriggerDef = {
     id: row.id,
@@ -402,6 +417,7 @@ function toTrigger(row: TriggerRow): TriggerDef {
     enabled: row.enabled === 1,
     createdAt: row.created_at,
   };
+  if (row.name !== null) def.name = row.name;
   if (row.prompt !== null) def.prompt = row.prompt;
   if (row.cron !== null) def.cron = row.cron;
   if (row.timezone !== null) def.timezone = row.timezone;

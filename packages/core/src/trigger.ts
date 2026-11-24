@@ -5,6 +5,7 @@ export type TriggerKind = "cron" | "webhook";
 export interface TriggerDef {
   id: string;
   kind: TriggerKind;
+  name?: string;
   prompt?: string;
   enabled: boolean;
   cron?: string;
