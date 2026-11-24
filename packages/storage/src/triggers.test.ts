@@ -60,6 +60,29 @@ describe("TriggerStore: CRUD", () => {
     s.close();
   });
 
+  it("stores a trimmed name and clears it when patched blank", () => {
+    const s = openTriggerStore(tmpDb());
+    s.create({ id: "named", kind: "cron", name: "  Morning digest ", prompt: "p", enabled: true, cron: "0 9 * * *" });
+    expect(s.get("named")?.name).toBe("Morning digest");
+    expect(s.update("named", { name: "   " })?.name).toBeUndefined();
+  });
+
+  it("adds the name column to a triggers table created without it", () => {
+    const file = tmpDb();
+    const legacy = new Database(file);
+    legacy.exec(`CREATE TABLE triggers (
+      id TEXT PRIMARY KEY, kind TEXT NOT NULL, prompt TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+      cron TEXT, timezone TEXT, webhook_secret TEXT, created_at TEXT NOT NULL,
+      last_run_at TEXT, last_thread_id TEXT)`);
+    legacy
+      .prepare("INSERT INTO triggers (id, kind, prompt, enabled, cron, created_at) VALUES (?, ?, ?, 1, ?, ?)")
+      .run("old", "cron", "p", "0 9 * * *", "2026-01-01T00:00:00.000Z");
+    legacy.close();
+    const s = openTriggerStore(file);
+    expect(s.get("old")?.name).toBeUndefined();
+    expect(s.update("old", { name: "Renamed" })?.name).toBe("Renamed");
+  });
+
   it("lists newest-first and filters enabled by kind", () => {
     const s = openTriggerStore(tmpDb());
     s.create({ id: "a", kind: "cron", enabled: true, cron: "* * * * *", createdAt: "2026-01-01T00:00:00Z" });

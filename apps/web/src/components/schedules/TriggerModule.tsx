@@ -3,11 +3,12 @@ import type { TriggerDef, TriggerKind } from "@pizza-bot/core";
 import { CalendarClock, Webhook, Plus, Play } from "lucide-react";
 import { ScheduleEditor } from "./ScheduleEditor.js";
 import { TriggerView } from "./TriggerView.js";
+import { triggerLabel } from "./trigger-label.js";
 import { ModuleHeader } from "../ModuleHeader.js";
 import { ConfirmationDialog } from "../ConfirmationDialog.js";
 import { useAppToast } from "../AppToast.js";
 import { L } from "../../lexicon.js";
-import { describeCron, formatCronRun, nextCronRun } from "../../lib/cron.js";
+import { formatCronRun, nextCronRun } from "../../lib/cron.js";
 import { relativeTime } from "../../lib/conversation.js";
 import { useIsMobile } from "../../use-is-mobile.js";
 import {
@@ -18,9 +19,9 @@ import { CapabilityStatusDot } from "../CapabilityControls.js";
 
 type HostedKind = Extract<TriggerKind, "cron" | "webhook">;
 
-const KIND_UI: Record<HostedKind, { section: string; noun: string; empty: string; rowDetail: string }> = {
-  cron: { section: L.schedulesSection, noun: L.schedule, empty: L.noSchedules, rowDetail: "" },
-  webhook: { section: L.webhooksSection, noun: L.webhook, empty: L.noWebhooks, rowDetail: "inbound webhook" },
+const KIND_UI: Record<HostedKind, { section: string; noun: string; empty: string }> = {
+  cron: { section: L.schedulesSection, noun: L.schedule, empty: L.noSchedules },
+  webhook: { section: L.webhooksSection, noun: L.webhook, empty: L.noWebhooks },
 };
 
 export interface TriggerModuleProps {
@@ -196,11 +197,7 @@ export function TriggerModule({
                             <span className="schedule-row-main">
                               <span className="schedule-row-line1">
                                 <span className="schedule-row-detail">
-                                  {kind === "cron"
-                                    ? t.cron
-                                      ? describeCron(t.cron)
-                                      : "no expression"
-                                    : ui.rowDetail}
+                                  {triggerLabel(t)}
                                 </span>
                                 <CapabilityStatusDot
                                   state={t.enabled ? "active" : "disabled"}

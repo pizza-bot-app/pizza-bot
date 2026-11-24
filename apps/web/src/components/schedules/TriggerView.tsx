@@ -3,6 +3,7 @@ import { CalendarClock, Copy, MessageSquareText, Play, Webhook } from "lucide-re
 import { CapabilityEnablement, CapabilityStatusDot } from "../CapabilityControls.js";
 import { EditAction, ResourceSection, ResourceView } from "../ResourceView.js";
 import { L } from "../../lexicon.js";
+import { triggerLabel } from "./trigger-label.js";
 import { describeCron, formatCronRun, nextCronRun } from "../../lib/cron.js";
 import { relativeTime } from "../../lib/conversation.js";
 import {
@@ -43,7 +44,7 @@ export function TriggerView({
   return (
     <ResourceView
       glyph={isCron ? <CalendarClock size={28} strokeWidth={1.5} /> : <Webhook size={28} strokeWidth={1.5} />}
-      name={isCron ? (trigger.cron ? describeCron(trigger.cron) : "No expression") : `Inbound ${noun.toLowerCase()}`}
+      name={triggerLabel(trigger)}
       status={
         <>
           <CapabilityStatusDot
@@ -58,6 +59,7 @@ export function TriggerView({
       provenance={
         isCron ? (
           <span>
+            {trigger.name && trigger.cron ? `${describeCron(trigger.cron)} · ` : ""}
             <code>{trigger.cron}</code>
             {timezone ? ` · ${timezone}` : ""}
           </span>

@@ -12,6 +12,7 @@ const newTriggerId = () => `trg_${Date.now().toString(36)}_${triggerCounter++}`;
 const triggerFieldsSchema = z.object({
   kind: z.enum(["cron", "webhook"]),
   enabled: z.boolean(),
+  name: z.string().max(80).optional(),
   prompt: z.string().optional(),
   cron: z.string().trim().min(1).optional(),
   timezone: z.string().trim().min(1).optional(),
@@ -77,6 +78,7 @@ export function triggerRoutes(store: TriggerStore, service?: TriggerService): Ho
       id: parsed.data.id ?? newTriggerId(),
       kind: data.kind,
       enabled: data.enabled,
+      ...(data.name !== undefined ? { name: data.name } : {}),
       ...(data.prompt !== undefined ? { prompt: data.prompt } : {}),
       ...(data.cron !== undefined ? { cron: data.cron } : {}),
       ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
@@ -106,6 +108,7 @@ export function triggerRoutes(store: TriggerStore, service?: TriggerService): Ho
     const patch: Partial<Omit<TriggerDef, "id" | "createdAt">> = {
       ...(data.kind !== undefined ? { kind: data.kind } : {}),
       ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
+      ...(data.name !== undefined ? { name: data.name } : {}),
       ...(data.prompt !== undefined ? { prompt: data.prompt } : {}),
       ...(data.cron !== undefined ? { cron: data.cron } : {}),
       ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),

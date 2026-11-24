@@ -77,6 +77,30 @@ describe("trigger routes: CRUD", () => {
     expect((await app.request("/triggers/t1")).status).toBe(404);
   });
 
+  it("accepts, renames, and rejects an over-long trigger name", async () => {
+    const store = memStore();
+    const app = appWith(store, fakeService(store).service);
+    const post = (body: object) =>
+      app.request("/triggers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const created = await post({ id: "n1", kind: "cron", cron: "0 9 * * *", prompt: "hi", name: "Digest" });
+    expect(((await created.json()) as { name?: string }).name).toBe("Digest");
+
+    const renamed = await app.request("/triggers/n1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Morning digest" }),
+    });
+    expect(((await renamed.json()) as { name?: string }).name).toBe("Morning digest");
+
+    const tooLong = await post({ kind: "cron", cron: "0 9 * * *", prompt: "hi", name: "x".repeat(81) });
+    expect(tooLong.status).toBe(400);
+  });
+
   it("validates cron expressions and timezones before persistence or reload", async () => {
     const store = memStore();
     const fake = fakeService(store);

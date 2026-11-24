@@ -38,6 +38,7 @@ export function ScheduleEditor({
   const notify = useAppToast();
   const isNew = trigger === null;
   const [enabled, setEnabled] = useState(trigger?.enabled ?? true);
+  const [name, setName] = useState(trigger?.name ?? "");
   const [prompt, setPrompt] = useState(trigger?.prompt ?? "");
   const [cron, setCron] = useState(trigger?.cron ?? "0 9 * * *");
   const [webhookSecret, setWebhookSecret] = useState(() =>
@@ -74,6 +75,7 @@ export function ScheduleEditor({
     const patch: Partial<TriggerDef> = {
       kind,
       ...(isNew ? { enabled } : {}),
+      ...(isNew && !name.trim() ? {} : { name: name.trim() }),
       prompt: prompt.trim() ? prompt.trim() : undefined,
       ...(kind === "cron" ? { cron } : {}),
       ...(kind === "webhook" && (isNew || webhookSecretDirty) ? { webhookSecret } : {}),
@@ -111,6 +113,19 @@ export function ScheduleEditor({
       </header>
 
       <div className="schedule-editor-body">
+        <label className="field">
+          <span className="field-label">
+            Name <span className="field-optional">(optional)</span>
+          </span>
+          <input
+            className="field-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={80}
+            placeholder={kind === "cron" ? "e.g. Morning inbox digest" : "e.g. Support ticket triage"}
+          />
+        </label>
+
         {kind === "cron" && (
           <label className="field">
             <span className="field-label">Cron expression</span>
