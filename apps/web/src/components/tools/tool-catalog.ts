@@ -1,0 +1,110 @@
+/** Pure helpers shared by every tool list: grouping by source, filtering, and wildcard grants. */
+import {
+  BUILTIN_EVAL_TOOL_REF,
+  expandToolPattern,
+  InvalidWildcardError,
+  isWildcard,
+  type ToolCatalog,
+} from "@pizza-bot/core";
+import type { ToolCatalogInfo } from "@/api-client";
+
+export const BUILTIN_SOURCE = "Built-in";
+
+export interface ToolEntry {
+  ref: string;
+  name: string;
+  source: string;
+  description?: string;
+}
+
+export interface ToolGroup {
+  source: string;
+  /** Grants every tool in the group; built-ins have no wildcard. */
+  wildcard?: string;
+  tools: ToolEntry[];
+}
+
+export interface GrantedTool {
+  ref: string;
+  name: string;
+  source: string;
+  /** Tool names a wildcard grant expands to; absent for exact refs and disconnected servers. */
+  matches?: string[];
+}
+
+export interface PatternSuggestion {
+  ref: string;
+  source: string;
+  matches: string[];
+}
+
+export function toolGroups(catalog: ToolCatalogInfo): ToolGroup[] {
+  const builtins: ToolGroup[] = catalog.builtins.length
+    ? [{ source: BUILTIN_SOURCE, tools: catalog.builtins.map((t) => ({ ...t, source: BUILTIN_SOURCE })) }]
+    : [];
+  return [
+    ...builtins,
+    ...catalog.servers.map((s) => ({
+      source: s.server,
+      wildcard: s.wildcard,
+      tools: s.tools.map((t) => ({ ...t, source: s.server })),
+    })),
+  ];
+}
+
+export function filterTools<T extends { name: string; description?: string }>(tools: T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return tools;
+  return tools.filter(
+    (tool) => tool.name.toLowerCase().includes(q) || (tool.description ?? "").toLowerCase().includes(q),
+  );
+}
+
+function namesBySource(catalog: ToolCatalogInfo): ToolCatalog {
+  return Object.fromEntries(catalog.servers.map((s) => [s.server, s.tools.map((t) => t.name)]));
+}
+
+export function describeGrantedTool(ref: string, catalog: ToolCatalogInfo): GrantedTool {
+  if (ref === BUILTIN_EVAL_TOOL_REF) return { ref, name: "eval", source: BUILTIN_SOURCE };
+  const [, server = "", name = ref] = ref.split(":");
+  if (!isWildcard(ref)) return { ref, name, source: server };
+  const granted = { ref, name: name === "*" ? "All tools" : name, source: server };
+  if (!catalog.servers.some((s) => s.server === server)) return granted;
+  try {
+    return { ...granted, matches: expandToolPattern(ref, namesBySource(catalog)).map((r) => r.split(":")[2]!) };
+  } catch (err) {
+    if (err instanceof InvalidWildcardError) return granted;
+    throw err;
+  }
+}
+
+/**
+ * Turns a search ending in `*` into grantable patterns: `list_*` is tried on every
+ * server, a full `mcp:<server>:list_*` on its own. Patterns matching nothing are
+ * dropped because the runtime rejects a skill whose wildcard grant is empty.
+ */
+export function patternSuggestions(
+  query: string,
+  catalog: ToolCatalogInfo,
+): { suggestions: PatternSuggestion[]; error?: string } {
+  const q = query.trim();
+  if (!q.includes("*")) return { suggestions: [] };
+  const refs = q.startsWith("mcp:") ? [q] : catalog.servers.map((s) => `mcp:${s.server}:${q}`);
+  const names = namesBySource(catalog);
+  const suggestions: PatternSuggestion[] = [];
+  try {
+    for (const ref of refs) {
+      const matches = expandToolPattern(ref, names).map((r) => r.split(":")[2]!);
+      if (matches.length > 0) suggestions.push({ ref, source: ref.split(":")[1]!, matches });
+    }
+  } catch (err) {
+    if (!(err instanceof InvalidWildcardError)) throw err;
+    return {
+      suggestions: [],
+      error: q.startsWith("mcp:") && q.split(":").length !== 3
+        ? "Patterns look like mcp:<server>:<prefix>*."
+        : "A * can only go at the end of a pattern.",
+    };
+  }
+  return { suggestions };
+}

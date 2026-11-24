@@ -6,6 +6,8 @@ import { L } from "../../lexicon.js";
 import { slugify } from "../../lib/utils.js";
 import { prepareSkillFiles } from "./skill-editor-files.js";
 import { useAppToast } from "../AppToast.js";
+import { describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "../tools/tool-catalog.js";
+import { ToolChip, ToolFilterInput, ToolRow, ToolSourceTag } from "../tools/ToolList.js";
 
 export interface SkillEditorProps {
   skill: SkillBundle | null;
@@ -44,17 +46,6 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const available = useMemo(
-    () => [
-      ...tools.builtins.map((t) => ({ ref: t.ref, label: t.name })),
-      ...tools.servers.flatMap((s) => [
-        { ref: s.wildcard, label: `${s.server} — all tools` },
-        ...s.tools.map((t) => ({ ref: t.ref, label: t.name })),
-      ]),
-    ],
-    [tools],
-  );
 
   const canSave = name.trim() !== "" && description.trim() !== "" && !saving;
 
@@ -197,8 +188,7 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
               <span className="field-hint">No tools declared.</span>
             )}
             {declaredTools.map((ref) => (
-              <span className="resource-tool-chip" key={ref}>
-                <span>{available.find((o) => o.ref === ref)?.label ?? ref}</span>
+              <ToolChip key={ref} tool={describeGrantedTool(ref, tools)}>
                 {ref.startsWith("mcp:") && (
                   <label className="skill-tool-approval">
                     <input
@@ -234,11 +224,12 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
                 >
                   <X size={12} />
                 </button>
-              </span>
+              </ToolChip>
             ))}
           </div>
-          <ToolAdder
-            available={available.filter((o) => !declaredTools.includes(o.ref))}
+          <ToolPicker
+            catalog={tools}
+            declared={declaredTools}
             onAdd={(ref) => setDeclaredTools((prev) => (prev.includes(ref) ? prev : [...prev, ref]))}
           />
         </div>
@@ -321,23 +312,27 @@ function updateFile(
   setFiles((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
 }
 
-function ToolAdder({
-  available,
+function ToolPicker({
+  catalog,
+  declared,
   onAdd,
 }: {
-  available: Array<{ ref: string; label: string }>;
+  catalog: ToolCatalogInfo;
+  declared: string[];
   onAdd: (ref: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const groups = useMemo(() => toolGroups(catalog), [catalog]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const rows = q
-      ? available.filter((o) => o.ref.toLowerCase().includes(q) || o.label.toLowerCase().includes(q))
-      : available;
-    return rows.slice(0, 50);
-  }, [available, query]);
+  const close = () => {
+    setOpen(false);
+    setQuery("");
+  };
+  const add = (ref: string) => {
+    onAdd(ref);
+    setQuery("");
+  };
 
   if (!open) {
     return (
@@ -347,50 +342,89 @@ function ToolAdder({
     );
   }
 
+  const taken = new Set(declared);
+  const isPattern = query.includes("*");
+  const { suggestions, error } = patternSuggestions(query, catalog);
+  const patterns = suggestions.filter((s) => !taken.has(s.ref));
+  const q = query.trim().toLowerCase();
+  const visibleGroups = isPattern
+    ? []
+    : groups
+        .map((group) => {
+          const untaken = group.tools.filter((t) => !taken.has(t.ref));
+          return { ...group, tools: group.source.toLowerCase().includes(q) ? untaken : filterTools(untaken, q) };
+        })
+        .filter((group) => group.tools.length > 0);
+  const empty = patterns.length === 0 && visibleGroups.length === 0;
+
   return (
     <div className="resource-tool-picker">
-      <input
-        className="field-input"
-        autoFocus
+      <ToolFilterInput
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search tools…"
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            setOpen(false);
-            setQuery("");
-          }
-        }}
+        onChange={setQuery}
+        placeholder="Search tools, or end with * to add a pattern like list_*"
+        autoFocus
+        onEscape={close}
       />
-      <ul className="resource-tool-options">
-        {filtered.length === 0 ? (
-          <li className="resource-tool-option-empty">No matching tools.</li>
-        ) : (
-          filtered.map((o) => (
-            <li key={o.ref}>
-              <button
-                type="button"
-                className="resource-tool-option"
-                onClick={() => {
-                  onAdd(o.ref);
-                  setQuery("");
-                }}
-              >
-                <span className="resource-tool-option-label">{o.label}</span>
-                <code className="resource-tool-option-ref">{o.ref}</code>
-              </button>
-            </li>
-          ))
+      <div className="tool-picker-list">
+        {error && <p className="resource-card-empty">{error}</p>}
+        {!error && empty && (
+          <p className="resource-card-empty">
+            {isPattern ? "No connected tools match that pattern." : "No matching tools."}
+          </p>
         )}
-      </ul>
-      <button
-        type="button"
-        className="btn-secondary"
-        onClick={() => {
-          setOpen(false);
-          setQuery("");
-        }}
-      >
+        {patterns.length > 0 && (
+          <section className="tool-group">
+            <header className="tool-group-head">
+              <span className="tool-group-title">Patterns</span>
+            </header>
+            <ul className="tool-rows">
+              {patterns.map((p) => (
+                <ToolRow
+                  key={p.ref}
+                  name={p.ref}
+                  description={`Grants ${p.matches.length} tool${p.matches.length === 1 ? "" : "s"}: ${p.matches.join(", ")}`}
+                  clampDescription
+                  onSelect={() => add(p.ref)}
+                  selectLabel={`Add ${p.ref}`}
+                />
+              ))}
+            </ul>
+          </section>
+        )}
+        {visibleGroups.map((group) => (
+          <section className="tool-group" key={group.source}>
+            <header className="tool-group-head">
+              <ToolSourceTag source={group.source} />
+              <span className="tool-group-count">
+                {group.tools.length} tool{group.tools.length === 1 ? "" : "s"}
+              </span>
+              {group.wildcard && !taken.has(group.wildcard) && (
+                <button
+                  type="button"
+                  className="resource-card-link tool-group-all"
+                  onClick={() => add(group.wildcard!)}
+                >
+                  Add all
+                </button>
+              )}
+            </header>
+            <ul className="tool-rows">
+              {group.tools.map((tool) => (
+                <ToolRow
+                  key={tool.ref}
+                  name={tool.name}
+                  description={tool.description}
+                  clampDescription
+                  onSelect={() => add(tool.ref)}
+                  selectLabel={`Add ${tool.ref}`}
+                />
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+      <button type="button" className="btn-secondary" onClick={close}>
         Done
       </button>
     </div>

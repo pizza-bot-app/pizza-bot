@@ -808,12 +808,18 @@ export interface LogQueryResult {
   truncated: boolean;
 }
 
+export interface ToolCatalogEntryInfo {
+  ref: string;
+  name: string;
+  description?: string;
+}
+
 export interface ToolCatalogInfo {
-  builtins: Array<{ ref: string; name: string }>;
+  builtins: ToolCatalogEntryInfo[];
   servers: Array<{
     server: string;
     wildcard: string;
-    tools: Array<{ ref: string; name: string }>;
+    tools: ToolCatalogEntryInfo[];
   }>;
 }
 

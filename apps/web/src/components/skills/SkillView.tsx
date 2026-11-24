@@ -1,15 +1,18 @@
 import type { ReactNode } from "react";
-import type { SkillBundle, SkillCatalogEntryInfo } from "@/api-client";
+import type { SkillBundle, SkillCatalogEntryInfo, ToolCatalogInfo } from "@/api-client";
 import { BookOpen, Cable, FileText, Hand, ScrollText, Wrench } from "lucide-react";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
 import { CapabilityStatusDot, type CapabilityVisualState } from "../CapabilityControls.js";
 import { EditAction, PluginLink, ResourceSection, ResourceView } from "../ResourceView.js";
 import { SkeletonLines } from "../ResourceDetailSkeleton.js";
 import { L } from "../../lexicon.js";
+import { describeGrantedTool } from "../tools/tool-catalog.js";
+import { ToolChip } from "../tools/ToolList.js";
 
 export function SkillView({
   skill,
   bundle,
+  tools,
   visualState,
   statusLabel,
   enablement,
@@ -19,6 +22,7 @@ export function SkillView({
 }: {
   skill: SkillCatalogEntryInfo;
   bundle: SkillBundle | null | undefined;
+  tools: ToolCatalogInfo;
   visualState: CapabilityVisualState;
   statusLabel: string;
   enablement?: ReactNode;
@@ -72,8 +76,8 @@ export function SkillView({
         ) : (
           <ul className="resource-chip-list">
             {skill.declaredTools.map((ref) => (
-              <li key={ref} className="resource-tool-chip">
-                <code>{ref}</code>
+              <li key={ref}>
+                <ToolChip tool={describeGrantedTool(ref, tools)} />
               </li>
             ))}
           </ul>
@@ -83,8 +87,8 @@ export function SkillView({
         <ResourceSection title="Asks before running" icon={<Hand size={14} />}>
           <ul className="resource-chip-list">
             {interruptRefs.map((ref) => (
-              <li key={ref} className="resource-tool-chip">
-                <code>{ref}</code>
+              <li key={ref}>
+                <ToolChip tool={describeGrantedTool(ref, tools)} />
               </li>
             ))}
           </ul>

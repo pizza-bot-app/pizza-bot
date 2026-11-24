@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import { Search, Wrench, X } from "lucide-react";
+import { Wrench, X } from "lucide-react";
 import type { McpToolInfo } from "@/api-client";
 import { SkeletonLines } from "../ResourceDetailSkeleton.js";
+import { filterTools } from "../tools/tool-catalog.js";
+import { ToolFilterInput, ToolRow } from "../tools/ToolList.js";
 
 export interface McpToolsDialogProps {
   serverId: string;
@@ -11,21 +13,10 @@ export interface McpToolsDialogProps {
   onClose: () => void;
 }
 
-const FILTER_THRESHOLD = 8;
-
 type LoadState =
   | { kind: "loading" }
   | { kind: "loaded"; tools: McpToolInfo[] }
   | { kind: "failed"; message: string };
-
-export function filterTools(tools: McpToolInfo[], query: string): McpToolInfo[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return tools;
-  return tools.filter(
-    (tool) =>
-      tool.name.toLowerCase().includes(q) || (tool.description ?? "").toLowerCase().includes(q),
-  );
-}
 
 export function McpToolsDialog({ serverId, toolCount, onGetTools, onClose }: McpToolsDialogProps) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
@@ -50,7 +41,6 @@ export function McpToolsDialog({ serverId, toolCount, onGetTools, onClose }: Mcp
   }, [serverId, onGetTools, attempt]);
 
   const visible = state.kind === "loaded" ? filterTools(state.tools, query) : [];
-  const showFilter = state.kind === "loaded" && state.tools.length > FILTER_THRESHOLD;
 
   return (
     <DialogPrimitive.Root open onOpenChange={(open) => !open && onClose()}>
@@ -73,24 +63,13 @@ export function McpToolsDialog({ serverId, toolCount, onGetTools, onClose }: Mcp
             </DialogPrimitive.Close>
           </header>
 
-          {showFilter && (
-            <div className="sidebar-search-wrap mcp-tools-filter">
-              <Search size={16} className="sidebar-search-icon" />
-              <input
-                className="sidebar-search"
-                placeholder="Filter tools..."
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                autoFocus
-              />
-            </div>
-          )}
+          <ToolFilterInput value={query} onChange={setQuery} autoFocus />
 
           <div className="mcp-tools-list-wrap">
             {state.kind === "loading" && (
-              <ul className="mcp-tools-list" aria-label="Loading tools">
+              <ul className="tool-rows" aria-label="Loading tools">
                 {Array.from({ length: Math.min(Math.max(toolCount, 1), 6) }, (_, index) => (
-                  <li key={index} className="mcp-tool">
+                  <li key={index} className="tool-row tool-row-body">
                     <SkeletonLines count={2} />
                   </li>
                 ))}
@@ -114,12 +93,9 @@ export function McpToolsDialog({ serverId, toolCount, onGetTools, onClose }: Mcp
               </p>
             )}
             {state.kind === "loaded" && visible.length > 0 && (
-              <ul className="mcp-tools-list">
+              <ul className="tool-rows">
                 {visible.map((tool) => (
-                  <li key={tool.name} className="mcp-tool">
-                    <code className="mcp-tool-name">{tool.name}</code>
-                    {tool.description && <p className="mcp-tool-desc">{tool.description}</p>}
-                  </li>
+                  <ToolRow key={tool.name} name={tool.name} description={tool.description} />
                 ))}
               </ul>
             )}

@@ -370,6 +370,17 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
       { name: "get_mcp_status", description: "Return deterministic MCP server status." },
     ]);
     expect((await app.request("/mcp-servers/nope/tools")).status).toBe(404);
+
+    const catalog = (await (await app.request("/tools")).json()) as {
+      servers: Array<{ server: string; tools: Array<{ ref: string; name: string; description?: string }> }>;
+    };
+    expect(catalog.servers.find((s) => s.server === "mcp-status")?.tools).toEqual([
+      {
+        ref: "mcp:mcp-status:get_mcp_status",
+        name: "get_mcp_status",
+        description: "Return deterministic MCP server status.",
+      },
+    ]);
   }, 20_000);
 
   it("rejects an unsafe id (400) and an invalid entry (400) without writing", async () => {
