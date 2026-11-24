@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { SkillBundle, SkillSiblingFile, ToolCatalogInfo } from "@/api-client";
 import type { SkillInterruptOn } from "@pizza-bot/core";
 import { ChevronLeft, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
@@ -6,8 +6,8 @@ import { L } from "../../lexicon.js";
 import { slugify } from "../../lib/utils.js";
 import { prepareSkillFiles } from "./skill-editor-files.js";
 import { useAppToast } from "../AppToast.js";
-import { coveringAskRef, describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "../tools/tool-catalog.js";
-import { ToolChip, ToolFilterInput, ToolRow, ToolSourceTag } from "../tools/ToolList.js";
+import { coveringWildcard, describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "../tools/tool-catalog.js";
+import { ToolChip, ToolFilterInput, ToolRow } from "../tools/ToolList.js";
 
 export interface SkillEditorProps {
   skill: SkillBundle | null;
@@ -190,7 +190,7 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
               <span className="field-hint">No tools declared.</span>
             )}
             {declaredTools.map((ref) => {
-              const coveredBy = coveringAskRef(ref, declaredTools, asksFirst);
+              const coveredBy = coveringWildcard(ref, declaredTools.filter(asksFirst));
               return (
                 <ToolChip key={ref} tool={describeGrantedTool(ref, tools)}>
                   {ref.startsWith("mcp:") && (
@@ -204,7 +204,11 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
                     >
                       <input
                         type="checkbox"
-                        aria-label={`Ask first before running ${ref}`}
+                        aria-label={
+                          coveredBy
+                            ? `Ask first before running ${ref}, on because ${coveredBy} asks first`
+                            : `Ask first before running ${ref}`
+                        }
                         checked={coveredBy !== undefined || asksFirst(ref)}
                         disabled={coveredBy !== undefined}
                         onChange={(event) =>
@@ -337,15 +341,17 @@ function ToolPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const groups = useMemo(() => toolGroups(catalog), [catalog]);
 
   const close = () => {
     setOpen(false);
     setQuery("");
   };
+  // The clicked row leaves the list, so focus goes back to the search box instead of <body>.
   const add = (ref: string) => {
     onAdd(ref);
-    setQuery("");
+    inputRef.current?.focus();
   };
 
   if (!open) {
@@ -357,18 +363,25 @@ function ToolPicker({
   }
 
   const taken = new Set(declared);
-  const isPattern = query.includes("*");
   const { suggestions, error } = patternSuggestions(query, catalog);
-  const patterns = suggestions.filter((s) => !taken.has(s.ref));
-  const q = query.trim().toLowerCase();
-  const visibleGroups = isPattern
-    ? []
-    : groups
-        .map((group) => {
-          const untaken = group.tools.filter((t) => !taken.has(t.ref));
-          return { ...group, tools: group.source.toLowerCase().includes(q) ? untaken : filterTools(untaken, q) };
-        })
-        .filter((group) => group.tools.length > 0);
+  const patterns = suggestions
+    .filter((p) => !taken.has(p.ref))
+    .map((p) => ({ ...p, includedIn: coveringWildcard(p.ref, declared) }));
+  const q = query.replace(/\*/g, "").trim().toLowerCase();
+  const visibleGroups = groups
+    .map((group) => {
+      const untaken = group.tools.filter((t) => !taken.has(t.ref));
+      const shown = group.source.toLowerCase().includes(q) ? untaken : filterTools(untaken, q);
+      return {
+        ...group,
+        total: group.tools.length,
+        tools: shown.map((t) => ({ ...t, includedIn: coveringWildcard(t.ref, declared) })),
+      };
+    })
+    .filter((group) => group.tools.length > 0);
+  const firstAddable =
+    patterns.find((p) => !p.includedIn)?.ref ??
+    visibleGroups.flatMap((g) => g.tools).find((t) => !t.includedIn)?.ref;
   const empty = patterns.length === 0 && visibleGroups.length === 0;
 
   return (
@@ -376,22 +389,22 @@ function ToolPicker({
       <ToolFilterInput
         value={query}
         onChange={setQuery}
+        label="Search tools"
         placeholder="Search tools, or end with * to add a pattern like list_*"
         autoFocus
         onEscape={close}
+        onEnter={() => firstAddable && add(firstAddable)}
+        inputRef={inputRef}
       />
+      <p className="resource-card-empty tool-picker-status" role="status">
+        {error ?? (empty ? (query.includes("*") ? "No connected tools match that pattern." : "No matching tools.") : "")}
+      </p>
       <div className="tool-picker-list">
-        {error && <p className="resource-card-empty">{error}</p>}
-        {!error && empty && (
-          <p className="resource-card-empty">
-            {isPattern ? "No connected tools match that pattern." : "No matching tools."}
-          </p>
-        )}
         {patterns.length > 0 && (
           <section className="tool-group">
-            <header className="tool-group-head">
+            <h4 className="tool-group-head">
               <span className="tool-group-title">Patterns</span>
-            </header>
+            </h4>
             <ul className="tool-rows">
               {patterns.map((p) => (
                 <ToolRow
@@ -401,6 +414,7 @@ function ToolPicker({
                   clampDescription
                   onSelect={() => add(p.ref)}
                   selectLabel={`Add ${p.ref}`}
+                  includedIn={p.includedIn}
                 />
               ))}
             </ul>
@@ -408,21 +422,14 @@ function ToolPicker({
         )}
         {visibleGroups.map((group) => (
           <section className="tool-group" key={group.source}>
-            <header className="tool-group-head">
-              <ToolSourceTag source={group.source} />
+            <h4 className="tool-group-head">
+              <span className="tool-group-title tool-group-title-server">{group.source}</span>
               <span className="tool-group-count">
-                {group.tools.length} tool{group.tools.length === 1 ? "" : "s"}
+                {group.tools.length === group.total
+                  ? `${group.total} tool${group.total === 1 ? "" : "s"}`
+                  : `${group.tools.length} of ${group.total} tools`}
               </span>
-              {group.wildcard && !taken.has(group.wildcard) && (
-                <button
-                  type="button"
-                  className="resource-card-link tool-group-all"
-                  onClick={() => add(group.wildcard!)}
-                >
-                  Add all
-                </button>
-              )}
-            </header>
+            </h4>
             <ul className="tool-rows">
               {group.tools.map((tool) => (
                 <ToolRow
@@ -432,6 +439,7 @@ function ToolPicker({
                   clampDescription
                   onSelect={() => add(tool.ref)}
                   selectLabel={`Add ${tool.ref}`}
+                  includedIn={tool.includedIn}
                 />
               ))}
             </ul>

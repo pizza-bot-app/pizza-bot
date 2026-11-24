@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ToolCatalogInfo } from "@/api-client";
-import { coveringAskRef, describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "./tool-catalog.js";
+import { coveringWildcard, describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "./tool-catalog.js";
 
 const catalog: ToolCatalogInfo = {
   builtins: [{ ref: "builtin:eval", name: "eval", description: "Evaluate expressions." }],
@@ -77,8 +77,12 @@ describe("describeGrantedTool", () => {
 });
 
 describe("patternSuggestions", () => {
-  it("ignores searches without a *", () => {
+  it("offers a server's * when the search names it, and nothing for other plain text", () => {
     expect(patternSuggestions("list_", catalog)).toEqual({ suggestions: [] });
+    expect(patternSuggestions("  ", catalog)).toEqual({ suggestions: [] });
+    expect(patternSuggestions("FIL", catalog).suggestions).toEqual([
+      { ref: "mcp:files:*", source: "files", matches: ["list_directory", "list_allowed_directories", "read_file"] },
+    ]);
   });
 
   it("tries a bare pattern on every server and drops the ones that match nothing", () => {
@@ -112,21 +116,18 @@ describe("patternSuggestions", () => {
   });
 });
 
-describe("coveringAskRef", () => {
-  const declared = ["mcp:files:*", "mcp:files:list_*", "mcp:files:read_file", "mcp:mail:list_folders"];
-
-  it("finds a broader asking wildcard on the same server", () => {
-    const asks = (ref: string) => ref === "mcp:files:*";
-    expect(coveringAskRef("mcp:files:read_file", declared, asks)).toBe("mcp:files:*");
-    expect(coveringAskRef("mcp:files:list_*", declared, asks)).toBe("mcp:files:*");
-    expect(coveringAskRef("mcp:files:*", declared, asks)).toBeUndefined();
-    expect(coveringAskRef("mcp:mail:list_folders", declared, asks)).toBeUndefined();
+describe("coveringWildcard", () => {
+  it("finds a broader wildcard on the same server", () => {
+    const refs = ["mcp:files:*", "mcp:files:list_*", "mcp:mail:*"];
+    expect(coveringWildcard("mcp:files:read_file", refs)).toBe("mcp:files:*");
+    expect(coveringWildcard("mcp:files:list_*", refs)).toBe("mcp:files:*");
+    expect(coveringWildcard("mcp:files:*", refs)).toBeUndefined();
+    expect(coveringWildcard("mcp:mail:list_folders", ["mcp:files:*"])).toBeUndefined();
   });
 
-  it("ignores wildcards that don't ask or don't cover the ref", () => {
-    const asks = (ref: string) => ref === "mcp:files:list_*";
-    expect(coveringAskRef("mcp:files:read_file", declared, asks)).toBeUndefined();
-    expect(coveringAskRef("mcp:files:*", declared, asks)).toBeUndefined();
-    expect(coveringAskRef("mcp:files:list_directory", [...declared, "mcp:files:list_directory"], asks)).toBe("mcp:files:list_*");
+  it("ignores exact refs and narrower patterns", () => {
+    expect(coveringWildcard("mcp:files:*", ["mcp:files:list_*"])).toBeUndefined();
+    expect(coveringWildcard("mcp:files:read_file", ["mcp:files:list_*", "mcp:files:read_file"])).toBeUndefined();
+    expect(coveringWildcard("mcp:files:list_directory", ["mcp:files:list_*"])).toBe("mcp:files:list_*");
   });
 });

@@ -1748,7 +1748,11 @@ button.sidebar-folder-row:hover,
   border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
 }
 .tool-row-btn { cursor: pointer; font: inherit; }
-.tool-row-btn:hover, .tool-row-btn:focus-visible { border-color: var(--brand); outline: none; }
+.tool-row-btn:hover:not(:disabled), .tool-row-btn:focus-visible { border-color: var(--brand); outline: none; }
+.tool-row-btn:disabled { cursor: default; opacity: .6; }
+.tool-row-included { margin-left: 8px; font-size: 11px; color: var(--dim); }
+.tool-picker-status:empty { height: 0; overflow: hidden; }
+.tool-picker-status { margin: 0; }
 .tool-row-name { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; font-weight: 600; word-break: break-all; }
 .tool-row-desc { margin: 4px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--dim); }
 .tool-row-desc-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -1758,10 +1762,13 @@ button.sidebar-folder-row:hover,
 }
 .tool-chip-count { font-size: 11px; color: var(--dim); white-space: nowrap; }
 .tool-group { display: flex; flex-direction: column; gap: 6px; }
-.tool-group-head { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+.tool-group-head {
+  position: sticky; top: 0; z-index: 1; margin: 0;
+  display: flex; align-items: baseline; gap: 8px; padding: 4px 2px; background: var(--panel);
+}
 .tool-group-title { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+.tool-group-title-server { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--text); }
 .tool-group-count { font-size: 11.5px; color: var(--dim); }
-.tool-group-all { margin-left: auto; font-size: 12px; font-weight: 600; }
 .tool-picker-list { display: flex; flex-direction: column; gap: 14px; max-height: 360px; overflow-y: auto; padding-right: 2px; }
 
 .resource-editor { display: flex; flex-direction: column; gap: 0; max-width: 720px; }

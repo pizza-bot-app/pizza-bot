@@ -79,16 +79,25 @@ export function describeGrantedTool(ref: string, catalog: ToolCatalogInfo): Gran
 }
 
 /**
- * Turns a search ending in `*` into grantable patterns: `list_*` is tried on every
- * server, `<server>:list_*` or `mcp:<server>:list_*` on that server only. Patterns
- * matching nothing are dropped because the runtime rejects an empty wildcard grant.
+ * Turns a search into grantable patterns: `list_*` is tried on every server,
+ * `<server>:list_*` or `mcp:<server>:list_*` on that server only, and a search naming
+ * a server offers its `*`. Patterns matching nothing are dropped because the runtime
+ * rejects an empty wildcard grant.
  */
 export function patternSuggestions(
   query: string,
   catalog: ToolCatalogInfo,
 ): { suggestions: PatternSuggestion[]; error?: string } {
   const q = query.trim();
-  if (!q.includes("*")) return { suggestions: [] };
+  if (!q) return { suggestions: [] };
+  if (!q.includes("*")) {
+    const lower = q.toLowerCase();
+    return {
+      suggestions: catalog.servers
+        .filter((s) => s.tools.length > 0 && s.server.toLowerCase().includes(lower))
+        .map((s) => ({ ref: s.wildcard, source: s.server, matches: s.tools.map((t) => t.name) })),
+    };
+  }
   const qualified = q.startsWith("mcp:") ? q : q.includes(":") ? `mcp:${q}` : undefined;
   if (qualified !== undefined && qualified.split(":").length !== 3) {
     return { suggestions: [], error: "Patterns look like <server>:<prefix>* or mcp:<server>:<prefix>*." };
@@ -108,21 +117,13 @@ export function patternSuggestions(
   return { suggestions };
 }
 
-/**
- * A declared wildcard that already makes `ref` ask first, if any. The runtime ORs
- * overlapping asks, so the editor shows a covered tool's box as checked and locked.
- */
-export function coveringAskRef(
-  ref: string,
-  declared: readonly string[],
-  asks: (ref: string) => boolean,
-): string | undefined {
+/** The first wildcard in `refs`, other than `ref` itself, whose matches include everything `ref` grants. */
+export function coveringWildcard(ref: string, refs: readonly string[]): string | undefined {
   const [, server, name = ""] = ref.split(":");
   const own = name.endsWith("*") ? name.slice(0, -1) : name;
-  return declared.find((other) => {
-    if (other === ref || !asks(other) || !isWildcard(other)) return false;
+  return refs.find((other) => {
+    if (other === ref || !isWildcard(other)) return false;
     const [, otherServer, pattern = ""] = other.split(":");
-    if (otherServer !== server || !pattern.endsWith("*")) return false;
-    return own.startsWith(pattern.slice(0, -1));
+    return otherServer === server && pattern.endsWith("*") && own.startsWith(pattern.slice(0, -1));
   });
 }

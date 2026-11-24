@@ -1,33 +1,43 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { Search } from "lucide-react";
 import type { GrantedTool } from "./tool-catalog.js";
 
 export function ToolFilterInput({
   value,
   onChange,
+  label = "Filter tools",
   placeholder = "Filter tools…",
   autoFocus,
   onEscape,
+  onEnter,
+  inputRef,
 }: {
   value: string;
   onChange: (value: string) => void;
+  label?: string;
   placeholder?: string;
   autoFocus?: boolean;
   onEscape?: () => void;
+  onEnter?: () => void;
+  inputRef?: Ref<HTMLInputElement>;
 }) {
   return (
     <div className="sidebar-search-wrap tool-filter">
       <Search size={16} className="sidebar-search-icon" />
       <input
+        ref={inputRef}
         className="sidebar-search"
         placeholder={placeholder}
-        aria-label={placeholder}
+        aria-label={label}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Escape" && onEscape) {
             event.preventDefault();
             onEscape();
+          } else if (event.key === "Enter" && onEnter) {
+            event.preventDefault();
+            onEnter();
           }
         }}
         autoFocus={autoFocus}
@@ -42,25 +52,35 @@ export function ToolRow({
   clampDescription = false,
   onSelect,
   selectLabel,
+  includedIn,
 }: {
   name: string;
   description?: string;
   clampDescription?: boolean;
   onSelect?: () => void;
   selectLabel?: string;
+  /** A granted wildcard that already covers this row, which makes it unselectable. */
+  includedIn?: string;
 }) {
   const body = (
     <>
       <code className="tool-row-name">{name}</code>
+      {includedIn && <span className="tool-row-included">Included in {includedIn}</span>}
       {description && (
         <p className={`tool-row-desc${clampDescription ? " tool-row-desc-clamp" : ""}`}>{description}</p>
       )}
     </>
   );
   return (
-    <li className="tool-row">
+    <li className="tool-row" title={clampDescription ? description : undefined}>
       {onSelect ? (
-        <button type="button" className="tool-row-btn" onClick={onSelect} aria-label={selectLabel}>
+        <button
+          type="button"
+          className="tool-row-btn"
+          onClick={onSelect}
+          aria-label={includedIn ? `${selectLabel}, included in ${includedIn}` : selectLabel}
+          disabled={includedIn !== undefined}
+        >
           {body}
         </button>
       ) : (
