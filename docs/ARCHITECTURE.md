@@ -471,7 +471,9 @@ subscribe.
 process arms them, with no cross-process lease. Every trigger fires a run through a
 `RunLauncher` backed by the `ProtocolRunManager` (`protocol-run-launcher.ts`) and
 is tracked by a durable `trigger_occurrences` row (pending → running →
-succeeded/failed/dead). On startup the service runs two recovery passes: cron
+succeeded/failed/dead, or `waiting` while a run is paused for a person; the
+resumed run on the same thread closes it out, and a refused or cancelled resume
+leaves it waiting). On startup the service runs two recovery passes: cron
 triggers get **missed-run recovery** (if a schedule interval elapsed while the
 process was down, the run fires once to catch up), and any occurrence left
 `pending`/`running` by a crash is replayed once, bounded by a per-occurrence
@@ -482,6 +484,40 @@ occurrence on wake because its tool side effects may already have happened;
 crash recovery remains the startup-only path. Initial startup similarly waits
 for the bounded MCP connection pass to settle before arming schedules or
 recovering occurrences, so recovered runs receive the settled skill projection.
+
+### Graph runs
+
+A trigger either starts a conversation with its `prompt` or, when it names a
+`graphId`, runs a declarative graph. Specs (`packages/core/src/graph-spec.ts`)
+live one JSON file per graph under `<dataRoot>/graphs` and are compiled by
+`compileGraphSpec` (`runtime-langgraph/src/graph-compiler.ts`) into a
+checkpointed `StateGraph`. Node types are `transform`, `branch`, `tool`, `llm`,
+`agent`, and `human`. Their fields use `{{path}}` templates over graph state,
+with no expressions, so a graph without `llm`/`agent` nodes is deterministic.
+
+- **One graph per thread.** A graph run is a thread whose `graphId` is fixed at
+  creation. `AgentHost.threadGraph` routes every state read and stream for that
+  thread to the compiled graph, never to the assistant. Chat messages and forks
+  are refused on graph threads.
+- **Input.** The run starts from `input` state: `{ trigger, prompt?, body? }`
+  for a trigger (a webhook body is delivered as JSON, not mined for a prompt), or
+  the caller's object for `POST /graphs/:id/runs`.
+- **The agent node** runs the assistant inside the node with the node's config,
+  so its checkpoints, stream frames, and approval pauses nest under the
+  `<node>:<task>` namespace and resume through the parent.
+- **The human node** calls `interrupt()` with a `GraphHumanRequest`. It resumes
+  with `input.respond` carrying `{ interruptId, response }`, keyed by interrupt
+  id.
+- **Recovery** replays a crashed graph occurrence on its own thread with
+  `continueFromCheckpoint`. If the thread has a checkpoint, the run resumes it
+  instead of re-running finished nodes. If it has none, the run starts from the
+  same seed.
+- **Tool nodes do not apply a skill's `interruptOn` approval.** Gate a tool node
+  that has side effects with a `human` node in front of it.
+- **The live view** reads plain v3 frames. `tasks` frames mark node start and
+  result; `lifecycle` and `checkpoints` frames give the subgraph tree and the
+  step timeline. `tests/langgraph-compat/graph-run-conformance.test.ts` pins
+  these shapes.
 
 ---
 
