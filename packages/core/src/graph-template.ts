@@ -1,8 +1,10 @@
 /** `{{path}}` templates and branch conditions over graph state; no expressions, so runs stay deterministic. */
 import type { GraphCondition } from "./graph-spec.js";
 
-const TEMPLATE = /\{\{\s*([^{}]+?)\s*\}\}/g;
-const WHOLE_TEMPLATE = /^\{\{\s*([^{}]+?)\s*\}\}$/;
+// Capture without surrounding \s*, which would overlap the path and backtrack
+// polynomially on long runs of spaces; paths are trimmed instead.
+const TEMPLATE = /\{\{([^{}]*)\}\}/g;
+const WHOLE_TEMPLATE = /^\{\{([^{}]*)\}\}$/;
 
 export function readPath(state: unknown, path: string): unknown {
   let current: unknown = state;
@@ -17,8 +19,10 @@ export function readPath(state: unknown, path: string): unknown {
 /** A string that is exactly one `{{path}}` yields the raw value; otherwise values interpolate as text. */
 export function renderTemplate(template: string, state: unknown): unknown {
   const whole = WHOLE_TEMPLATE.exec(template);
-  if (whole) return readPath(state, whole[1]!);
-  return template.replace(TEMPLATE, (_match, path: string) => stringify(readPath(state, path)));
+  if (whole && whole[1]!.trim()) return readPath(state, whole[1]!.trim());
+  return template.replace(TEMPLATE, (match, path: string) =>
+    path.trim() ? stringify(readPath(state, path.trim())) : match,
+  );
 }
 
 export function renderText(template: string, state: unknown): string {

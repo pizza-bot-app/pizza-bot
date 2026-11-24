@@ -11,6 +11,14 @@ describe("graph templates", () => {
     );
   });
 
+  it("leaves an empty placeholder as text and stays linear on long runs of spaces", () => {
+    expect(renderTemplate("{{  }} and {{summary}}", state)).toBe("{{  }} and ok");
+    const hostile = `{{${" ".repeat(50_000)}z`;
+    const started = performance.now();
+    expect(renderTemplate(hostile, state)).toBe(hostile);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   it("renders nested JSON and does not read inherited properties", () => {
     expect(renderValue({ q: "{{summary}}", list: ["{{input.body.n}}"] }, state)).toEqual({
       q: "ok",
