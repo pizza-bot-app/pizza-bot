@@ -446,6 +446,7 @@ export function App() {
                 onDelete={mcpAdmin.remove}
                 onGetDoc={mcpAdmin.getDoc}
                 onGetTools={mcpAdmin.getTools}
+                onOpenPlugins={() => setView("plugins")}
               />
             </div>
           ) : view === "plugins" ? (
