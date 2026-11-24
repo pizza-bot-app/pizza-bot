@@ -1,6 +1,7 @@
 import type { McpServerRow, McpServerDoc, McpServerEntryWire, McpToolInfo } from "@/api-client";
 import { useState } from "react";
-import { AlertTriangle, Cable, Pencil, Puzzle, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Cable, RefreshCw } from "lucide-react";
+import { EditAction, PluginLink } from "../ResourceView.js";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
 import { McpServerCard, mcpStatusLabel, mcpVisualState } from "./McpServerCard.js";
 import { McpServerEditor } from "./McpServerEditor.js";
@@ -22,7 +23,7 @@ export interface McpServersModuleProps {
   onDelete: (id: string) => Promise<boolean>;
   onGetDoc: (id: string) => Promise<McpServerDoc | undefined>;
   onGetTools: (id: string) => Promise<McpToolInfo[]>;
-  onOpenPlugins?: () => void;
+  onOpenPlugin?: (pluginName: string) => void;
 }
 
 function transportSummary(entry: McpServerRow["entry"]): string {
@@ -42,7 +43,7 @@ export function McpServersModule({
   onDelete,
   onGetDoc,
   onGetTools,
-  onOpenPlugins,
+  onOpenPlugin,
 }: McpServersModuleProps) {
   return (
     <ResourceModule
@@ -90,57 +91,10 @@ export function McpServersModule({
           onDelete={onDelete}
           onGetDoc={onGetDoc}
           onGetTools={onGetTools}
-          onOpenPlugins={onOpenPlugins}
+          onOpenPlugin={onOpenPlugin}
         />
       )}
     />
-  );
-}
-
-export function McpManagedLink({ onOpenPlugins }: { onOpenPlugins?: () => void }) {
-  return (
-    <button
-      type="button"
-      className="resource-card-link mcp-managed-link"
-      onClick={onOpenPlugins}
-      disabled={!onOpenPlugins}
-    >
-      <Puzzle size={13} /> Managed by plugin
-    </button>
-  );
-}
-
-export function McpServerActions({
-  server,
-  deleteBlockedReason,
-  onEdit,
-  onDelete,
-}: {
-  server: McpServerRow;
-  deleteBlockedReason?: string;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const managed = server.source === "plugin";
-  const managedReason = `Managed by the ${server.pluginName ?? "plugin"} plugin`;
-  return (
-    <>
-      <button
-        type="button"
-        className="btn-secondary resource-editor-delete"
-        title={managed ? managedReason : deleteBlockedReason}
-        onClick={onDelete}
-        disabled={managed || Boolean(deleteBlockedReason)}
-      >
-        <Trash2 size={14} /> Delete
-      </button>
-      <span className="resource-editor-actions-spacer" />
-      {!managed && (
-        <button type="button" className="btn-secondary" onClick={onEdit}>
-          <Pencil size={14} /> Edit
-        </button>
-      )}
-    </>
   );
 }
 
@@ -157,11 +111,11 @@ function McpServerDetail({
   onDelete,
   onGetDoc,
   onGetTools,
-  onOpenPlugins,
+  onOpenPlugin,
 }: ResourceDetailArgs<McpServerRow> &
   Pick<
     McpServersModuleProps,
-    "onCreate" | "onUpdate" | "onSetEnabled" | "onReconnect" | "onDelete" | "onGetDoc" | "onGetTools" | "onOpenPlugins"
+    "onCreate" | "onUpdate" | "onSetEnabled" | "onReconnect" | "onDelete" | "onGetDoc" | "onGetTools" | "onOpenPlugin"
   >) {
   const isUser = selected?.source === "user";
   const editing = selection?.mode === "edit" && isUser;
@@ -256,8 +210,6 @@ function McpServerDetail({
       <McpServerEditor
         key={`${doc.id}:${reloadToken}`}
         server={doc}
-        enablement={enablement}
-        reconnectControl={reconnectControl}
         dependents={dependents}
         onSave={handleSave}
         onDelete={() => void requestDelete(selected)}
@@ -277,15 +229,15 @@ function McpServerDetail({
         dependents={dependents}
         onBack={backToList}
         headerAction={
-          selected.source === "plugin" ? <McpManagedLink onOpenPlugins={onOpenPlugins} /> : undefined
-        }
-        footer={
-          <McpServerActions
-            server={selected}
-            deleteBlockedReason={deleteBlockedReason}
-            onEdit={() => setSelection({ mode: "edit", id: selected.id })}
-            onDelete={() => void requestDelete(selected)}
-          />
+          selected.source === "plugin" && selected.pluginName ? (
+            <PluginLink
+              prefix="Managed by plugin"
+              pluginName={selected.pluginName}
+              onOpenPlugin={onOpenPlugin}
+            />
+          ) : isUser ? (
+            <EditAction onEdit={() => setSelection({ mode: "edit", id: selected.id })} />
+          ) : undefined
         }
         loadError={
           loadFailed ? (

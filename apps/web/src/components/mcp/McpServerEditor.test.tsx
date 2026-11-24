@@ -44,12 +44,12 @@ describe("McpServerEditor", () => {
 
   it("explains why the name cannot be changed on an existing server", () => {
     const html = render();
-    expect(html).toContain("The ID is fixed once created");
+    expect(html).toContain("Names can’t be changed after creation.");
     expect(renderToStaticMarkup(
       <AppToastProvider>
         <McpServerEditor server={null} onSave={vi.fn()} onCancel={vi.fn()} />
       </AppToastProvider>,
-    )).not.toContain("The ID is fixed once created");
+    )).not.toContain("Names can’t be changed after creation.");
   });
 
   it("orders the footer Delete, then Cancel and Save", () => {
@@ -60,6 +60,7 @@ describe("McpServerEditor", () => {
 
   it("disables Delete with the blocking reason when dependents require the server", () => {
     const html = render({ onDelete: vi.fn(), deleteBlockedReason: "Required by Email Triage." });
-    expect(html).toMatch(/<button[^>]*resource-editor-delete[^>]*disabled=""[^>]*title="Required by Email Triage\."/);
+    expect(html).toMatch(/<button[^>]*resource-editor-delete[^>]*disabled=""[^>]*aria-describedby="mcp-delete-blocked"/);
+    expect(html).toMatch(/id="mcp-delete-blocked"[^>]*>Required by Email Triage\.</);
   });
 });

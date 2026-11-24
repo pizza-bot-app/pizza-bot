@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import type { MemoryInfo, MemoryDoc } from "@/api-client";
-import { Brain, ChevronLeft, Trash2 } from "lucide-react";
-import { ResourceModule } from "../ResourceModule.js";
+import { Brain, ChevronLeft, FileText, Trash2 } from "lucide-react";
+import { ResourceModule, type ResourceDetailArgs } from "../ResourceModule.js";
+import { EditAction, ResourceSection, ResourceView } from "../ResourceView.js";
+import { SkeletonLines } from "../ResourceDetailSkeleton.js";
+import { useKeyedDoc } from "../../use-keyed-doc.js";
+import { relativeTime } from "../../lib/conversation.js";
 import { ResourceList } from "../ResourceList.js";
 import { L } from "../../lexicon.js";
 import { slugify } from "../../lib/utils.js";
@@ -27,7 +31,7 @@ export function MemoriesModule({ memories, onCreate, onUpdate, onDelete, onGetCo
       emptyIcon={<Brain size={40} strokeWidth={1} />}
       title={L.memoriesSection}
       newLabel={`New ${L.memory}`}
-      emptyText={`Select a ${L.memory.toLowerCase()} to view or edit it, or create a new one.`}
+      emptyText={`Select a ${L.memory.toLowerCase()} to see it, or create a new one.`}
       renderList={({ selectedId, onSelect }) => (
         <ResourceList
           items={memories}
@@ -50,52 +54,108 @@ export function MemoriesModule({ memories, onCreate, onUpdate, onDelete, onGetCo
           )}
         />
       )}
-      renderDetail={({ selection, setSelection, confirmAction }) => {
-        const handleCreate = async (id: string, content: string) => {
-          const created = await onCreate(id, content);
-          setSelection({ mode: "view", id: created.id });
-        };
-        if (selection?.mode === "new") {
-          return (
-            <MemoryEditor
-              key="new"
-              id={null}
-              existingIds={memories.map((m) => m.id)}
-              onCreate={handleCreate}
-              onUpdate={onUpdate}
-              onCancel={() => setSelection(null)}
-              onGetContent={onGetContent}
-            />
-          );
-        }
-        if (selection?.mode === "view") {
-          const id = selection.id;
-          return (
-            <MemoryEditor
-              key={id}
-              id={id}
-              existingIds={memories.map((m) => m.id)}
-              onCreate={handleCreate}
-              onUpdate={onUpdate}
-              onDelete={() =>
-                void confirmAction(
-                  `Delete this ${L.memory.toLowerCase()}? This can’t be undone.`,
-                  () => onDelete(id),
-                  {
-                    title: `Delete ${L.memory.toLowerCase()}?`,
-                    confirmLabel: "Delete",
-                    destructive: true,
-                  },
-                )
-              }
-              onCancel={() => setSelection(null)}
-              onGetContent={onGetContent}
-            />
-          );
-        }
-        return null;
-      }}
+      renderDetail={(args) => (
+        <MemoryDetail
+          {...args}
+          existingIds={memories.map((m) => m.id)}
+          onCreate={onCreate}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
+          onGetContent={onGetContent}
+        />
+      )}
     />
+  );
+}
+
+function MemoryDetail({
+  selection,
+  selected,
+  setSelection,
+  backToList,
+  confirmAction,
+  existingIds,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onGetContent,
+}: ResourceDetailArgs<MemoryInfo> &
+  Omit<MemoriesModuleProps, "memories"> & { existingIds: string[] }) {
+  const content = useKeyedDoc(
+    selection?.mode === "view" && selected ? selected.id : null,
+    onGetContent,
+    selected?.updatedAt,
+  );
+  const handleCreate = async (id: string, body: string) => {
+    const created = await onCreate(id, body);
+    setSelection({ mode: "view", id: created.id });
+  };
+  const handleUpdate = async (id: string, body: string) => {
+    const updated = await onUpdate(id, body);
+    setSelection({ mode: "view", id });
+    return updated;
+  };
+
+  if (selection?.mode === "new") {
+    return (
+      <MemoryEditor
+        key="new"
+        id={null}
+        existingIds={existingIds}
+        onCreate={handleCreate}
+        onUpdate={handleUpdate}
+        onCancel={() => setSelection(null)}
+        onGetContent={onGetContent}
+      />
+    );
+  }
+  if (!selected) return null;
+  const id = selected.id;
+  if (selection?.mode === "edit") {
+    return (
+      <MemoryEditor
+        key={id}
+        id={id}
+        existingIds={existingIds}
+        onCreate={handleCreate}
+        onUpdate={handleUpdate}
+        onDelete={() =>
+          void confirmAction(
+            `Delete this ${L.memory.toLowerCase()}? This can’t be undone.`,
+            () => onDelete(id),
+            {
+              title: `Delete ${L.memory.toLowerCase()}?`,
+              confirmLabel: "Delete",
+              destructive: true,
+            },
+          )
+        }
+        onCancel={() => setSelection({ mode: "view", id })}
+        onGetContent={onGetContent}
+      />
+    );
+  }
+  return (
+    <ResourceView
+      glyph={<Brain size={28} strokeWidth={1.5} />}
+      name={id}
+      status={`Updated ${relativeTime(selected.updatedAt)} · ${selected.size.toLocaleString()} bytes`}
+      provenance={<code>memories/{id}.md</code>}
+      headerAction={<EditAction onEdit={() => setSelection({ mode: "edit", id })} />}
+      backLabel={L.memoriesSection}
+      onBack={backToList}
+    >
+      <p className="resource-card-lede">The assistant reads this across every conversation.</p>
+      <ResourceSection title="Content" icon={<FileText size={14} />}>
+        {content === undefined ? (
+          <div className="skill-card-body pending">
+            <SkeletonLines count={6} />
+          </div>
+        ) : (
+          <pre className="skill-card-body">{content?.content.trim() || "(empty)"}</pre>
+        )}
+      </ResourceSection>
+    </ResourceView>
   );
 }
 
@@ -169,7 +229,7 @@ function MemoryEditor({
         <ChevronLeft size={18} /> {L.memoriesSection}
       </button>
       <header className="resource-editor-head">
-        <h2 className="resource-editor-title">{isNew ? `New ${L.memory}` : id}</h2>
+        <h2 className="resource-editor-title">{isNew ? `New ${L.memory}` : `Edit ${id}`}</h2>
       </header>
 
       <div className="resource-editor-body">

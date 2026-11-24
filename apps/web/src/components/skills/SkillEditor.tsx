@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import type { SkillBundle, SkillSiblingFile, ToolCatalogInfo } from "@/api-client";
 import type { SkillInterruptOn } from "@pizza-bot/core";
 import { ChevronLeft, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
@@ -23,11 +23,12 @@ export interface SkillEditorProps {
     mode: "delete" | "revert";
     run: () => Promise<void>;
   };
-  enablement?: ReactNode;
+  /** Editing a shipped skill saves a user copy that hides it until reverted. */
+  customizing?: boolean;
   onCancel: () => void;
 }
 
-export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, enablement, onCancel }: SkillEditorProps) {
+export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, customizing = false, onCancel }: SkillEditorProps) {
   const notify = useAppToast();
   const isNew = skill === null;
 
@@ -112,11 +113,15 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, e
         <ChevronLeft size={18} /> {L.skillsSection}
       </button>
       <header className="resource-editor-head">
-        <h2 className="resource-editor-title">{isNew ? `New ${L.skill}` : `Edit ${skill?.name}`}</h2>
+        <h2 className="resource-editor-title">{isNew ? `New ${L.skill}` : `${customizing ? "Customize" : "Edit"} ${skill?.name}`}</h2>
       </header>
 
       <div className="resource-editor-body">
-        {enablement}
+        {customizing && (
+          <p className="resource-editor-note">
+            Saving creates your own copy of this skill. You can revert to the shipped version at any time.
+          </p>
+        )}
         {isNew && (
           <div className="resource-generate">
             <span className="field-label">

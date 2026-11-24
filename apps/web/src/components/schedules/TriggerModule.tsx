@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { TriggerDef, TriggerKind } from "@pizza-bot/core";
 import { CalendarClock, Webhook, Plus, Play } from "lucide-react";
 import { ScheduleEditor } from "./ScheduleEditor.js";
+import { TriggerView } from "./TriggerView.js";
 import { ModuleHeader } from "../ModuleHeader.js";
 import { ConfirmationDialog } from "../ConfirmationDialog.js";
 import { useAppToast } from "../AppToast.js";
@@ -35,7 +36,7 @@ export interface TriggerModuleProps {
 }
 
 type Selection =
-  | { mode: "edit"; id: string; revealedWebhookSecret?: string }
+  | { mode: "view" | "edit"; id: string; revealedWebhookSecret?: string }
   | { mode: "new" }
   | null;
 
@@ -63,38 +64,38 @@ export function TriggerModule({
   const ofKind = useMemo(() => triggers.filter((t) => t.kind === kind), [triggers, kind]);
 
   useEffect(() => {
-    if (selection?.mode === "edit" && !ofKind.some((t) => t.id === selection.id)) {
+    if (selection && selection.mode !== "new" && !ofKind.some((t) => t.id === selection.id)) {
       setSelection(null);
     }
   }, [ofKind, selection]);
 
-  const storedSelectedTrigger =
-    selection?.mode === "edit" ? ofKind.find((t) => t.id === selection.id) ?? null : null;
+  const selectedId = selection && selection.mode !== "new" ? selection.id : null;
+  const revealedWebhookSecret =
+    selection && selection.mode !== "new" ? selection.revealedWebhookSecret : undefined;
+  const storedSelectedTrigger = selectedId ? ofKind.find((t) => t.id === selectedId) ?? null : null;
   const selectedTrigger =
-    storedSelectedTrigger && selection?.mode === "edit" && selection.revealedWebhookSecret
-      ? { ...storedSelectedTrigger, webhookSecret: selection.revealedWebhookSecret }
+    storedSelectedTrigger && revealedWebhookSecret
+      ? { ...storedSelectedTrigger, webhookSecret: revealedWebhookSecret }
       : storedSelectedTrigger;
   const listNavigation = useSelectableListNavigation({
     itemIds: ofKind.map((trigger) => trigger.id),
-    selectedId: selection?.mode === "edit" ? selection.id : null,
-    onSelect: (id) => setSelection({ mode: "edit", id }),
+    selectedId,
+    onSelect: (id) => setSelection({ mode: "view", id }),
     searchEnabled: false,
   });
 
   const handleSave = async (patch: Partial<TriggerDef>) => {
     if (selection?.mode === "edit") {
       await onUpdate(selection.id, patch);
-      if (patch.webhookSecret) {
-        setSelection((current) =>
-          current?.mode === "edit" && current.id === selection.id
-            ? { ...current, revealedWebhookSecret: patch.webhookSecret }
-            : current,
-        );
-      }
+      setSelection({
+        mode: "view",
+        id: selection.id,
+        ...(patch.webhookSecret ? { revealedWebhookSecret: patch.webhookSecret } : {}),
+      });
     } else {
       const created = await onCreate({ ...patch, kind });
       setSelection({
-        mode: "edit",
+        mode: "view",
         id: created.id,
         ...(patch.webhookSecret ? { revealedWebhookSecret: patch.webhookSecret } : {}),
       });
@@ -179,7 +180,7 @@ export function TriggerModule({
                         kind === "cron" && t.cron
                           ? nextCronRun(t.cron, new Date(), effectiveTimezone)
                           : null;
-                      const active = selection?.mode === "edit" && selection.id === t.id;
+                      const active = selectedId === t.id;
                       return (
                         <li
                           key={t.id}
@@ -239,22 +240,27 @@ export function TriggerModule({
         </div>
 
         <div className="module-detail">
-          {selection ? (
+          {selection?.mode === "view" && selectedTrigger ? (
+            <TriggerView
+              trigger={selectedTrigger}
+              apiBase={apiBase}
+              defaultTimezone={defaultTimezone}
+              revealedWebhookSecret={revealedWebhookSecret}
+              onEnabledChange={async (enabled) => {
+                await onUpdate(selectedTrigger.id, { enabled });
+              }}
+              onRun={() => void handleRun(selectedTrigger)}
+              onEdit={() => setSelection({ mode: "edit", id: selectedTrigger.id })}
+              onBack={() => setSelection(null)}
+            />
+          ) : selection?.mode === "new" || (selection?.mode === "edit" && selectedTrigger) ? (
             <ScheduleEditor
               // Remount for a new selection, not for each fresh object from polling.
               key={selection.mode === "edit" ? selection.id : "new"}
               kind={kind}
-              apiBase={apiBase}
               defaultTimezone={defaultTimezone}
-              trigger={selectedTrigger}
+              trigger={selection.mode === "edit" ? selectedTrigger : null}
               onSave={handleSave}
-              onEnabledChange={
-                selectedTrigger
-                  ? async (enabled) => {
-                      await onUpdate(selectedTrigger.id, { enabled });
-                    }
-                  : undefined
-              }
               onDelete={
                 selectedTrigger
                   ? () => {
@@ -263,12 +269,14 @@ export function TriggerModule({
                     }
                   : undefined
               }
-              onCancel={() => setSelection(null)}
+              onCancel={() =>
+                setSelection(selectedId ? { mode: "view", id: selectedId } : null)
+              }
             />
           ) : (
             <div className="module-detail-empty">
               <HeaderIcon size={40} strokeWidth={1} />
-              <p>Select a {ui.noun.toLowerCase()} to edit, or create a new one.</p>
+              <p>Select a {ui.noun.toLowerCase()} to see it, or create a new one.</p>
             </div>
           )}
         </div>

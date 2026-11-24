@@ -1,5 +1,6 @@
 import type { McpServerRow, McpToolInfo } from "@/api-client";
-import { ChevronLeft, Cable, Puzzle, Globe, TerminalSquare } from "lucide-react";
+import { Cable, Globe, TerminalSquare } from "lucide-react";
+import { ResourceSection, ResourceView } from "../ResourceView.js";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
 import { L } from "../../lexicon.js";
 import { useState, type ReactNode } from "react";
@@ -34,7 +35,6 @@ export interface McpServerCardProps {
   onBack?: () => void;
   onGetTools?: (id: string) => Promise<McpToolInfo[]>;
   headerAction?: ReactNode;
-  footer?: ReactNode;
   enablement?: ReactNode;
   reconnectControl?: ReactNode;
   dependents?: ReactNode;
@@ -44,7 +44,6 @@ export interface McpServerCardProps {
 export function McpServerCard({
   server,
   headerAction,
-  footer,
   enablement,
   reconnectControl,
   dependents,
@@ -59,65 +58,42 @@ export function McpServerCard({
   const canListTools = server.status === "connected" && onGetTools !== undefined;
 
   return (
-    <div className="resource-card">
-      {onBack && (
-        <button className="module-detail-back" onClick={onBack}>
-          <ChevronLeft size={18} /> {L.mcpSection}
-        </button>
-      )}
-      <header className="resource-card-head">
-        <div className="skill-card-glyph">
-          <Cable size={28} strokeWidth={1.5} />
-        </div>
-        <div className="resource-card-titles">
-          <div className="resource-card-name-row">
-            <h2 className="resource-card-name">{server.id}</h2>
-            <ProvenanceBadge provenance={server.source} />
-          </div>
-          <p className="resource-card-desc">
-            <CapabilityStatusDot state={mcpVisualState(server)} label={statusLabel} />{" "}
-            {canListTools ? (
-              <>
-                Connected ·{" "}
-                <button
-                  type="button"
-                  className="resource-card-link mcp-tools-link"
-                  onClick={() => setToolsOpen(true)}
-                  aria-haspopup="dialog"
-                  title="Show the tools this server provides"
-                >
-                  {toolsLabel}
-                </button>
-              </>
-            ) : (
-              statusLabel
-            )}
-          </p>
-          {server.pluginName && (
-            <p className="skill-card-provenance">
-              <Puzzle size={13} /> from plugin <code>{server.pluginName}</code>
-            </p>
+    <ResourceView
+      glyph={<Cable size={28} strokeWidth={1.5} />}
+      name={server.id}
+      badge={<ProvenanceBadge provenance={server.source} />}
+      status={
+        <>
+          <CapabilityStatusDot state={mcpVisualState(server)} label={statusLabel} />{" "}
+          {canListTools ? (
+            <>
+              Connected ·{" "}
+              <button
+                type="button"
+                className="resource-card-link mcp-tools-link"
+                onClick={() => setToolsOpen(true)}
+                aria-haspopup="dialog"
+                title="Show the tools this server provides"
+              >
+                {toolsLabel}
+              </button>
+            </>
+          ) : (
+            statusLabel
           )}
-        </div>
-        {headerAction && <div className="resource-card-header-action">{headerAction}</div>}
-      </header>
-
+        </>
+      }
+      headerAction={headerAction}
+      backLabel={L.mcpSection}
+      onBack={onBack}
+    >
       {loadError}
       {enablement}
       {reconnectControl}
-
-      <section className="resource-card-section">
-        <h3 className="resource-card-section-title">
-          {isStdio ? (
-            <>
-              <TerminalSquare size={14} /> Stdio transport
-            </>
-          ) : (
-            <>
-              <Globe size={14} /> {("type" in server.entry && server.entry.type) || "http"} transport
-            </>
-          )}
-        </h3>
+      <ResourceSection
+        title={isStdio ? "Stdio transport" : `${("type" in server.entry && server.entry.type) || "http"} transport`}
+        icon={isStdio ? <TerminalSquare size={14} /> : <Globe size={14} />}
+      >
         {"command" in server.entry ? (
           <pre className="skill-card-body">
             {`${server.entry.command} ${(server.entry.args ?? []).join(" ")}`.trim()}
@@ -125,9 +101,8 @@ export function McpServerCard({
         ) : (
           <pre className="skill-card-body">{server.entry.url}</pre>
         )}
-      </section>
+      </ResourceSection>
       {dependents}
-      {footer && <footer className="resource-editor-actions">{footer}</footer>}
       {toolsOpen && onGetTools && (
         <McpToolsDialog
           serverId={server.id}
@@ -136,6 +111,6 @@ export function McpServerCard({
           onClose={() => setToolsOpen(false)}
         />
       )}
-    </div>
+    </ResourceView>
   );
 }

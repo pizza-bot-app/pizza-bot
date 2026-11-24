@@ -10,56 +10,146 @@ import {
 } from "lucide-react";
 import type { PluginInfo } from "@/api-client";
 import { L } from "../../lexicon.js";
-import { ModuleHeader } from "../ModuleHeader.js";
 import { ConfirmationDialog } from "../ConfirmationDialog.js";
+import { ResourceModule } from "../ResourceModule.js";
+import { ResourceList } from "../ResourceList.js";
+import { ResourceSection, ResourceView } from "../ResourceView.js";
+import { CapabilityStatusDot, type CapabilityVisualState } from "../CapabilityControls.js";
 import { useAppToast } from "../AppToast.js";
 
 export interface PluginsModuleProps {
   plugins: PluginInfo[];
+  focusName?: string;
   onImport: (file: File) => Promise<{ name: string }>;
   onDelete: (name: string) => Promise<boolean>;
   onRefresh: (name: string) => Promise<void>;
+  onOpenSkills?: () => void;
+  onOpenMcpServers?: () => void;
+}
+
+const matches = (plugin: PluginInfo, q: string) =>
+  plugin.name.toLowerCase().includes(q) ||
+  (plugin.displayName ?? "").toLowerCase().includes(q) ||
+  (plugin.description ?? "").toLowerCase().includes(q);
+
+function pluginVisualState(plugin: PluginInfo): CapabilityVisualState {
+  if (!plugin.status || plugin.status === "loaded") return "active";
+  return "unavailable";
 }
 
 export function PluginsModule({
   plugins,
+  focusName,
   onImport,
   onDelete,
   onRefresh,
+  onOpenSkills,
+  onOpenMcpServers,
 }: PluginsModuleProps) {
-  const [pending, setPending] = useState<PluginInfo | null>(null);
-  const [removing, setRemoving] = useState(false);
-  const [refreshing, setRefreshing] = useState<string | null>(null);
+  return (
+    <ResourceModule
+      items={plugins}
+      getId={(plugin) => plugin.name}
+      focusId={focusName}
+      icon={<Puzzle size={18} />}
+      emptyIcon={<Puzzle size={40} strokeWidth={1} />}
+      title={L.pluginsSection}
+      newLabel=""
+      canCreate={false}
+      emptyText={plugins.length === 0 ? L.noPlugins : "Select a plugin to see what it adds."}
+      renderHeaderActions={() => <PluginImportControl onImport={onImport} />}
+      renderList={({ selectedId, onSelect }) => (
+        <ResourceList
+          items={plugins}
+          getId={(plugin) => plugin.name}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          matches={matches}
+          label={L.pluginsSection}
+          searchPlaceholder="Search plugins..."
+          emptyTitle={L.noPlugins}
+          emptySub="Import a plugin ZIP to add skills and MCP servers."
+          noMatchSub={(q) => `No plugins match “${q}”`}
+          renderRow={(plugin) => (
+            <span className="resource-row-main">
+              <span className="resource-row-line1">
+                <span className="resource-row-name">{plugin.displayName ?? plugin.name}</span>
+                <span className="resource-row-badges">
+                  {plugin.version && <span className="plugin-version">v{plugin.version}</span>}
+                  <CapabilityStatusDot
+                    state={pluginVisualState(plugin)}
+                    label={plugin.status ?? "loaded"}
+                  />
+                </span>
+              </span>
+              <span className="resource-row-desc">{plugin.description}</span>
+            </span>
+          )}
+        />
+      )}
+      renderDetail={({ selected, backToList, confirmAction }) =>
+        selected ? (
+          <PluginView
+            plugin={selected}
+            onBack={backToList}
+            onRefresh={onRefresh}
+            onOpenSkills={onOpenSkills}
+            onOpenMcpServers={onOpenMcpServers}
+            onRemove={() =>
+              void confirmAction(
+                `Remove “${selected.displayName ?? selected.name}”? Its skills and MCP servers will no longer be available.`,
+                () => onDelete(selected.name),
+                {
+                  title: "Remove plugin?",
+                  confirmLabel: "Remove",
+                  destructive: true,
+                  successMessage: `${selected.displayName ?? selected.name} removed`,
+                },
+              )
+            }
+          />
+        ) : null
+      }
+    />
+  );
+}
+
+function PluginView({
+  plugin,
+  onBack,
+  onRefresh,
+  onRemove,
+  onOpenSkills,
+  onOpenMcpServers,
+}: {
+  plugin: PluginInfo;
+  onBack?: () => void;
+  onRefresh: (name: string) => Promise<void>;
+  onRemove: () => void;
+  onOpenSkills?: () => void;
+  onOpenMcpServers?: () => void;
+}) {
+  const [refreshing, setRefreshing] = useState(false);
   const notify = useAppToast();
+  const label = plugin.displayName ?? plugin.name;
+  const loaded = !plugin.status || plugin.status === "loaded";
+  const contributions = [
+    { singular: "skill", plural: "skills", count: plugin.contributions.skills, icon: BookOpen, open: onOpenSkills },
+    {
+      singular: "MCP server",
+      plural: "MCP servers",
+      count: plugin.contributions.mcpServers,
+      icon: Cable,
+      open: onOpenMcpServers,
+    },
+  ].filter((entry) => entry.count > 0);
 
-  const confirmDelete = async () => {
-    if (!pending || removing) return;
-    setRemoving(true);
-    try {
-      await onDelete(pending.name);
-      notify({ title: "Plugin removed", description: pending.displayName ?? pending.name, tone: "success" });
-      setPending(null);
-    } catch (cause) {
-      notify({
-        title: "Plugin removal failed",
-        description: cause instanceof Error ? cause.message : undefined,
-        tone: "error",
-      });
-    } finally {
-      setRemoving(false);
-    }
-  };
-
-  const refreshPlugin = async (plugin: PluginInfo) => {
+  const refresh = async () => {
     if (refreshing) return;
-    setRefreshing(plugin.name);
+    setRefreshing(true);
     try {
       await onRefresh(plugin.name);
-      notify({
-        title: "Plugin refreshed",
-        description: plugin.displayName ?? plugin.name,
-        tone: "success",
-      });
+      notify({ title: "Plugin refreshed", description: label, tone: "success" });
     } catch (cause) {
       notify({
         title: "Plugin refresh failed",
@@ -67,130 +157,83 @@ export function PluginsModule({
         tone: "error",
       });
     } finally {
-      setRefreshing(null);
+      setRefreshing(false);
     }
   };
 
   return (
-    <div className="module">
-      <ModuleHeader icon={<Puzzle size={18} />} title={L.pluginsSection} count={plugins.length}>
-        <span className="module-header-spacer" />
-        <PluginImportControl onImport={onImport} />
-      </ModuleHeader>
-      <div className="plugins-body">
-        {plugins.length === 0 ? (
-          <div className="module-detail-empty">
-            <Puzzle size={40} strokeWidth={1} />
-            <p>{L.noPlugins}</p>
-          </div>
+    <ResourceView
+      glyph={<Puzzle size={28} strokeWidth={1.5} />}
+      name={label}
+      badge={plugin.version ? <span className="plugin-version">v{plugin.version}</span> : undefined}
+      status={
+        <>
+          <CapabilityStatusDot state={pluginVisualState(plugin)} label={plugin.status ?? "loaded"} />{" "}
+          {loaded ? "Loaded" : plugin.status}
+          {plugin.author ? ` · ${plugin.author}` : ""}
+        </>
+      }
+      provenance={
+        plugin.removable ? (
+          plugin.homepage ? (
+            <a className="resource-card-link" href={plugin.homepage} target="_blank" rel="noreferrer">
+              Homepage ↗
+            </a>
+          ) : undefined
         ) : (
-          <ul className="plugin-list">
-            {plugins.map((plugin) => {
-              const contributions = [
-                { singular: "MCP server", plural: "MCP servers", count: plugin.contributions.mcpServers, icon: Cable },
-                { singular: "Skill", plural: "Skills", count: plugin.contributions.skills, icon: BookOpen },
-              ].filter((entry) => entry.count > 0);
-
-              return (
-                <li className="plugin-card" key={plugin.id}>
-                  <div className="plugin-card-icon" aria-hidden="true">
-                    <Puzzle size={20} />
-                  </div>
-                  <div className="plugin-card-main">
-                    <div className="plugin-card-heading">
-                      <h2>{plugin.displayName ?? plugin.name}</h2>
-                      {plugin.version && <span className="plugin-version">v{plugin.version}</span>}
-                      {plugin.status && plugin.status !== "loaded" && (
-                        <span
-                          className={`plugin-load-status ${plugin.status}`}
-                        >
-                          {plugin.status}
-                        </span>
-                      )}
-                    </div>
-                    {plugin.description && <p>{plugin.description}</p>}
-                    {plugin.status && plugin.status !== "loaded" && plugin.detail && (
-                      <p className={`plugin-load-detail ${plugin.status}`}>
-                        {plugin.detail}
-                      </p>
-                    )}
-                    <div className="plugin-card-meta">
-                      {plugin.author && <span>{plugin.author}</span>}
-                      {plugin.homepage && (
-                        <a href={plugin.homepage} target="_blank" rel="noreferrer">
-                          Homepage
-                        </a>
-                      )}
-                    </div>
-                    {contributions.length > 0 && (
-                      <div className="plugin-contributions">
-                        {contributions.map(({ singular, plural, count, icon: Icon }) => (
-                          <span key={singular}>
-                            <Icon size={13} /> {count} {count === 1 ? singular : plural}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {plugin.materialization && (
-                      <div
-                        className={`plugin-sync-status ${plugin.materialization.state}`}
-                        title={plugin.materialization.detail}
-                      >
-                        {plugin.materialization.state === "synced"
-                          ? "Synced"
-                          : plugin.materialization.state === "stale"
-                            ? "Using last successful sync"
-                            : "Sync failed"}
-                      </div>
-                    )}
-                  </div>
-                  <div className="plugin-card-actions">
-                    {plugin.materialization && (
-                      <button
-                        type="button"
-                        className="plugin-card-action"
-                        aria-label={`Refresh ${plugin.displayName ?? plugin.name}`}
-                        title="Refresh generated contributions"
-                        disabled={refreshing !== null}
-                        onClick={() => void refreshPlugin(plugin)}
-                      >
-                        <RefreshCw
-                          className={
-                            refreshing === plugin.name ? "spin" : undefined
-                          }
-                          size={15}
-                        />
-                      </button>
-                    )}
-                    {plugin.removable && (
-                      <button
-                        type="button"
-                        className="plugin-card-action plugin-card-remove"
-                        aria-label={`Remove ${plugin.displayName ?? plugin.name}`}
-                        onClick={() => setPending(plugin)}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
+          <span>Bundled with Pizza Bot</span>
+        )
+      }
+      backLabel={L.pluginsSection}
+      onBack={onBack}
+      footer={
+        plugin.removable ? (
+          <button type="button" className="btn-secondary resource-editor-delete" onClick={onRemove}>
+            <Trash2 size={14} /> Remove
+          </button>
+        ) : undefined
+      }
+    >
+      {plugin.description && <p className="resource-card-lede">{plugin.description}</p>}
+      {!loaded && plugin.detail && (
+        <p className={`plugin-load-detail ${plugin.status}`}>{plugin.detail}</p>
+      )}
+      {plugin.materialization && (
+        <section className="resource-inline-action">
+          <div className="resource-inline-action-copy">
+            <div className="resource-inline-action-title">
+              {plugin.materialization.state === "synced"
+                ? "Synced"
+                : plugin.materialization.state === "stale"
+                  ? "Using last successful sync"
+                  : "Sync failed"}
+            </div>
+            <div className="resource-inline-action-detail">
+              {plugin.materialization.detail ?? "Regenerate this plugin’s skills and MCP servers from its sources."}
+            </div>
+          </div>
+          <button type="button" className="btn-secondary" onClick={() => void refresh()} disabled={refreshing}>
+            <RefreshCw className={refreshing ? "spin" : undefined} size={14} /> Refresh
+          </button>
+        </section>
+      )}
+      <ResourceSection title="Adds" icon={<Puzzle size={14} />}>
+        {contributions.length === 0 ? (
+          <p className="resource-card-empty">This plugin doesn’t add any skills or MCP servers.</p>
+        ) : (
+          <ul className="skill-card-files">
+            {contributions.map(({ singular, plural, count, icon: Icon, open }) => (
+              <li key={singular} className="skill-card-file">
+                <Icon size={13} />
+                <button type="button" className="resource-card-link" onClick={open} disabled={!open}>
+                  {count} {count === 1 ? singular : plural} ↗
+                </button>
+              </li>
+            ))}
           </ul>
         )}
-      </div>
-      {pending && (
-        <ConfirmationDialog
-          title="Remove plugin"
-          message={`Remove "${pending.displayName ?? pending.name}"? Its skills and MCP servers will no longer be available.`}
-          confirmLabel="Remove"
-          destructive
-          busy={removing}
-          onCancel={() => !removing && setPending(null)}
-          onConfirm={() => void confirmDelete()}
-        />
-      )}
-    </div>
+      </ResourceSection>
+    </ResourceView>
   );
 }
 

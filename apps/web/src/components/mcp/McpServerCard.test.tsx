@@ -17,17 +17,14 @@ function server(overrides: Partial<McpServerRow> = {}): McpServerRow {
 }
 
 describe("McpServerCard", () => {
-  it("renders the footer slot at the bottom, after the header and dependents", () => {
+  it("renders a read-only view with no destructive actions", () => {
     const html = renderToStaticMarkup(
-      <McpServerCard
-        server={server()}
-        dependents={<div id="dependents" />}
-        footer={<button>Edit</button>}
-      />,
+      <McpServerCard server={server()} dependents={<div id="dependents" />} />,
     );
-    expect(html).toMatch(/<\/header>[\s\S]*id="dependents"[\s\S]*<footer class="resource-editor-actions"><button>Edit<\/button><\/footer>/);
+    expect(html).toMatch(/<\/header>[\s\S]*id="dependents"/);
+    expect(html).not.toContain("<footer");
+    expect(html).not.toContain("Delete");
     expect(html).toContain('class="provenance-badge user"');
-    expect(html).not.toContain('class="provenance-badge plugin"');
   });
 
   it("renders the header action inside the header", () => {
@@ -37,12 +34,12 @@ describe("McpServerCard", () => {
     expect(html).toMatch(/<header[^>]*>(?:(?!<\/header>)[\s\S])*id="managed"[\s\S]*<\/header>/);
   });
 
-  it("shows plugin provenance in the header", () => {
+  it("leaves plugin attribution to the header action instead of repeating it", () => {
     const html = renderToStaticMarkup(
       <McpServerCard server={server({ source: "plugin", pluginName: "outlook-suite" })} />,
     );
     expect(html).toContain('class="provenance-badge plugin"');
-    expect(html).toContain("from plugin <code>outlook-suite</code>");
+    expect(html).not.toContain("outlook-suite");
   });
 
   it("renders the load-error slot above the enablement control", () => {
