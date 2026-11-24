@@ -34,8 +34,7 @@ export function protocolRoutes(host: AgentHost): Hono {
         command: cmd,
         stateReader: {
           getState: async (id) => {
-            await host.whenReady();
-            return host.agent.getState(id);
+            return (await host.threadGraph(id)).getState(id);
           },
         },
       });
@@ -141,7 +140,7 @@ export function protocolRoutes(host: AgentHost): Hono {
   app.get("/threads/:thread_id/state", async (c) => {
     await host.whenReady();
     const threadId = c.req.param("thread_id");
-    const state = await host.agent.getState(threadId);
+    const state = await (await host.threadGraph(threadId)).getState(threadId);
     return c.json(toProtocolState(state));
   });
 

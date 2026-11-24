@@ -27,10 +27,16 @@ import {
   type SkillCatalogEntry,
   type SkillInfo,
   type ThreadActivityOutcome,
+  type GraphSpec,
 } from "@pizza-bot/core";
 import { registerBuiltinProviders, UnavailableChatModel } from "@pizza-bot/inference-providers";
-import type { LangGraphAgent } from "@pizza-bot/runtime-langgraph";
+import {
+  compileGraphSpec,
+  type LangGraphAgent,
+  type LangGraphThreadGraph,
+} from "@pizza-bot/runtime-langgraph";
 import type { ProtocolEvent } from "@langchain/langgraph";
+import type { StructuredToolInterface } from "@langchain/core/tools";
 import {
   openPersistence,
   openAppDatabase,
@@ -92,6 +98,7 @@ import {
 import { lstat, mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { ProtocolRunManager } from "./protocol-run-manager.js";
+import { GraphRegistry } from "./graph-registry.js";
 import type { ImportedPlugin } from "./plugin-import.js";
 import { protocolRunLauncher } from "./protocol-run-launcher.js";
 import { TriggerService } from "./trigger-service.js";
@@ -362,6 +369,8 @@ export class AgentHost {
 
   readonly triggers: TriggerStore;
   readonly triggerService: TriggerService;
+  readonly graphRegistry: GraphRegistry;
+  private readonly compiledGraphs = new Map<string, { fingerprint: string; graph: LangGraphThreadGraph }>();
 
   readonly threadStore: ThreadStore;
   readonly folderStore: FolderStore;
@@ -437,15 +446,17 @@ export class AgentHost {
     this.explicitModelId = explicitModelId ?? process.env.PIZZA_MODEL ?? null;
     this.modelId = this.selectDefaultModel();
     if (this.appDb.attachments) this.attachments = this.appDb.attachments;
+    this.graphRegistry = new GraphRegistry(join(dataRoot, "graphs"));
     this.triggerService = new TriggerService(protocolRunLauncher(this.protocolRuns), this.triggers, {
       isEnabled: () => this.settings.get().enableAutomations,
+      awaitsInput: async (threadId) => stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId)),
     });
     this.runMaintenance = new RunMaintenance({
       threadStore: this.threadStore,
       search: this.search,
       getMessages: async (threadId) => {
         await this.warmup;
-        const state = await this.agent.getState(threadId);
+        const state = await (await this.threadGraph(threadId)).getState(threadId);
         return (state.values as { messages?: IndexableMessage[] } | undefined)?.messages ?? [];
       },
       generateTitle: async (userMessage, assistantMessage) => {
@@ -616,7 +627,7 @@ export class AgentHost {
     resumeFallback: boolean,
   ): Promise<boolean> {
     try {
-      return stateAwaitsAction(await this.agent.getState(threadId));
+      return stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId));
     } catch {
       return resumeFallback || (this.threadStore.get(threadId)?.awaitingAction ?? false);
     }
@@ -624,7 +635,7 @@ export class AgentHost {
 
   private async readThreadInterruptIds(threadId: string): Promise<string[]> {
     try {
-      return interruptIdsOf(await this.agent.getState(threadId));
+      return interruptIdsOf(await (await this.threadGraph(threadId)).getState(threadId));
     } catch {
       return [];
     }
@@ -817,8 +828,71 @@ export class AgentHost {
   }
 
   private async *streamProtocolReady(input: RunInput, opts: RunOptions): AsyncIterable<ProtocolEvent> {
+    const requestedGraph = opts.configurable?.graph_id;
+    const graphId =
+      typeof requestedGraph === "string" && requestedGraph.length > 0
+        ? requestedGraph
+        : this.threadStore.get(opts.threadId)?.graphId;
+    if (graphId) {
+      yield* this.streamGraphRun(graphId, input, opts);
+      return;
+    }
     const { agent, cleaned } = await this.resolveTurn(opts);
     yield* agent.streamProtocol(input, cleaned);
+  }
+
+  private async *streamGraphRun(
+    graphId: string,
+    input: RunInput,
+    opts: RunOptions,
+  ): AsyncIterable<ProtocolEvent> {
+    await this.warmup;
+    if ("messages" in input) {
+      throw new Error("A graph run accepts graph input or a resume, not chat messages.");
+    }
+    const thread = this.threadStore.get(opts.threadId);
+    // A thread's checkpoints belong to one graph; another graph would misread them.
+    if (thread && thread.graphId !== graphId) {
+      throw new Error(`Thread ${opts.threadId} does not run graph ${graphId}.`);
+    }
+    const { spec, graph } = await this.compiledGraph(graphId);
+    if (!thread) {
+      this.threadStore.create({
+        threadId: opts.threadId,
+        graphId,
+        title: spec.name,
+        source: opts.configurable?.source === "trigger" ? "trigger" : "user",
+      });
+    }
+    const cleaned = { ...opts };
+    if (opts.configurable) {
+      const { graph_id: _graphId, model: _model, ...rest } = opts.configurable;
+      cleaned.configurable = rest;
+    }
+    yield* graph.streamProtocol(input, cleaned);
+  }
+
+  /** The graph whose checkpoints a thread holds: its graph run, or the assistant. */
+  async threadGraph(threadId: string): Promise<LangGraphThreadGraph> {
+    await this.warmup;
+    const graphId = this.threadStore.get(threadId)?.graphId;
+    return graphId ? (await this.compiledGraph(graphId)).graph : this.agent;
+  }
+
+  private async compiledGraph(graphId: string): Promise<{ spec: GraphSpec; graph: LangGraphThreadGraph }> {
+    const spec = await this.graphRegistry.get(graphId);
+    if (!spec) throw new Error(`Graph ${graphId} does not exist or does not parse.`);
+    const fingerprint = JSON.stringify(spec);
+    const cached = this.compiledGraphs.get(graphId);
+    if (cached?.fingerprint === fingerprint) return { spec, graph: cached.graph };
+    const graph = compileGraphSpec(spec, {
+      ...(this.persistence.checkpointer ? { checkpointer: this.persistence.checkpointer } : {}),
+      agentFor: (modelId) => this.agentFor(modelId),
+      modelFor: (modelId) => this.graphs!.buildModel(modelId ?? this.modelId),
+      tool: (ref) => this.mcpTools[ref] as StructuredToolInterface | undefined,
+    });
+    this.compiledGraphs.set(graphId, { fingerprint, graph });
+    return { spec, graph };
   }
 
   private async resolveTurn(
