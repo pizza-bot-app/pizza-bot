@@ -131,6 +131,27 @@ describe("FsPluginLoader", () => {
     expect(String(errors[0]?.error)).toContain("Invalid plugin manifest");
   });
 
+  // Creating a symlink needs elevated privilege on Windows (EPERM otherwise).
+  it.skipIf(process.platform === "win32")("finds a plugin through a top-level symlink and skips broken or file links", async () => {
+    const pluginsDir = await mkdtemp(join(tmpdir(), "plugin-links-"));
+    await symlink(EXAMPLE_ROOT, join(pluginsDir, "linked"));
+    await symlink(join(pluginsDir, "missing"), join(pluginsDir, "broken"));
+    await writeFile(join(pluginsDir, "notes.txt"), "not a plugin");
+    await symlink(join(pluginsDir, "notes.txt"), join(pluginsDir, "file-link"));
+
+    const errors: unknown[] = [];
+    const loader = new FsPluginLoader();
+    const sources = await loader.find(pluginsDir, (_root, error) => errors.push(error));
+
+    expect(errors).toEqual([]);
+    expect(sources.map(({ root, manifest }) => [root, manifest.name])).toEqual([
+      [join(pluginsDir, "linked"), "mcp-status"],
+    ]);
+    const reg = new ContributionRegistry();
+    await loader.load(sources[0]!.manifest, sources[0]!.root, reg);
+    expect(reg.skills.has("health-report")).toBe(true);
+  });
+
   it("does not mutate the registry when a late contribution is invalid", async () => {
     const root = await mkdtemp(join(tmpdir(), "plugin-atomic-invalid-"));
     const skill = join(root, "skill.md");

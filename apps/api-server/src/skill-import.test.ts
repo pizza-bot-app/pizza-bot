@@ -148,6 +148,19 @@ describe("parseSkillArchive", () => {
     );
   });
 
+  it("drops version-control metadata but keeps other dotfiles", async () => {
+    const skill = await parseSkillArchive(zip([
+      { path: "review-change/SKILL.md", content: markdown },
+      { path: "review-change/.git/HEAD", content: "ref: refs/heads/main" },
+      { path: "review-change/nested/.git", content: "gitdir: ../.git" },
+      { path: "review-change/sub/.hg/store", content: "hg" },
+      { path: "review-change/.svn/entries", content: "svn" },
+      { path: "review-change/.prettierrc", content: "{}" },
+    ]));
+    assertSkill(skill);
+    expect(skill.files.map((file) => file.path).sort()).toEqual([".prettierrc", "SKILL.md"]);
+  });
+
   it("rejects more than the allowed number of non-metadata files", async () => {
     await expect(parseSkillArchive(zip([
       { path: "SKILL.md", content: markdown },

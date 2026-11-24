@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { SkillBundle, SkillCatalogEntryInfo, ToolCatalogInfo } from "@/api-client";
-import { BookOpen, Cable, FileText, Hand, ScrollText, Wrench } from "lucide-react";
+import { BookOpen, Cable, FileText, Hand, ScrollText, Unlink, Wrench } from "lucide-react";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
 import { CapabilityStatusDot, type CapabilityVisualState } from "../CapabilityControls.js";
 import { EditAction, PluginLink, ResourceSection, ResourceView } from "../ResourceView.js";
@@ -17,6 +17,7 @@ export function SkillView({
   statusLabel,
   enablement,
   onEdit,
+  onUnlink,
   onOpenPlugin,
   onBack,
 }: {
@@ -27,6 +28,7 @@ export function SkillView({
   statusLabel: string;
   enablement?: ReactNode;
   onEdit: () => void;
+  onUnlink?: () => void;
   onOpenPlugin?: (pluginName: string) => void;
   onBack?: () => void;
 }) {
@@ -42,6 +44,9 @@ export function SkillView({
     ) : shippedFrom === "builtin" ? (
       <span>{skill.overrides ? "Customized from the built-in version" : "Built in to Pizza Bot"}</span>
     ) : undefined;
+  const linkedNote = skill.linked ? (
+    <span>Linked from {skill.linkTarget ?? "another folder"}; edit it at the source</span>
+  ) : undefined;
   const interruptRefs = Object.keys(bundle?.interruptOn ?? {});
 
   return (
@@ -54,8 +59,16 @@ export function SkillView({
           <CapabilityStatusDot state={visualState} label={statusLabel} /> {statusLabel}
         </>
       }
-      provenance={provenance}
-      headerAction={<EditAction label={shipped ? "Customize" : "Edit"} onEdit={onEdit} />}
+      provenance={linkedNote ?? provenance}
+      headerAction={
+        !skill.linked ? (
+          <EditAction label={shipped ? "Customize" : "Edit"} onEdit={onEdit} />
+        ) : onUnlink ? (
+          <button type="button" className="btn-secondary" onClick={onUnlink}>
+            <Unlink size={14} /> Unlink
+          </button>
+        ) : undefined
+      }
       backLabel={L.skillsSection}
       onBack={onBack}
     >

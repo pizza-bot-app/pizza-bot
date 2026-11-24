@@ -81,7 +81,7 @@ import {
   resolveMemoriesDir,
   resolveMcpConfig,
 } from "./plugins-dir.js";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { ProtocolRunManager } from "./protocol-run-manager.js";
 import type { ImportedPlugin } from "./plugin-import.js";
@@ -1629,16 +1629,21 @@ export class AgentHost {
    * directory itself cannot be renamed aside while a server's cwd sits in it.
    * Dropping the manifest first is what makes the reload stop those servers; the
    * delete then only has to outlast the brief post-exit handle window.
+   *
+   * A symlinked plugin is the user's own folder: only the link goes, and the
+   * reload after unlinking is what stops its servers.
    */
   async deletePlugin(name: string): Promise<boolean> {
     const installDir = await this.pluginsInstallDirectory();
     if (!installDir || !(await this.pluginIsInstalled(name))) return false;
     const dir = join(installDir, name);
-    await rm(join(dir, ".claude-plugin"), { recursive: true, force: true });
+    const linked = (await lstat(dir)).isSymbolicLink();
+    if (linked) await unlink(dir);
+    else await rm(join(dir, ".claude-plugin"), { recursive: true, force: true });
     try {
       await this.reloadPlugins("manual");
     } finally {
-      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      if (!linked) await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       await this.removePluginMaterialization(name);
       this.capabilityPreferences.deleteSource(`plugin:${name}`);
     }

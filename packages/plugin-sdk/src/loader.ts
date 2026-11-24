@@ -23,6 +23,12 @@ import { expandMcpEnvVars } from "./mcp-servers-config.js";
 import { ContributionRegistry, type PluginLoader } from "./registry.js";
 
 const MANIFEST_REL = ".claude-plugin/plugin.json";
+const VCS_METADATA = new Set([".git", ".hg", ".svn"]);
+
+/** Version-control metadata (a directory, or a `.git` file in worktrees/submodules) is never skill content. */
+export function isVcsMetadata(name: string): boolean {
+  return VCS_METADATA.has(name);
+}
 const mcpServersFileSchema = z.object({
   mcpServers: z.record(z.string(), z.unknown()),
 });
@@ -67,9 +73,14 @@ export class FsPluginLoader implements PluginLoader {
     );
     const found: PluginSource[] = [];
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
       const root = join(pluginsDir, entry.name);
       try {
+        // A top-level symlink counts when it resolves to a directory; a broken
+        // link is ENOENT and skipped like a folder without a manifest.
+        const isDir =
+          entry.isDirectory() ||
+          (entry.isSymbolicLink() && (await stat(root)).isDirectory());
+        if (!isDir) continue;
         found.push({
           root,
           manifest: await this.readManifest(join(root, MANIFEST_REL)),
@@ -150,6 +161,7 @@ export class FsPluginLoader implements PluginLoader {
       if (st.isDirectory()) {
         const children = await readdir(abs, { withFileTypes: true });
         for (const child of children) {
+          if (isVcsMetadata(child.name)) continue;
           const isMarkdown = extname(child.name) === ".md";
           if (!child.isDirectory() && !child.isSymbolicLink() && !isMarkdown) {
             continue;

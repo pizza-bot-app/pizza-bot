@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SkillCatalog, SkillCatalogEntry } from "@pizza-bot/core";
@@ -175,6 +175,30 @@ describe("loadSkillCatalog", () => {
     expect(file.content).toEqual(bytes);
   });
 
+  it("omits version-control metadata at any depth but keeps other dotfiles", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "skill-cat-"));
+    const skillDir = join(dir, "versioned");
+    await mkdir(join(skillDir, ".git", "objects"), { recursive: true });
+    await mkdir(join(skillDir, "sub", ".hg"), { recursive: true });
+    await mkdir(join(skillDir, "nested"), { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), "---\nname: versioned\ndescription: In a repo.\n---\n");
+    await writeFile(join(skillDir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    await writeFile(join(skillDir, ".git", "objects", "ab"), "blob");
+    await writeFile(join(skillDir, "nested", ".git"), "gitdir: ../../.git/worktrees/nested\n");
+    await writeFile(join(skillDir, "sub", ".hg", "store"), "hg");
+    await writeFile(join(skillDir, "sub", "notes.md"), "notes");
+    await writeFile(join(skillDir, ".prettierrc"), "{}");
+
+    const reg = new ContributionRegistry();
+    reg.registerSkill("test", dir, "versioned", skillDir);
+
+    expect((await loadSkillCatalog(reg)).get("versioned")!.files.map((file) => file.path)).toEqual([
+      "/skills/versioned/SKILL.md",
+      "/skills/versioned/.prettierrc",
+      "/skills/versioned/sub/notes.md",
+    ]);
+  });
+
   // Creating a symlink needs elevated privilege on Windows (EPERM otherwise).
   it.skipIf(process.platform === "win32")("does not follow nested file or directory symlinks", async () => {
     const dir = await mkdtemp(join(tmpdir(), "skill-cat-"));
@@ -334,6 +358,40 @@ describe("loadUserSkills", () => {
 
     const catalog = await loadUserSkills(dir);
     expect(catalog.get("plain")?.declaredTools).toEqual([]);
+  });
+
+  // Creating a symlink needs elevated privilege on Windows (EPERM otherwise).
+  it.skipIf(process.platform === "win32")("follows a top-level symlink to a skill folder and marks it linked", async () => {
+    const source = await seedUserSkills([
+      { id: "shared", frontmatter: "name: shared\ndescription: Lives in another repo." },
+    ]);
+    const outside = await mkdtemp(join(tmpdir(), "skill-link-outside-"));
+    await writeFile(join(outside, "secret.txt"), "outside\n");
+    await symlink(outside, join(source, "shared", "nested-link"));
+    const dir = await mkdtemp(join(tmpdir(), "skill-links-"));
+    await symlink(join(source, "shared"), join(dir, "linked"));
+
+    const linked = (await loadUserSkills(dir)).get("linked");
+    expect(linked).toMatchObject({
+      source: "user",
+      description: "Lives in another repo.",
+      linked: true,
+      linkTarget: await realpath(join(source, "shared")),
+    });
+    expect(linked?.files.map((file) => file.path)).toEqual(["/skills/linked/SKILL.md"]);
+  });
+
+  it.skipIf(process.platform === "win32")("skips broken links and links to files, logging them", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "skill-links-"));
+    const file = join(dir, "SKILL.md.txt");
+    await writeFile(file, "---\nname: file\ndescription: A file, not a folder.\n---\n");
+    await symlink(file, join(dir, "file-link"));
+    await symlink(join(dir, "missing"), join(dir, "broken-link"));
+
+    const logs: string[] = [];
+    const catalog = await loadUserSkills(dir, (msg) => logs.push(msg));
+    expect([...catalog.keys()]).toEqual([]);
+    expect(logs.filter((line) => line.includes("does not resolve to a directory"))).toHaveLength(2);
   });
 });
 
