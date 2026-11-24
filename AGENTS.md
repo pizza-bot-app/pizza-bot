@@ -83,11 +83,13 @@ frontend consumes them through the `@langchain/langgraph-sdk`
 - **Model providers**: `packages/inference-providers` (one adapter per provider
   under `src/providers/`, with flat files except for Bedrock's multi-file shim in
   `src/providers/bedrock/`).
-- **Agent definition**: `packages/core/src/agent.ts` (`pizzaBotSystemPrompt` + the
-  single `PIZZA_BOT_AGENT` orchestrator). Capabilities come from skills under
-  `skills/<id>/SKILL.md`, projected into delegatable subagents by
-  `resolveSkillSubagents` and seeded into run state by `buildSkillSeed` /
-  `withSkillSeed` (`runtime-langgraph/src/index.ts`).
+- **Orchestrator and subagents**: `packages/core/src/agent.ts`
+  (`pizzaBotSystemPrompt` + the single `PIZZA_BOT_AGENT` orchestrator). Specialists
+  are agent definitions (`agents/<id>.md`, types in `core/src/agent-definition.ts`,
+  loader in `plugin-sdk/src/agent-catalog.ts`) compiled into DeepAgents subagents by
+  `resolveAgentSubagents` (`runtime-langgraph/src/index.ts`). Skills
+  (`skills/<id>/SKILL.md`) load through DeepAgents' native skills middleware from a
+  read-only `/skills/` backend route (`runtime-langgraph/src/backend.ts`).
 
 ## Testing
 

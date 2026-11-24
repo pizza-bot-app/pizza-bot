@@ -15,8 +15,8 @@ import {
 } from "./skill-catalog.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const EXAMPLE_ROOT = resolve(__dirname, "../../../examples/plugins/mcp-status");
-const MANIFEST = resolve(EXAMPLE_ROOT, ".claude-plugin/plugin.json");
+const WORKSPACE_ROOT = resolve(__dirname, "../../../plugins/google-workspace");
+const MANIFEST = resolve(WORKSPACE_ROOT, ".claude-plugin/plugin.json");
 const BUILTIN_SKILLS_DIR = resolve(__dirname, "../../../skills");
 
 describe("loadSkillCatalog", () => {
@@ -24,22 +24,22 @@ describe("loadSkillCatalog", () => {
     const loader = new FsPluginLoader();
     const reg = new ContributionRegistry();
     const manifest = await loader.readManifest(MANIFEST);
-    await loader.load(manifest, EXAMPLE_ROOT, reg);
+    await loader.load(manifest, WORKSPACE_ROOT, reg);
 
     const catalog = await loadSkillCatalog(reg);
-    const skill = catalog.get("health-report");
+    const skill = catalog.get("calendar");
     expect(skill).toBeDefined();
-    expect(skill!.name).toBe("health-report");
-    expect(skill!.description).toMatch(/health report/i);
+    expect(skill!.name).toBe("calendar");
+    expect(skill!.description).toMatch(/calendar/i);
     expect(skill!.source).toBe("plugin");
-    expect(skill!.pluginName).toBe("mcp-status");
+    expect(skill!.pluginName).toBe("google-workspace");
 
-    const skillMd = skill!.files.find((f) => f.path === "/skills/health-report/SKILL.md");
+    const skillMd = skill!.files.find((f) => f.path === "/skills/calendar/SKILL.md");
     expect(skillMd).toBeDefined();
     // Line ending is the checkout's, not the repo's: core.autocrlf yields CRLF.
     expect(skillMd!.content).toEqual(expect.stringMatching(/^---\r?\n/));
     expect(skillMd!.mimeType).toBe("text/markdown");
-    expect(skill!.files[0]!.path).toBe("/skills/health-report/SKILL.md");
+    expect(skill!.files[0]!.path).toBe("/skills/calendar/SKILL.md");
   });
 
   it("skips a skill whose SKILL.md has no description (no routing signal)", async () => {
@@ -73,7 +73,7 @@ describe("loadSkillCatalog", () => {
     ]);
   });
 
-  it("loads declared tools and their HITL policy from skill frontmatter", async () => {
+  it("ignores tool grants in skill frontmatter and says where they belong", async () => {
     const dir = await mkdtemp(join(tmpdir(), "skill-cat-"));
     const skillDir = join(dir, "mailer");
     await mkdir(skillDir, { recursive: true });
@@ -101,13 +101,11 @@ describe("loadSkillCatalog", () => {
     const reg = new ContributionRegistry();
     reg.registerSkill("test", dir, "mailer", skillDir);
 
-    const skill = (await loadSkillCatalog(reg)).get("mailer")!;
-    expect(skill.declaredTools).toEqual(["mcp:outlook:send_email"]);
-    expect(skill.interruptOn).toEqual({
-      "mcp:outlook:send_email": {
-        allowedDecisions: ["approve", "edit", "reject"],
-      },
-    });
+    const logs: string[] = [];
+    const skill = (await loadSkillCatalog(reg, (m) => logs.push(m))).get("mailer")!;
+    expect(skill).not.toHaveProperty("declaredTools");
+    expect(skill).not.toHaveProperty("interruptOn");
+    expect(logs.some((l) => l.includes("tool grants belong to an agent"))).toBe(true);
   });
 
   it("recursively preserves scripts, references, and assets relative paths", async () => {
@@ -324,22 +322,6 @@ describe("loadUserSkills", () => {
     expect((await loadUserSkills(join(tmpdir(), "definitely-not-here-xyz"))).size).toBe(0);
   });
 
-  it("parses frontmatter `tools:` into declaredTools", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "skill-cat-"));
-    const skillDir = join(dir, "mailer");
-    await mkdir(skillDir, { recursive: true });
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: mailer\ndescription: Send mail.\ntools:\n  - mcp:outlook:send_email\n  - mcp:cal:create_event\n---\n# Mailer\n",
-    );
-
-    const catalog = await loadUserSkills(dir);
-    expect(catalog.get("mailer")?.declaredTools).toEqual([
-      "mcp:outlook:send_email",
-      "mcp:cal:create_event",
-    ]);
-  });
-
   it("skips a skill using the reserved top-level agent id, logging why", async () => {
     const dir = await seedUserSkills([
       { id: "pizza-bot", frontmatter: "name: pizza-bot\ndescription: Tries to shadow the orchestrator." },
@@ -348,16 +330,6 @@ describe("loadUserSkills", () => {
     const catalog = await loadUserSkills(dir, (m) => logs.push(m));
     expect(catalog.has("pizza-bot")).toBe(false);
     expect(logs.some((l) => l.includes("pizza-bot") && l.includes("reserved"))).toBe(true);
-  });
-
-  it("defaults declaredTools to [] when no tools/mcp key is present", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "skill-cat-"));
-    const skillDir = join(dir, "plain");
-    await mkdir(skillDir, { recursive: true });
-    await writeFile(join(skillDir, "SKILL.md"), "---\nname: plain\ndescription: Plain skill.\n---\n# Plain\n");
-
-    const catalog = await loadUserSkills(dir);
-    expect(catalog.get("plain")?.declaredTools).toEqual([]);
   });
 
   // A junction needs no privilege on Windows; other platforms ignore the type.
@@ -410,7 +382,6 @@ describe("loadBuiltinSkills", () => {
     expect(guide).toMatchObject({
       name: "Pizza Bot Guide",
       source: "builtin",
-      declaredTools: [],
     });
     expect(guide?.files.map((file) => file.path)).toEqual(
       expect.arrayContaining([
@@ -425,8 +396,8 @@ describe("loadBuiltinSkills", () => {
 describe("mergeSkillCatalogs", () => {
   const entry = (id: string, source: SkillCatalogEntry["source"]): SkillCatalogEntry =>
     source === "plugin"
-      ? { id, name: id, description: "d", source, pluginName: "p", files: [], declaredTools: [], interruptOn: {} }
-      : { id, name: id, description: "d", source, files: [], declaredTools: [], interruptOn: {} };
+      ? { id, name: id, description: "d", source, pluginName: "p", files: [] }
+      : { id, name: id, description: "d", source, files: [] };
 
   it("unions plugin + user skills", () => {
     const plugin: SkillCatalog = new Map([["a", entry("a", "plugin")]]);

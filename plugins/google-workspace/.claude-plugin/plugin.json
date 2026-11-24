@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "engines": { "pizzaBot": ">=1.0.0 <2.0.0" },
   "capabilities": {
-    "required": ["mcp-servers/v1", "skills/v1"]
+    "required": ["mcp-servers/v1", "agents/v1", "skills/v1"]
   },
   "displayName": "Google Workspace",
   "description": "Read and draft Gmail, and read and schedule Google Calendar events.",
@@ -12,5 +12,6 @@
   "license": "Apache-2.0",
   "keywords": ["gmail", "calendar", "google", "email"],
   "skills": "./skills/",
+  "agents": "./agents/",
   "mcpServers": "./.mcp.json"
 }

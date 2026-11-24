@@ -1,7 +1,7 @@
-/** Stores installation-owned enablement overrides for skills and MCP servers. */
+/** Stores installation-owned enablement overrides for skills, agents, and MCP servers. */
 import Database from "better-sqlite3";
 
-export type CapabilityKind = "skill" | "mcp";
+export type CapabilityKind = "skill" | "agent" | "mcp";
 
 export interface CapabilityPreferenceKey {
   kind: CapabilityKind;

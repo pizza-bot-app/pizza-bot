@@ -3,24 +3,22 @@ import { describe, expect, it } from "vitest";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { MemorySaver } from "@langchain/langgraph";
-import type { SkillCatalog } from "@pizza-bot/core";
+import type { AgentCatalog } from "@pizza-bot/core";
 import { createPizzaBotAgent } from "./index.js";
 import { SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY } from "deepagents";
 import { TASK_USAGE_NOTES } from "./task-dispatch-middleware.js";
 
-const skills: SkillCatalog = new Map([[
+const agents: AgentCatalog = new Map([[
   "worker",
   {
     id: "worker",
     name: "Worker",
     description: "Handles delegated work.",
+    systemPrompt: "Complete the task.",
     source: "user",
     declaredTools: [],
+    skills: [],
     interruptOn: {},
-    files: [{
-      path: "/skills/worker/SKILL.md",
-      content: "---\nname: worker\ndescription: Handles delegated work.\n---\n\nComplete the task.",
-    }],
   },
 ]]);
 
@@ -73,7 +71,7 @@ async function dispatch(
   const model = new DispatchingModel(description);
   const agent = await createPizzaBotAgent("Help the user.", {
     model,
-    skills,
+    agents,
     checkpointer: new MemorySaver(),
   });
   const frames: unknown[] = [];
@@ -162,11 +160,11 @@ class SchemaDispatchingModel extends BaseChatModel<Record<string, never>> {
 
 describe("subagent dispatch with a response schema", () => {
   // eval's task() carries its responseSchema under this configurable key.
-  it("rebuilds the skill worker with the requested response format and returns its answer", async () => {
+  it("rebuilds the worker with the requested response format and returns its answer", async () => {
     const model = new SchemaDispatchingModel({});
     const agent = await createPizzaBotAgent("Help the user.", {
       model,
-      skills,
+      agents,
       checkpointer: new MemorySaver(),
     });
     const threadId = `schema_${Math.random().toString(36).slice(2)}`;

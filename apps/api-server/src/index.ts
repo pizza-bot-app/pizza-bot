@@ -15,6 +15,7 @@ import {
   skillRoutes,
 } from "./routes-skills.js";
 import { mcpRoutes } from "./routes-mcp.js";
+import { agentRoutes } from "./routes-agents.js";
 import { memoryRoutes } from "./routes-memories.js";
 import { settingsRoutes } from "./routes-settings.js";
 import { lifecycleRoutes } from "./routes-lifecycle.js";
@@ -228,6 +229,7 @@ export function buildApp(
   app.route("/", langGraphRoutes(host));
   app.route("/", triggerRoutes(host.triggers, host.triggerService));
   app.route("/", skillRoutes(host));
+  app.route("/", agentRoutes(host));
   app.route("/", mcpRoutes(host));
   app.route("/", memoryRoutes(host));
   app.route("/", settingsRoutes(host));

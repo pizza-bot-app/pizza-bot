@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "engines": { "pizzaBot": ">=1.0.0 <2.0.0" },
   "capabilities": {
-    "required": ["mcp-servers/v1", "skills/v1"]
+    "required": ["mcp-servers/v1", "agents/v1"]
   },
   "displayName": "Playwright Browser Automation",
   "description": "Browser automation and inspection through Playwright MCP.",
@@ -12,6 +12,6 @@
   "homepage": "https://github.com/microsoft/playwright-mcp",
   "license": "Apache-2.0",
   "keywords": ["browser", "automation", "playwright", "testing"],
-  "skills": "./skills/",
+  "agents": "./agents/",
   "mcpServers": "./.mcp.json"
 }

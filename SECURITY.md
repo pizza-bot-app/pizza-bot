@@ -154,9 +154,9 @@ use a SQLite-aware snapshot when backing up live databases.
   executable web-UI contribution kind. A plugin's MCP entry can still name an
   executable command, so installing that plugin also trusts the processes it
   launches.
-- **Skills can direct tool use.** A skill's `SKILL.md` becomes a worker's system
-  prompt and can steer the model toward its declared tools. Review skills from
-  sources you don't control before installing them.
+- **Agents and skills can direct tool use.** An agent's prompt, and any skill it
+  reads, can steer the model toward the agent's declared tools. Review agents and
+  skills from sources you don't control before installing them.
 
 Treat installing an MCP server, a plugin, or a user skill as running code (or
 directing the model to) on your machine. The ZIP import confirmation is a trust

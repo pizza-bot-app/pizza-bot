@@ -2,15 +2,15 @@
 import {
   createDeepAgent,
   createFilesystemMiddleware,
+  createSkillsMiddleware,
   registerHarnessProfile,
+  type AnyBackendProtocol,
   type SubAgent,
 } from "deepagents";
 import {
-  collectSkillFiles,
-  normalizeSkillFile,
+  collectSkillPaths,
   resolveToolReferences,
-  splitSkillMd,
-  SKILL_MD,
+  type AgentCatalog,
   type RuntimeDeps,
   type AgentHandle,
   type RunInput,
@@ -20,13 +20,11 @@ import {
   type ThreadTask,
   type StateHistoryOptions,
   type Checkpoint,
-  type SkillCatalog,
-  type SkillCatalogEntry,
   type Logger,
   type ToolCatalog,
   type HitlDecision,
-  type SkillInterruptConfig,
-  type SkillInterruptOn,
+  type InterruptConfig,
+  type InterruptOnPolicy,
   BUILTIN_EVAL_TOOL_REF,
   DEFAULT_SETTINGS,
 } from "@pizza-bot/core";
@@ -100,9 +98,9 @@ const DEFAULT_HITL_DECISIONS: readonly HitlDecision[] = ["approve", "edit", "rej
 
 /** The decisions both configs allow; never empty, so an overlap can't silently stop asking. */
 function narrowInterruptConfig(
-  a: SkillInterruptConfig,
-  b: SkillInterruptConfig,
-): SkillInterruptConfig {
+  a: InterruptConfig,
+  b: InterruptConfig,
+): InterruptConfig {
   if (a === false) return b;
   if (b === false) return a;
   if (a === true && b === true) return true;
@@ -120,13 +118,13 @@ function narrowInterruptConfig(
  * asks first if any ref covering it does; `false` never cancels another ref's ask.
  */
 function qualifyInterruptOn(
-  interruptOn: SkillInterruptOn | undefined,
+  interruptOn: InterruptOnPolicy | undefined,
   catalog: ToolCatalog | undefined,
   who: string,
   logger?: Logger,
-): SkillInterruptOn | undefined {
+): InterruptOnPolicy | undefined {
   if (!interruptOn) return interruptOn;
-  const out: SkillInterruptOn = {};
+  const out: InterruptOnPolicy = {};
   for (const [ref, config] of Object.entries(interruptOn)) {
     if (config === false) continue;
     if (!ref.startsWith("mcp:")) {
@@ -183,7 +181,7 @@ const EVAL_PTC_TOOLS = [
 export function codeInterpreterOptions(hasSubagents: boolean) {
   return {
     // Only MCP tools are withheld: reaching them from code would bypass the HITL
-    // approval a skill declares through `interruptOn`.
+    // approval an agent declares through `interruptOn`.
     ptc: [...EVAL_PTC_TOOLS] as string[],
     // Deliberately above the upstream default: the sandbox exists so bulk data
     // stays inside it and only a distillate returns through this string.
@@ -239,58 +237,60 @@ function resolveToolRefs(
 }
 
 /**
- * Derive one isolated subagent from each skill. The skill catalog is the only
- * source of subagent identity, instructions, tools, and HITL policy.
+ * Compile one isolated subagent per ready agent definition. The definition is
+ * the subagent's whole identity: prompt, model, tool surface, skills, approvals.
  */
-export async function resolveSkillSubagents(
-  skills: SkillCatalog | undefined,
+export async function resolveAgentSubagents(
+  agents: AgentCatalog | undefined,
   deps: RuntimeDeps,
+  backend: AnyBackendProtocol,
 ): Promise<readonly SubAgent[] | undefined> {
-  if (!skills?.size) return undefined;
+  if (!agents?.size) return undefined;
   const logger = deps.logger;
   const limits = {
     ...AGENT_RUN_LIMITS.subagent,
     toolCalls: deps.maxSubagentToolCalls ?? AGENT_RUN_LIMITS.subagent.toolCalls,
   };
-  const entries = [...skills.values()];
-  const resolved = await Promise.all(entries.map(async (entry) => {
+  const resolved = await Promise.all([...agents.values()].map(async (agent) => {
     try {
-      const middleware: unknown[] = [
+      const model = deps.agentModels?.get(agent.id) ?? deps.model;
+      if (!model) throw new Error("no model resolved");
+      // Declarative subagents bypass createDeepAgent's per-subagent defaults, so
+      // filesystem and skills middleware are mounted here, on the shared backend.
+      const middleware: unknown[] = [createFilesystemMiddleware({ backend })];
+      const skillSources = collectSkillPaths(agent.skills, deps.skills);
+      if (skillSources.length > 0) {
+        middleware.push(createSkillsMiddleware({ backend, sources: skillSources }));
+      }
+      middleware.push(
         ...runLimitMiddleware(limits),
         subagentFinalizationMiddleware(AGENT_RUN_LIMITS.subagent.modelCalls),
         structuredResponseMiddleware(),
         toolErrorRecoveryMiddleware(),
         outputTruncationMiddleware(),
         currentDateTimeMiddleware(),
-      ];
+      );
       if (deps.localFolders) {
         middleware.push(localFolderContextMiddleware(deps.localFolders));
       }
-      if (hasEvalTool(entry.declaredTools)) {
+      if (hasEvalTool(agent.declaredTools)) {
         middleware.push(await codeInterpreterMiddleware(false));
       }
-      const tools = resolveToolRefs(
-        mcpToolRefs(entry.declaredTools),
-        deps,
-        `skill "${entry.id}"`,
-      );
-      const interruptOn = qualifyInterruptOn(
-        entry.interruptOn,
-        deps.catalog,
-        `skill "${entry.id}"`,
-        logger,
-      );
+      const who = `agent "${agent.id}"`;
+      const tools = resolveToolRefs(mcpToolRefs(agent.declaredTools), deps, who);
+      const interruptOn = qualifyInterruptOn(agent.interruptOn, deps.catalog, who, logger);
       return {
-        name: entry.id,
-        description: entry.description,
-        systemPrompt: skillBody(entry) || entry.description,
+        name: agent.id,
+        description: agent.description,
+        systemPrompt: agent.systemPrompt || agent.description,
+        model,
         tools,
         middleware,
         ...(interruptOn && Object.keys(interruptOn).length > 0 ? { interruptOn } : {}),
       } as unknown as SubAgent;
     } catch (err) {
       logger?.warn(
-        `[skills] subagent "${entry.id}" disabled: ${err instanceof Error ? err.message : String(err)}`,
+        `[agents] subagent "${agent.id}" disabled: ${err instanceof Error ? err.message : String(err)}`,
       );
       return null;
     }
@@ -299,53 +299,24 @@ export async function resolveSkillSubagents(
   return usable.length ? usable : undefined;
 }
 
-function skillBody(entry: SkillCatalogEntry): string {
-  const skillMd = entry.files.find((file) => file.path.endsWith(`/${SKILL_MD}`));
-  if (!skillMd) return "";
-  const content = normalizeSkillFile(skillMd).content;
-  return typeof content === "string" ? splitSkillMd(content).body.trim() : "";
-}
-
-export interface StateFile {
-  content: string | Uint8Array;
-  mimeType: string;
-  created_at: string;
-  modified_at: string;
-}
-
-/**
- * Materialize equipped skill files in shared run state for explicit reference reads.
- */
-export function buildSkillSeed(deps: RuntimeDeps): Record<string, StateFile> {
-  const contentByPath = collectSkillFiles(
-    deps.skills ? [...deps.skills.keys()] : [],
-    deps.skills,
-  );
-  const now = new Date().toISOString();
-  const seed: Record<string, StateFile> = {};
-  for (const [path, { content, mimeType }] of Object.entries(contentByPath)) {
-    seed[path] = { content, mimeType, created_at: now, modified_at: now };
-  }
-  return seed;
-}
-
-/** Seed message turns only; resume commands use skills already in persisted state. */
-export function withSkillSeed(
+/** Message turns force a skills reload so catalog edits reach existing threads. */
+export function withSkillReload(
   input: { messages: unknown[] } | object,
-  seed: Record<string, StateFile> | undefined,
-): { messages: unknown[]; files?: Record<string, StateFile> } | object {
-  if (!seed || !("messages" in input)) return input;
-  return { ...input, files: seed };
+  reload: boolean,
+): object {
+  if (!reload || !("messages" in input)) return input;
+  return { ...input, skillsMetadata: null };
 }
 
 interface AssembledAgent {
   compiled: unknown;
-  skillSeed?: Record<string, StateFile>;
+  reloadsSkills: boolean;
 }
 
 async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promise<AssembledAgent> {
   // DeepAgents builds one backend shared by the orchestrator and subagents.
   const backend = buildBackend({
+    ...(deps.skills ? { skills: deps.skills } : {}),
     ...(deps.memoriesDir ? { memoriesDir: deps.memoriesDir } : {}),
     ...(deps.memoryEnabled ? { memoryEnabled: deps.memoryEnabled } : {}),
     ...(deps.localFolders ? { localFolders: deps.localFolders } : {}),
@@ -373,23 +344,9 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   }
 
   const model = deps.model;
-  const resolvedSubagents = await resolveSkillSubagents(deps.skills, deps);
   // Declarative, not compiled: DeepAgents rebuilds a declarative spec per call to
   // apply an eval task()'s responseSchema, and rejects one for a compiled subagent.
-  const subagents = resolvedSubagents?.map((subagent): SubAgent => {
-    if (!model) {
-      throw new Error("Pizza Bot requires a resolved model before building subagents.");
-    }
-    return {
-      ...subagent,
-      model,
-      tools: subagent.tools ?? [],
-      middleware: [
-        createFilesystemMiddleware({ backend }),
-        ...(subagent.middleware ?? []),
-      ],
-    };
-  });
+  const subagents = await resolveAgentSubagents(deps.agents, deps, backend);
 
   // The roster goes to this middleware alone, never to createDeepAgent: it replaces
   // DeepAgents' own by name, so a roster given there would only gain upstream's
@@ -412,14 +369,11 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   if (model) params.model = model;
   if (deps.checkpointer) params.checkpointer = deps.checkpointer;
   if (deps.store) params.store = deps.store;
-
-  // Subagents receive their SKILL.md body as their system prompt; the seed retains
-  // sibling files without coaching the root to read skill instructions.
-  const skillSeed = buildSkillSeed(deps);
-  const hasSeed = Object.keys(skillSeed).length > 0;
+  const rootSkills = collectSkillPaths(deps.rootSkills, deps.skills);
+  if (rootSkills.length > 0) params.skills = rootSkills;
 
   const compiled = await createDeepAgent(params as never);
-  return { compiled, ...(hasSeed ? { skillSeed } : {}) };
+  return { compiled, reloadsSkills: rootSkills.length > 0 };
 }
 
 interface CompiledGraph extends ProtocolCapableGraph {
@@ -518,12 +472,11 @@ function snapshotTasks(snap: { tasks?: ReadonlyArray<RuntimeTask> }): ThreadTask
 class LangGraphAgent implements AgentHandle {
   constructor(
     private readonly compiled: CompiledGraph,
-    private readonly skillSeed?: Record<string, StateFile>,
+    private readonly reloadsSkills: boolean,
   ) {}
 
-  /** Stream native protocol frames, seeding skills only on message turns. */
   streamProtocol(input: RunInput, opts: RunOptions): AsyncIterable<ProtocolEvent> {
-    const lgInput = withSkillSeed(toLangGraphInput(input), this.skillSeed);
+    const lgInput = withSkillReload(toLangGraphInput(input), this.reloadsSkills);
     return streamProtocolEvents(this.compiled, lgInput, opts);
   }
 
@@ -596,23 +549,23 @@ class LangGraphAgent implements AgentHandle {
   }
 }
 
-/** Compile the static Pizza Bot graph and its skill-derived subagents. */
+/** Compile the Pizza Bot graph and one subagent per ready agent definition. */
 export async function createPizzaBotAgent(
   systemPrompt: string,
   deps: RuntimeDeps,
 ): Promise<LangGraphAgent> {
-  const requiresHitl = [...(deps.skills?.values() ?? [])]
-    .some((skill) =>
-      Object.entries(skill.interruptOn)
+  const requiresHitl = [...(deps.agents?.values() ?? [])]
+    .some((agent) =>
+      Object.entries(agent.interruptOn)
         .some(([ref, config]) => ref.startsWith("mcp:") && config !== false),
     );
   if (requiresHitl && !deps.checkpointer) {
     throw new Error(
-      "A skill declares interruptOn; a checkpointer is required for HITL but none was provided.",
+      "An agent declares interruptOn; a checkpointer is required for HITL but none was provided.",
     );
   }
-  const { compiled, skillSeed } = await assemblePizzaBot(systemPrompt, deps);
-  return new LangGraphAgent(compiled as CompiledGraph, skillSeed);
+  const { compiled, reloadsSkills } = await assemblePizzaBot(systemPrompt, deps);
+  return new LangGraphAgent(compiled as CompiledGraph, reloadsSkills);
 }
 
 export type { LangGraphAgent };
