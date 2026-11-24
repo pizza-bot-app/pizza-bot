@@ -1,4 +1,4 @@
-import type { SkillCatalogInfo, SkillBundle, SkillDraft, ToolCatalogInfo } from "@/api-client";
+import type { SkillCatalogInfo, SkillBundle, SkillDraft } from "@/api-client";
 import { useRef, useState, type ChangeEvent } from "react";
 import { BookOpen, LoaderCircle, Upload } from "lucide-react";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
@@ -11,6 +11,7 @@ import { useKeyedDoc } from "../../use-keyed-doc.js";
 import { L } from "../../lexicon.js";
 import { skillRemovalPresentation, skillUnlinkAction } from "./skill-actions.js";
 import { useAppToast } from "../AppToast.js";
+import { useAgentName } from "../agent-names.js";
 import {
   CapabilityEnablement,
   CapabilityStatusDot,
@@ -19,7 +20,6 @@ import {
 
 export interface SkillsModuleProps {
   skills: SkillCatalogInfo;
-  tools: ToolCatalogInfo;
   onCreate: (bundle: SkillBundle) => Promise<SkillBundle>;
   onImport: (file: File) => Promise<SkillBundle>;
   onUpdate: (id: string, bundle: SkillBundle) => Promise<SkillBundle>;
@@ -38,22 +38,15 @@ const matches = (s: SkillEntry, q: string) =>
   s.description.toLowerCase().includes(q);
 
 function skillVisualState(skill: SkillEntry): CapabilityVisualState {
-  if (!skill.enabled || skill.status === "disabled") return "disabled";
-  if (skill.status === "loading") return "loading";
-  if (skill.status === "unavailable") return "unavailable";
-  return "active";
+  return skill.enabled ? "active" : "disabled";
 }
 
 function skillStatusLabel(skill: SkillEntry): string {
-  if (!skill.enabled || skill.status === "disabled") return "Disabled";
-  if (skill.status === "loading") return skill.statusDetail ?? "Loading";
-  if (skill.status === "unavailable") return skill.statusDetail ?? "Unavailable";
-  return "Ready";
+  return skill.enabled ? "Enabled" : "Disabled";
 }
 
 export function SkillsModule({
   skills,
-  tools,
   onCreate,
   onImport,
   onUpdate,
@@ -64,6 +57,7 @@ export function SkillsModule({
   onOpenPlugin,
 }: SkillsModuleProps) {
   const catalog = skills.skills;
+  const agentName = useAgentName();
   return (
     <ResourceModule
       items={catalog}
@@ -97,14 +91,6 @@ export function SkillsModule({
               <span className="resource-row-line1">
                 <span className="resource-row-name">{s.name}</span>
                 <span className="resource-row-badges">
-                  {s.status === "loading" || s.status === "unavailable" ? (
-                    <span
-                      className={`skill-status ${s.status}`}
-                      title={s.statusDetail}
-                    >
-                      {s.status === "loading" ? "Loading" : "Unavailable"}
-                    </span>
-                  ) : null}
                   <ProvenanceBadge provenance={s.source} overrides={s.overrides} />
                   <CapabilityStatusDot
                     state={skillVisualState(s)}
@@ -113,6 +99,11 @@ export function SkillsModule({
                 </span>
               </span>
               <span className="resource-row-desc">{s.description}</span>
+              {s.usedBy?.length ? (
+                <span className="resource-row-meta">
+                  Used by {s.usedBy.map(agentName).join(", ")}
+                </span>
+              ) : null}
             </span>
           )}
         />
@@ -120,7 +111,6 @@ export function SkillsModule({
       renderDetail={(args) => (
         <SkillDetail
           {...args}
-          tools={tools}
           onCreate={onCreate}
           onUpdate={onUpdate}
           onSetEnabled={onSetEnabled}
@@ -196,7 +186,6 @@ function SkillDetail({
   setSelection,
   backToList,
   confirmAction,
-  tools,
   onCreate,
   onUpdate,
   onSetEnabled,
@@ -207,8 +196,9 @@ function SkillDetail({
 }: ResourceDetailArgs<SkillEntry> &
   Pick<
     SkillsModuleProps,
-    "tools" | "onCreate" | "onUpdate" | "onSetEnabled" | "onDelete" | "onGetBundle" | "onGenerate" | "onOpenPlugin"
+    "onCreate" | "onUpdate" | "onSetEnabled" | "onDelete" | "onGetBundle" | "onGenerate" | "onOpenPlugin"
   >) {
+  const agentName = useAgentName();
   const [savedRevision, setSavedRevision] = useState(0);
   const bundle = useKeyedDoc(
     selected && selection?.mode !== "new" ? selected.id : null,
@@ -227,33 +217,12 @@ function SkillDetail({
       setSelection({ mode: "view", id: b.id });
     }
   };
-  const missingDependencies =
-    selected?.mcpDependencies.filter((dependency) => dependency.status === "missing") ?? [];
-  const disabledDependencies =
-    selected?.mcpDependencies.filter((dependency) => dependency.status === "disabled") ?? [];
-  const dependencyActions = [
-    ...(missingDependencies.length > 0
-      ? [`Configure ${missingDependencies.map((dependency) => dependency.id).join(", ")} first.`]
-      : []),
-    ...(disabledDependencies.length > 0
-      ? [`Enable ${disabledDependencies.map((dependency) => dependency.id).join(", ")} first.`]
-      : []),
-  ];
-  const blockedReason =
-    selected && !selected.enabled && dependencyActions.length > 0
-      ? dependencyActions.join(" ")
-      : undefined;
-  const stateDescription =
-    selected?.enabled && selected.status !== "ready"
-      ? selected.statusDetail ?? "Enabled, but currently unavailable"
-      : undefined;
 
   if (selection?.mode === "new") {
     return (
       <SkillEditor
         key="new"
         skill={null}
-        tools={tools}
         onSave={handleSave}
         onGenerate={onGenerate}
         onCancel={() => setSelection(null)}
@@ -279,7 +248,6 @@ function SkillDetail({
       <SkillEditor
         key={bundle.id}
         skill={bundle}
-        tools={tools}
         customizing={customizing}
         onSave={handleSave}
         onGenerate={onGenerate}
@@ -314,15 +282,17 @@ function SkillDetail({
     <SkillView
       skill={selected}
       bundle={bundle}
-      tools={tools}
       visualState={skillVisualState(selected)}
       statusLabel={skillStatusLabel(selected)}
       enablement={
         <CapabilityEnablement
           enabled={selected.enabled}
           noun="Skill"
-          blockedReason={blockedReason}
-          stateDescription={stateDescription}
+          {...(selected.usedBy?.length
+            ? {
+                stateDescription: `${selected.enabled ? "Available" : "Not available"} to ${selected.usedBy.map(agentName).join(", ")}`,
+              }
+            : {})}
           onChange={(enabled) => onSetEnabled(selected.id, enabled)}
         />
       }

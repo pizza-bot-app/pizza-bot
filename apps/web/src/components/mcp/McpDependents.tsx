@@ -1,28 +1,28 @@
 import type { McpServerRow } from "@/api-client";
-import { BookOpen, LockKeyhole } from "lucide-react";
+import { Bot, LockKeyhole } from "lucide-react";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
 
 export function McpDependents({
-  skills,
+  agents,
 }: {
-  skills: McpServerRow["dependentSkills"];
+  agents: McpServerRow["dependentAgents"];
 }) {
-  if (skills.length === 0) return null;
+  if (agents.length === 0) return null;
   return (
     <section className="resource-card-section mcp-dependents">
       <h3 className="resource-card-section-title">
-        <BookOpen size={14} /> Required by skills
+        <Bot size={14} /> Required by agents
       </h3>
       <ul className="mcp-dependent-list">
-        {skills.map((skill) => (
-          <li key={skill.id} className="mcp-dependent-row">
+        {agents.map((agent) => (
+          <li key={agent.id} className="mcp-dependent-row">
             <span className="mcp-dependent-name">
-              {skill.enabled && <LockKeyhole size={12} aria-label="Prevents disabling this server" />}
-              {skill.name}
+              {agent.enabled && <LockKeyhole size={12} aria-label="Prevents disabling this server" />}
+              {agent.name}
             </span>
             <span className="mcp-dependent-meta">
-              <span>{skill.enabled ? "Enabled" : "Disabled"}</span>
-              <ProvenanceBadge provenance={skill.source} />
+              <span>{agent.enabled ? "Enabled" : "Disabled"}</span>
+              <ProvenanceBadge provenance={agent.source} />
             </span>
           </li>
         ))}

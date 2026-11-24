@@ -15,10 +15,7 @@ describe("SkillEditor", () => {
             body: "Use the notes tools.",
             files: [],
             source: "user",
-            declaredTools: [],
-            interruptOn: {},
           }}
-          tools={{ builtins: [], servers: [] }}
           onSave={vi.fn()}
           onGenerate={vi.fn()}
           customizing
@@ -31,77 +28,15 @@ describe("SkillEditor", () => {
     expect(html).toContain("Saving creates your own copy of this skill.");
   });
 
-  it("labels each granted tool with its source and a pattern with its match count", () => {
+  it("offers no tool grants, which belong to agents", () => {
     const html = renderToStaticMarkup(
       <AppToastProvider>
-        <SkillEditor
-          skill={{
-            id: "files",
-            name: "Files",
-            description: "Reads files.",
-            body: "Read files.",
-            files: [],
-            source: "user",
-            declaredTools: ["builtin:eval", "mcp:fs:read_file", "mcp:fs:list_*"],
-            interruptOn: {},
-          }}
-          tools={{
-            builtins: [{ ref: "builtin:eval", name: "eval" }],
-            servers: [
-              {
-                server: "fs",
-                wildcard: "mcp:fs:*",
-                tools: ["read_file", "list_directory", "list_allowed_directories"].map((name) => ({
-                  ref: `mcp:fs:${name}`,
-                  name,
-                })),
-              },
-            ],
-          }}
-          onSave={vi.fn()}
-          onGenerate={vi.fn()}
-          onCancel={vi.fn()}
-        />
+        <SkillEditor skill={null} onSave={vi.fn()} onGenerate={vi.fn()} onCancel={vi.fn()} />
       </AppToastProvider>,
     );
 
-    expect(html).toMatch(/<code>eval<\/code><span class="tool-source">Built-in<\/span>/);
-    expect(html).toMatch(/<code>read_file<\/code><span class="tool-source">fs<\/span>/);
-    expect(html).toMatch(/<code>list_\*<\/code><span class="tool-source">fs<\/span><span class="tool-chip-count">2 tools<\/span>/);
-    expect(html).toContain('aria-label="Ask first before running mcp:fs:read_file"');
-    expect(html).not.toContain(">Approval<");
-  });
-
-  it("locks Ask first on for a tool an asking wildcard already covers", () => {
-    const html = renderToStaticMarkup(
-      <AppToastProvider>
-        <SkillEditor
-          skill={{
-            id: "files",
-            name: "Files",
-            description: "Reads files.",
-            body: "Read files.",
-            files: [],
-            source: "user",
-            declaredTools: ["mcp:fs:*", "mcp:fs:read_file"],
-            interruptOn: { "mcp:fs:*": true },
-          }}
-          tools={{
-            builtins: [],
-            servers: [{ server: "fs", wildcard: "mcp:fs:*", tools: [{ ref: "mcp:fs:read_file", name: "read_file" }] }],
-          }}
-          onSave={vi.fn()}
-          onGenerate={vi.fn()}
-          onCancel={vi.fn()}
-        />
-      </AppToastProvider>,
-    );
-
-    expect(html).toMatch(/aria-label="Ask first before running mcp:fs:\*" checked=""\/>/);
-    expect(html).toMatch(
-      /aria-label="Ask first before running mcp:fs:read_file, on because mcp:fs:\* pauses for your approval before this tool runs" disabled="" checked=""\/>/,
-    );
-    expect(html).toContain('title="On because mcp:fs:* pauses for your approval before this tool runs"');
+    expect(html).toContain("SKILL.md body");
+    expect(html).not.toContain("Add a tool");
+    expect(html).not.toContain("Ask first");
   });
 });
-

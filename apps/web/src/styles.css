@@ -1608,6 +1608,7 @@ button.sidebar-folder-row:hover,
   font-size: 12.5px; color: var(--dim); line-height: 1.4;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+.resource-row-meta { font-size: 11.5px; color: var(--dim); }
 
 .resource-card { display: flex; flex-direction: column; gap: 24px; max-width: 720px; }
 .resource-card-head { display: flex; align-items: flex-start; gap: 16px; }
@@ -1674,10 +1675,10 @@ button.sidebar-folder-row:hover,
 .capability-status-dot.unavailable { background: var(--danger, #e5484d); }
 .capability-status-dot.loading { background: var(--brand); }
 .capability-status-dot.disabled { background: var(--dim); }
-.skill-status {
+.capability-status-text {
   font-size: 10px; line-height: 1; font-weight: 600; color: var(--dim);
 }
-.skill-status.unavailable { color: var(--danger, #e5484d); }
+.capability-status-text.unavailable { color: var(--danger, #e5484d); }
 .mcp-mono { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
 .mcp-transport-toggle { display: flex; gap: 8px; }
 .mcp-transport-toggle .btn-secondary.active {

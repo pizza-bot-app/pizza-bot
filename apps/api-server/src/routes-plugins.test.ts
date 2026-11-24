@@ -105,6 +105,7 @@ describe("plugin routes", () => {
           },
           removable: false,
           contributions: {
+            agents: 0,
             skills: 1,
             mcpServers: 1,
           },
@@ -180,7 +181,7 @@ describe("plugin routes", () => {
           status: "incompatible",
           detail: "Unsupported plugin API version",
           removable: true,
-          contributions: { skills: 0, mcpServers: 0 },
+          contributions: { agents: 0, skills: 0, mcpServers: 0 },
         },
         {
           name: "paused-plugin",
