@@ -4,7 +4,8 @@ import { dirname, resolve } from "node:path";
 import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SkillCatalog, SkillCatalogEntry } from "@pizza-bot/core";
+import { composeSkillMd } from "@pizza-bot/core";
+import type { SkillCatalog, SkillCatalogEntry, SkillInterruptOn } from "@pizza-bot/core";
 import { ContributionRegistry } from "./registry.js";
 import { FsPluginLoader } from "./loader.js";
 import {
@@ -83,14 +84,9 @@ describe("loadSkillCatalog", () => {
         "---",
         "name: Mailer",
         "description: Sends reviewed mail.",
-        "tools:",
-        "  - mcp:outlook:send_email",
-        "interruptOn:",
-        "  mcp:outlook:send_email:",
-        "    allowedDecisions:",
-        "      - approve",
-        "      - edit",
-        "      - reject",
+        "metadata:",
+        "  pizza-bot-tools: mcp:outlook:send_email",
+        "  pizza-bot-interrupt-on: mcp:outlook:send_email",
         "---",
         "",
         "# Mailer",
@@ -261,17 +257,25 @@ describe("loadUserSkills", () => {
     expect(logs.some((l) => l.includes("nodesc"))).toBe(true);
   });
 
-  it.each(["interruptOn", "tools"])("skips malformed %s YAML in every catalog source", async (field) => {
+  it.each([
+    [
+      "interruptOn",
+      "tools: [mcp:mcp-status:get_mcp_status]\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true\n  note: a: b",
+    ],
+    [
+      "tools",
+      "tools: [mcp:mcp-status:get_mcp_status\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true",
+    ],
+    [
+      "metadata",
+      "metadata:\n  pizza-bot-tools: mcp:mcp-status:get_mcp_status\n" +
+        "  pizza-bot-interrupt-on: \"mcp:mcp-status:get_mcp_status\n  note: a: b",
+    ],
+  ])("skips malformed %s YAML in every catalog source", async (_field, policy) => {
     const dir = await seedUserSkills([
       {
         id: "hitl-probe",
-        frontmatter: [
-          "name: hitl-probe",
-          "description: Probe.",
-          field === "interruptOn"
-            ? "tools: [mcp:mcp-status:get_mcp_status]\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true\n  note: a: b"
-            : "tools: [mcp:mcp-status:get_mcp_status\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true",
-        ].join("\n"),
+        frontmatter: ["name: hitl-probe", "description: Probe.", policy].join("\n"),
         body: "# Probe",
       },
       { id: "valid", frontmatter: "name: valid\ndescription: Valid skill." },
@@ -300,7 +304,7 @@ describe("loadUserSkills", () => {
     expect((await loadUserSkills(join(tmpdir(), "definitely-not-here-xyz"))).size).toBe(0);
   });
 
-  it("parses frontmatter `tools:` into declaredTools", async () => {
+  it("parses legacy top-level `tools:` into declaredTools", async () => {
     const dir = await mkdtemp(join(tmpdir(), "skill-cat-"));
     const skillDir = join(dir, "mailer");
     await mkdir(skillDir, { recursive: true });
@@ -314,6 +318,23 @@ describe("loadUserSkills", () => {
       "mcp:outlook:send_email",
       "mcp:cal:create_event",
     ]);
+  });
+
+  it("reads back the tools and HITL policy composeSkillMd writes", async () => {
+    const declaredTools = ["mcp:outlook:send_email", "mcp:outlook:search_*", "builtin:eval"];
+    const interruptOn = {
+      "mcp:outlook:send_email": { allowedDecisions: ["approve", "edit", "reject"] },
+      "mcp:outlook:search_*": { allowedDecisions: ["reject", "approve"] },
+    } satisfies SkillInterruptOn;
+    const dir = await mkdtemp(join(tmpdir(), "skill-cat-"));
+    await mkdir(join(dir, "mailer"), { recursive: true });
+    await writeFile(
+      join(dir, "mailer", "SKILL.md"),
+      composeSkillMd("mailer", "Send: mail.", "# Mailer", declaredTools, interruptOn, "Mailer"),
+    );
+
+    const skill = (await loadUserSkills(dir)).get("mailer");
+    expect(skill).toMatchObject({ name: "Mailer", description: "Send: mail.", declaredTools, interruptOn });
   });
 
   it("skips a skill using the reserved top-level agent id, logging why", async () => {

@@ -41,6 +41,11 @@ export function evaluateSkillReadiness(
   let pending: string | undefined;
 
   for (const ref of skill.declaredTools) {
+    if (!ref.startsWith("mcp:") && !ref.startsWith("builtin:")) {
+      // Typically carried in from another client's `allowed-tools` (Read, Bash(...)).
+      return unavailable(`${ref} is a Claude Code tool Pizza Bot doesn't support`);
+    }
+    if (/\s/.test(ref)) return unavailable(`${ref} is invalid`);
     if (ref.startsWith("builtin:")) {
       if (!context.builtins.has(ref)) return unavailable(`${ref} is unavailable`);
       continue;

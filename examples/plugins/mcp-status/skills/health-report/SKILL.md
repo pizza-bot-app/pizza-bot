@@ -1,8 +1,8 @@
 ---
 name: health-report
 description: Produce a formatted health report of connected MCP servers and tools.
-tools:
-  - mcp:mcp-status:get_mcp_status
+metadata:
+  pizza-bot-tools: mcp:mcp-status:get_mcp_status
 ---
 
 # MCP Health Report

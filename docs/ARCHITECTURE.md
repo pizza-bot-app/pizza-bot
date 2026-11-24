@@ -259,7 +259,7 @@ in `core/src/protocol-types.ts`:
   resume from (and, for a cut page, the limit that fits); an uncut page is
   unchanged.
   MCP tools are deliberately withheld: reaching one from generated code
-  would bypass the approval a skill declares through `interruptOn`. Writes are not
+  would bypass the approval a skill declares. Writes are not
   narrowed at the bridge — the composite backend re-reads each grant's `readOnly`
   flag on every call, so it refuses the write and names why, whereas the bridged
   list is fixed when the graph compiles and would freeze a live gate. Two sandbox
@@ -277,7 +277,8 @@ in `core/src/protocol-types.ts`:
   `ModelDescriptor.contextWindow` for clients and
   `model.profile.maxInputTokens` for DeepAgents summarization. Native LangChain
   profiles remain the fallback when catalog metadata is unavailable.
-- **HITL**: a skill declares `interruptOn: { toolRef: { allowedDecisions } }`.
+- **HITL**: a skill declares `metadata.pizza-bot-interrupt-on` (`toolRef` or
+  `toolRef=approve,reject`), parsed into `interruptOn: { toolRef: { allowedDecisions } }`.
   On an interrupt the runtime surfaces the pause as a native protocol interrupt
   frame; the UI renders the AI Elements-derived `Confirmation` component; the
   client sends the decision back over the SDK as an `input.respond` command →
@@ -300,7 +301,11 @@ in `core/src/protocol-types.ts`:
   Each skill catalog entry compiles directly into one subagent invoked through the
   `task` tool. Its `SKILL.md` body is the system prompt, its description is the
   routing signal, and its declared `mcp:server:tool` refs are its complete tool
-  surface. A readiness projection compiles the subagent only after every explicit
+  surface. They and the HITL policy live in `metadata` string values
+  (`pizza-bot-tools`, `pizza-bot-interrupt-on`), the only place the Agent Skills
+  spec allows client fields; legacy top-level `tools`/`mcp`/`interruptOn` still
+  load, and `allowed-tools` adds to the set with `mcp__server__tool` names
+  translated. A readiness projection compiles the subagent only after every explicit
   tool exists, every wildcard has completed discovery with a match, and every
   built-in dependency is available. Dependency-free skills are ready
   immediately. Loading or unavailable skills are omitted from the callable

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUILTIN_EVAL_TOOL_REF,
   evaluateSkillReadiness,
+  parseDeclaredTools,
   projectSkillReadiness,
   type SkillCatalogEntry,
   type SkillReadinessContext,
@@ -35,6 +36,32 @@ describe("evaluateSkillReadiness", () => {
     expect(
       evaluateSkillReadiness(skill("analyst", [BUILTIN_EVAL_TOOL_REF]), context()),
     ).toEqual({ status: "ready" });
+  });
+
+  it("names allowed-tools entries outside the ref vocabulary as unsupported", () => {
+    const declaredTools = parseDeclaredTools({ "allowed-tools": "Bash(git add:*) Read" });
+    expect(evaluateSkillReadiness(skill("claude-code", declaredTools), context())).toEqual({
+      status: "unavailable",
+      detail: "Bash(git add:*) is a Claude Code tool Pizza Bot doesn't support",
+    });
+    for (const ref of ["Read", "WebFetch"]) {
+      expect(evaluateSkillReadiness(skill("reader", [ref]), context())).toEqual({
+        status: "unavailable",
+        detail: `${ref} is a Claude Code tool Pizza Bot doesn't support`,
+      });
+    }
+  });
+
+  it("leaves a skill unavailable when a declared ref contains whitespace", () => {
+    const ctx = context({
+      catalog: { srv: ["my tool"] },
+      tools: new Set(["mcp:srv:my tool"]),
+      mcpServers: new Map([["srv", { status: "ready" }]]),
+    });
+    expect(evaluateSkillReadiness(skill("spaced", ["mcp:srv:my tool"]), ctx)).toEqual({
+      status: "unavailable",
+      detail: "mcp:srv:my tool is invalid",
+    });
   });
 
   it("keeps a skill loading while its MCP server is loading", () => {

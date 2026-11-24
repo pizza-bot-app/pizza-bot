@@ -61,8 +61,8 @@ minimal MCP-backed skill looks like:
 ---
 name: release-check
 description: Check release readiness and report blockers.
-tools:
-  - mcp:release-tools:check_release
+metadata:
+  pizza-bot-tools: mcp:release-tools:check_release
 ---
 
 1. Run the release check.
@@ -75,17 +75,24 @@ are enabled and connected. Loading or unavailable skills remain visible but are
 omitted from the subagent list until their dependencies recover. Newly ready
 skills become available on the next turn.
 
-Use `interruptOn` in the frontmatter to require human approval for a tool. The
-allowed decisions drive the application's approval card:
+The [Agent Skills spec](https://agentskills.io/specification) only allows string
+`metadata` values, so Pizza Bot's fields are space-separated strings there.
+`pizza-bot-tools` lists `mcp:<server>:<tool>` refs (wildcards allowed) and
+`builtin:eval`. `pizza-bot-interrupt-on` requires human approval for MCP tools: a
+bare ref allows approve, edit, and reject; `ref=approve,reject` narrows the
+decisions the approval card offers:
 
 ```yaml
-interruptOn:
-  "mcp:release-tools:publish_release":
-    allowedDecisions:
-      - approve
-      - edit
-      - reject
+metadata:
+  pizza-bot-tools: mcp:release-tools:check_release mcp:release-tools:publish_release
+  pizza-bot-interrupt-on: mcp:release-tools:publish_release=approve,reject
 ```
+
+A spec `allowed-tools` field adds to the declared tools: Claude Code's
+`mcp__<server>__<tool>` names map to `mcp:<server>:<tool>`, and any other entry
+(such as `Bash(git:*)` or `Read`) names a tool Pizza Bot lacks, so the skill stays
+unavailable. Skills with top-level `tools`, `mcp`, or `interruptOn` fields still
+load; saving one from the editor rewrites it in the metadata form.
 
 See the [skills guide](../skills/README.md) for catalog precedence, Built-in
 skills, Plugin skills, sibling resources, and editing behavior.

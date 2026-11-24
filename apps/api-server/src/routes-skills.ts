@@ -139,6 +139,7 @@ function parseBody(raw: unknown): ParseResult<SkillFields> {
     if (typeof t !== "string") continue;
     const ref = t.trim();
     if (!ref || seenTools.has(ref)) continue;
+    if (/\s/.test(ref)) return { ok: false, detail: `invalid tool ref "${ref}": refs cannot contain whitespace` };
     if (!toolRefSchema.safeParse(ref).success) return { ok: false, detail: `invalid tool ref "${ref}"` };
     seenTools.add(ref);
     declaredTools.push(ref);

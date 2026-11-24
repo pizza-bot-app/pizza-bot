@@ -11,8 +11,8 @@ export const BUILTIN_EVAL_TOOL_REF = "builtin:eval";
 export const toolRefSchema = z
   .string()
   .refine(
-    (ref) => ref === BUILTIN_EVAL_TOOL_REF || /^mcp:[^:]+:[^:]+$/.test(ref),
-    "Tool ref must be builtin:eval or mcp:<server>:<tool> (wildcards allowed)",
+    (ref) => ref === BUILTIN_EVAL_TOOL_REF || /^mcp:[^:\s]+:[^:\s]+$/.test(ref),
+    "Tool ref must be builtin:eval or mcp:<server>:<tool> without whitespace (wildcards allowed)",
   );
 
 export const interruptToolRefSchema = toolRefSchema.refine(
@@ -79,10 +79,15 @@ export function splitSkillMd(raw: string): { frontmatter: string; body: string }
   return { frontmatter: match[1]!, body: raw.slice(match[0].length).replace(/^\r?\n/, "") };
 }
 
+const TOOLS_METADATA_KEY = "pizza-bot-tools";
+const INTERRUPT_ON_METADATA_KEY = "pizza-bot-interrupt-on";
+const DEFAULT_INTERRUPT_DECISIONS: readonly HitlDecision[] = ["approve", "edit", "reject"];
+const ALL_INTERRUPT_DECISIONS: readonly HitlDecision[] = ["approve", "edit", "reject", "respond"];
+
 /**
- * Rebuilds spec-compliant frontmatter from the canonical name, optional display
- * name, description, and declared tools. Surrounding body whitespace is
- * normalized for idempotent saves.
+ * Rebuilds spec-compliant frontmatter. The Agent Skills spec allows only string
+ * `metadata` values, so tool grants and HITL policy are space-separated strings
+ * there; normalizes surrounding body whitespace for idempotent saves.
  */
 export function composeSkillMd(
   name: string,
@@ -92,26 +97,24 @@ export function composeSkillMd(
   interruptOn: SkillInterruptOn = {},
   displayName?: string,
 ): string {
-  const toolsBlock = declaredTools.length > 0
-    ? `tools:\n${declaredTools.map((t) => `  - ${JSON.stringify(t)}`).join("\n")}\n`
-    : "";
-  const metadataBlock = displayName && displayName !== name
-    ? `metadata:\n  display-name: ${JSON.stringify(displayName)}\n`
-    : "";
-  const interruptEntries = Object.entries(interruptOn);
-  const interruptBlock = interruptEntries.length > 0
-    ? `interruptOn:\n${interruptEntries.map(([ref, config]) => {
-        if (typeof config === "boolean") return `  ${JSON.stringify(ref)}: ${config}`;
-        return [
-          `  ${JSON.stringify(ref)}:`,
-          "    allowedDecisions:",
-          ...config.allowedDecisions.map((decision) => `      - ${decision}`),
-        ].join("\n");
-      }).join("\n")}\n`
+  const metadata: Array<[string, string]> = [];
+  if (displayName && displayName !== name) metadata.push(["display-name", displayName]);
+  if (declaredTools.length > 0) metadata.push([TOOLS_METADATA_KEY, declaredTools.join(" ")]);
+  const interruptRefs = Object.entries(interruptOn).flatMap(([ref, config]) => {
+    // `true` is every decision to the HITL middleware, not the bare-ref default.
+    if (config === false) return [];
+    const decisions = config === true ? ALL_INTERRUPT_DECISIONS : config.allowedDecisions;
+    return sameDecisions(decisions, DEFAULT_INTERRUPT_DECISIONS)
+      ? [ref]
+      : [`${ref}=${decisions.join(",")}`];
+  });
+  if (interruptRefs.length > 0) metadata.push([INTERRUPT_ON_METADATA_KEY, interruptRefs.join(" ")]);
+  const metadataBlock = metadata.length > 0
+    ? `metadata:\n${metadata.map(([key, value]) => `  ${key}: ${JSON.stringify(value)}\n`).join("")}`
     : "";
   const fm =
     `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n` +
-    `${metadataBlock}${toolsBlock}${interruptBlock}---\n`;
+    `${metadataBlock}---\n`;
   let bodyStart = 0;
   for (;;) {
     if (body.startsWith("\r\n", bodyStart)) bodyStart += 2;
@@ -198,29 +201,72 @@ export function skillMcpServerIds(skill: Pick<SkillCatalogEntry, "declaredTools"
   return [...servers];
 }
 
-/**
- * Reads declared tool references from parsed skill frontmatter. Accepts either
- * `tools:` or `mcp:` (a comma/whitespace string or a list); non-string entries
- * are dropped so a malformed value degrades to "no declared tools", not a throw.
- */
-export function parseDeclaredTools(frontmatter: Record<string, unknown>): string[] {
-  const raw = frontmatter.tools ?? frontmatter.mcp;
-  const items = Array.isArray(raw)
-    ? raw
-    : typeof raw === "string"
-      ? raw.split(/[,\s]+/)
-      : [];
-  const seen = new Set<string>();
-  for (const item of items) {
-    if (typeof item === "string" && item.trim()) seen.add(item.trim());
-  }
-  return [...seen];
+function sameDecisions(a: readonly HitlDecision[], b: readonly HitlDecision[]): boolean {
+  return a.length === b.length && a.every((decision, i) => decision === b[i]);
 }
 
-const HITL_DECISIONS = new Set<HitlDecision>(["approve", "edit", "reject", "respond"]);
+function metadataField(frontmatter: Record<string, unknown>, key: string): unknown {
+  const metadata = frontmatter.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;
+  return (metadata as Record<string, unknown>)[key];
+}
 
-/** Reads per-tool HITL policy from skill frontmatter. Invalid entries are ignored. */
+function listItems(raw: unknown, separator: RegExp): string[] {
+  const items = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(separator) : [];
+  return items.flatMap((item) => (typeof item === "string" && item.trim() ? [item.trim()] : []));
+}
+
+/**
+ * Claude Code permission rules such as `Bash(git add:*)` contain spaces, so a
+ * string `allowed-tools` is tokenized with parentheses kept whole.
+ */
+function allowedToolItems(raw: unknown): string[] {
+  if (typeof raw !== "string") return listItems(raw, /[,\s]+/);
+  return [...raw.matchAll(/[^\s,()]+(?:\([^)]*\))?/g)].map((match) => match[0]);
+}
+
+/** `mcp__<server>__<tool>` splits at the first `__` so tool names may contain `__`. */
+function translateAllowedTool(entry: string): string {
+  if (!entry.startsWith("mcp__")) return entry;
+  const rest = entry.slice("mcp__".length);
+  const split = rest.indexOf("__");
+  if (split <= 0 || split + 2 >= rest.length) return entry;
+  return `mcp:${rest.slice(0, split)}:${rest.slice(split + 2)}`;
+}
+
+/**
+ * Reads declared tool refs from `metadata.pizza-bot-tools`, else legacy
+ * top-level `tools`/`mcp`, unioned with translated `allowed-tools`. Entries
+ * outside the ref vocabulary are kept so readiness reports the skill
+ * unavailable rather than granting it fewer tools than it asked for.
+ */
+export function parseDeclaredTools(frontmatter: Record<string, unknown>): string[] {
+  const metadataTools = metadataField(frontmatter, TOOLS_METADATA_KEY);
+  const base = listItems(
+    metadataTools !== undefined ? metadataTools : frontmatter.tools ?? frontmatter.mcp,
+    /[,\s]+/,
+  );
+  const allowed = allowedToolItems(frontmatter["allowed-tools"]).map(translateAllowedTool);
+  return [...new Set([...base, ...allowed])];
+}
+
+const HITL_DECISIONS = new Set<HitlDecision>(ALL_INTERRUPT_DECISIONS);
+
+function validDecisions(decisions: readonly unknown[]): HitlDecision[] {
+  return decisions.filter(
+    (decision): decision is HitlDecision =>
+      typeof decision === "string" && HITL_DECISIONS.has(decision as HitlDecision),
+  );
+}
+
+/**
+ * Reads per-tool HITL policy from `metadata.pizza-bot-interrupt-on`
+ * (`ref` or `ref=approve,reject`), else legacy top-level `interruptOn`.
+ * Invalid refs are ignored; an unusable decision list falls back to the default.
+ */
 export function parseSkillInterruptOn(frontmatter: Record<string, unknown>): SkillInterruptOn {
+  const metadataPolicy = metadataField(frontmatter, INTERRUPT_ON_METADATA_KEY);
+  if (metadataPolicy !== undefined) return parseInterruptOnRefs(metadataPolicy);
   const raw = frontmatter.interruptOn;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const parsed: SkillInterruptOn = {};
@@ -230,14 +276,29 @@ export function parseSkillInterruptOn(frontmatter: Record<string, unknown>): Ski
       parsed[ref] = config;
       continue;
     }
-    if (!config || typeof config !== "object" || Array.isArray(config)) continue;
-    const decisions = (config as { allowedDecisions?: unknown }).allowedDecisions;
-    if (!Array.isArray(decisions)) continue;
-    const allowedDecisions = decisions.filter(
-      (decision): decision is HitlDecision =>
-        typeof decision === "string" && HITL_DECISIONS.has(decision as HitlDecision),
-    );
-    if (allowedDecisions.length > 0) parsed[ref] = { allowedDecisions };
+    const decisions = config && typeof config === "object" && !Array.isArray(config)
+      ? (config as { allowedDecisions?: unknown }).allowedDecisions
+      : undefined;
+    parsed[ref] = { allowedDecisions: decisionsOrDefault(Array.isArray(decisions) ? decisions : []) };
+  }
+  return parsed;
+}
+
+/** A ref named for approval keeps it even when its decision list is unusable. */
+function decisionsOrDefault(decisions: readonly unknown[]): HitlDecision[] {
+  const valid = validDecisions(decisions);
+  return valid.length > 0 ? valid : [...DEFAULT_INTERRUPT_DECISIONS];
+}
+
+function parseInterruptOnRefs(raw: unknown): SkillInterruptOn {
+  const parsed: SkillInterruptOn = {};
+  for (const item of listItems(raw, /\s+/)) {
+    const split = item.indexOf("=");
+    const ref = split < 0 ? item : item.slice(0, split);
+    if (!interruptToolRefSchema.safeParse(ref).success) continue;
+    parsed[ref] = {
+      allowedDecisions: decisionsOrDefault(split < 0 ? [] : item.slice(split + 1).split(",")),
+    };
   }
   return parsed;
 }

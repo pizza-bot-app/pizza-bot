@@ -335,8 +335,9 @@ describe("skill routes", () => {
     expect(response.status).toBe(201);
     const md = await readFile(join(skillsDir, "review", "SKILL.md"), "utf8");
     expect(md).toContain(
-      'tools:\n  - "mcp:mcp-status:get_mcp_status"\n  - "builtin:eval"',
+      '  pizza-bot-tools: "mcp:mcp-status:get_mcp_status builtin:eval"\n',
     );
+    expect(md).not.toMatch(/^tools:/m);
   });
 
   it("creates a user override when patching a built-in skill", async () => {
@@ -507,7 +508,8 @@ describe("skill routes", () => {
       },
     });
     const md = await readFile(join(skillsDir, "review", "SKILL.md"), "utf8");
-    expect(md).toContain('interruptOn:\n  "mcp:outlook:send_email":');
+    expect(md).toContain('  pizza-bot-interrupt-on: "mcp:outlook:send_email"\n');
+    expect(md).not.toMatch(/^interruptOn:/m);
   });
 
   it("rejects approval policy for a tool the skill does not declare", async () => {
@@ -527,6 +529,21 @@ describe("skill routes", () => {
     expect(await response.json()).toMatchObject({
       error: "invalid",
       detail: expect.stringContaining("is not declared"),
+    });
+  });
+
+  it("rejects a tool ref containing whitespace with a clear reason", async () => {
+    const { app } = await fixture();
+    const response = await app.request("/skills", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "review", ...bundle, declaredTools: ["mcp:outlook:send email"] }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "invalid",
+      detail: 'invalid tool ref "mcp:outlook:send email": refs cannot contain whitespace',
     });
   });
 

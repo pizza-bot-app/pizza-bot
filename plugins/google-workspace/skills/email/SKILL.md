@@ -1,11 +1,12 @@
 ---
 name: email
 description: Search, read, summarize and draft replies in the user's Gmail. Use when the user asks about their email, inbox, a sender or thread, or wants a reply or new message drafted. Decides on its own which Gmail searches to run and how many threads to open; drafts are saved for the user to review and never sent.
-tools:
-  - mcp:google-workspace:search_threads
-  - mcp:google-workspace:get_thread
-  - mcp:google-workspace:list_labels
-  - mcp:google-workspace:create_draft
+metadata:
+  pizza-bot-tools: >-
+    mcp:google-workspace:search_threads
+    mcp:google-workspace:get_thread
+    mcp:google-workspace:list_labels
+    mcp:google-workspace:create_draft
 ---
 
 # Email

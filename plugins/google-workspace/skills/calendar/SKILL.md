@@ -1,18 +1,14 @@
 ---
 name: calendar
 description: Look up the user's Google Calendar schedule, find free time, and create events. Use when the user asks what is on their calendar, when they are free, about a meeting, or wants something scheduled. Decides on its own the time range to query and which slots to propose; creates an event only after the user has confirmed its details.
-tools:
-  - mcp:google-workspace:list_calendars
-  - mcp:google-workspace:list_events
-  - mcp:google-workspace:get_event
-  - mcp:google-workspace:find_free_time
-  - mcp:google-workspace:create_event
-interruptOn:
-  "mcp:google-workspace:create_event":
-    allowedDecisions:
-      - approve
-      - edit
-      - reject
+metadata:
+  pizza-bot-tools: >-
+    mcp:google-workspace:list_calendars
+    mcp:google-workspace:list_events
+    mcp:google-workspace:get_event
+    mcp:google-workspace:find_free_time
+    mcp:google-workspace:create_event
+  pizza-bot-interrupt-on: mcp:google-workspace:create_event
 ---
 
 # Calendar

@@ -9,6 +9,7 @@ import {
   parseDeclaredTools,
   parseSkillInterruptOn,
   SKILLS_ROOT,
+  toolRefSchema,
   type SkillCatalog,
   type SkillCatalogEntry,
 } from "./skill.js";
@@ -194,41 +195,43 @@ describe("splitSkillMd / composeSkillMd", () => {
     expect(composeSkillMd("n", "d", "")).toBe('---\nname: "n"\ndescription: "d"\n---\n');
   });
 
-  it("emits a `tools:` YAML list the loader's parseDeclaredTools reads back", () => {
+  it("emits tool grants as a space-separated metadata string", () => {
     const md = composeSkillMd("n", "d", "# body", [
       "mcp:mcp-status:get_mcp_status",
       "builtin:eval",
     ]);
     expect(md).toBe(
-      '---\nname: "n"\ndescription: "d"\ntools:\n' +
-        '  - "mcp:mcp-status:get_mcp_status"\n  - "builtin:eval"\n---\n\n# body\n',
+      '---\nname: "n"\ndescription: "d"\nmetadata:\n' +
+        '  pizza-bot-tools: "mcp:mcp-status:get_mcp_status builtin:eval"\n---\n\n# body\n',
     );
-    // The catalog loader hands parseDeclaredTools the YAML-parsed mapping.
-    expect(
-      parseDeclaredTools({ tools: ["mcp:mcp-status:get_mcp_status", "builtin:eval"] }),
-    ).toEqual(["mcp:mcp-status:get_mcp_status", "builtin:eval"]);
   });
 
-  it("omits the `tools:` block when no tools are declared", () => {
-    expect(composeSkillMd("n", "d", "x")).not.toContain("tools:");
+  it("omits metadata when there is no display name, tool, or policy", () => {
+    expect(composeSkillMd("n", "d", "x")).not.toContain("metadata:");
   });
 
-  it("emits skill-owned HITL policy in frontmatter", () => {
+  it("emits HITL policy under metadata, never as top-level fields", () => {
     const md = composeSkillMd(
-      "Mailer",
+      "mailer",
       "Sends mail",
       "# Mail",
-      ["mcp:outlook:send_email"],
+      ["mcp:outlook:send_email", "mcp:outlook:delete_email", "mcp:outlook:archive"],
       {
-        "mcp:outlook:send_email": {
-          allowedDecisions: ["approve", "edit", "reject"],
-        },
+        "mcp:outlook:send_email": { allowedDecisions: ["approve", "edit", "reject"] },
+        "mcp:outlook:delete_email": { allowedDecisions: ["approve", "reject"] },
+        "mcp:outlook:archive": true,
+        "mcp:outlook:read": false,
       },
+      "Mailer",
     );
-    expect(md).toContain(
-      'interruptOn:\n  "mcp:outlook:send_email":\n    allowedDecisions:\n' +
-        "      - approve\n      - edit\n      - reject\n",
+    expect(md).toBe(
+      '---\nname: "mailer"\ndescription: "Sends mail"\nmetadata:\n' +
+        '  display-name: "Mailer"\n' +
+        '  pizza-bot-tools: "mcp:outlook:send_email mcp:outlook:delete_email mcp:outlook:archive"\n' +
+        '  pizza-bot-interrupt-on: "mcp:outlook:send_email mcp:outlook:delete_email=approve,reject ' +
+        'mcp:outlook:archive=approve,edit,reject,respond"\n---\n\n# Mail\n',
     );
+    expect(md).not.toMatch(/^(tools|mcp|interruptOn):/m);
   });
 });
 
@@ -253,8 +256,39 @@ describe("skillInfoOf", () => {
   });
 });
 
+describe("toolRefSchema", () => {
+  it("rejects refs containing whitespace", () => {
+    expect(toolRefSchema.safeParse("mcp:srv:tool").success).toBe(true);
+    expect(toolRefSchema.safeParse("mcp:srv:search_*").success).toBe(true);
+    for (const ref of ["mcp:srv:my tool", "mcp:my srv:tool", "mcp:srv:tool\t", "builtin:eval "]) {
+      expect(toolRefSchema.safeParse(ref).success).toBe(false);
+    }
+  });
+});
+
 describe("parseDeclaredTools", () => {
-  it("reads a `tools:` list of refs", () => {
+  it("keeps a list-form ref containing whitespace so readiness can reject it", () => {
+    expect(parseDeclaredTools({ tools: ["mcp:srv:my tool"] })).toEqual(["mcp:srv:my tool"]);
+  });
+
+  it("reads space-separated refs from metadata.pizza-bot-tools", () => {
+    expect(
+      parseDeclaredTools({
+        metadata: { "pizza-bot-tools": "mcp:outlook:send_email  mcp:cal:create_event" },
+      }),
+    ).toEqual(["mcp:outlook:send_email", "mcp:cal:create_event"]);
+  });
+
+  it("prefers metadata over legacy top-level tools", () => {
+    expect(
+      parseDeclaredTools({
+        metadata: { "pizza-bot-tools": "mcp:a:x" },
+        tools: ["mcp:legacy:y"],
+      }),
+    ).toEqual(["mcp:a:x"]);
+  });
+
+  it("reads a legacy top-level `tools:` list of refs", () => {
     expect(parseDeclaredTools({ tools: ["mcp:outlook:send_email", "mcp:cal:create_event"] })).toEqual([
       "mcp:outlook:send_email",
       "mcp:cal:create_event",
@@ -269,14 +303,97 @@ describe("parseDeclaredTools", () => {
     expect(parseDeclaredTools({ mcp: ["x", 3, null, "y"] as unknown[] })).toEqual(["x", "y"]);
   });
 
-  it("returns [] when neither key is present or the value is unusable", () => {
+  it("returns [] when no key is present or the value is unusable", () => {
     expect(parseDeclaredTools({})).toEqual([]);
     expect(parseDeclaredTools({ tools: 42 })).toEqual([]);
+    expect(parseDeclaredTools({ metadata: "x" })).toEqual([]);
+  });
+
+  it("translates a space-separated allowed-tools string", () => {
+    expect(
+      parseDeclaredTools({
+        "allowed-tools": "mcp__outlook__send_email mcp__srv__tool__x Bash(git add:*) Read",
+      }),
+    ).toEqual(["mcp:outlook:send_email", "mcp:srv:tool__x", "Bash(git add:*)", "Read"]);
+  });
+
+  it("translates comma-separated and list allowed-tools, keeping unknown entries verbatim", () => {
+    expect(parseDeclaredTools({ "allowed-tools": "Read, mcp__cal__list_events" })).toEqual([
+      "Read",
+      "mcp:cal:list_events",
+    ]);
+    expect(
+      parseDeclaredTools({ "allowed-tools": ["mcp__cal__list_events", "mcp__cal", "Bash(git:*)", 7] }),
+    ).toEqual(["mcp:cal:list_events", "mcp__cal", "Bash(git:*)"]);
+  });
+
+  it("unions allowed-tools into the declared tools and dedupes", () => {
+    expect(
+      parseDeclaredTools({
+        metadata: { "pizza-bot-tools": "mcp:cal:list_events builtin:eval" },
+        "allowed-tools": "mcp__cal__list_events mcp__cal__create_event",
+      }),
+    ).toEqual(["mcp:cal:list_events", "builtin:eval", "mcp:cal:create_event"]);
+    expect(
+      parseDeclaredTools({ tools: ["mcp:cal:list_events"], "allowed-tools": "mcp__cal__list_events" }),
+    ).toEqual(["mcp:cal:list_events"]);
   });
 });
 
 describe("parseSkillInterruptOn", () => {
-  it("reads boolean and decision-list policies", () => {
+  it("reads bare metadata refs as the default approve/edit/reject decisions", () => {
+    expect(
+      parseSkillInterruptOn({
+        metadata: { "pizza-bot-interrupt-on": "mcp:outlook:send_email mcp:cal:create_event" },
+      }),
+    ).toEqual({
+      "mcp:outlook:send_email": { allowedDecisions: ["approve", "edit", "reject"] },
+      "mcp:cal:create_event": { allowedDecisions: ["approve", "edit", "reject"] },
+    });
+  });
+
+  it("narrows decisions after `=` and ignores invalid refs and decisions", () => {
+    expect(
+      parseSkillInterruptOn({
+        metadata: {
+          "pizza-bot-interrupt-on":
+            "mcp:a:send=approve,reject mcp:a:del=approve,unknown,respond builtin:eval Read mcp::x",
+        },
+      }),
+    ).toEqual({
+      "mcp:a:send": { allowedDecisions: ["approve", "reject"] },
+      "mcp:a:del": { allowedDecisions: ["approve", "respond"] },
+    });
+  });
+
+  it("falls back to the default decisions when a valid ref has no usable decision", () => {
+    expect(
+      parseSkillInterruptOn({
+        metadata: { "pizza-bot-interrupt-on": "mcp:a:typo=aprove mcp:a:empty= mcp:a:commas=,," },
+      }),
+    ).toEqual({
+      "mcp:a:typo": { allowedDecisions: ["approve", "edit", "reject"] },
+      "mcp:a:empty": { allowedDecisions: ["approve", "edit", "reject"] },
+      "mcp:a:commas": { allowedDecisions: ["approve", "edit", "reject"] },
+    });
+  });
+
+  it("ignores list-form refs containing whitespace", () => {
+    expect(
+      parseSkillInterruptOn({ metadata: { "pizza-bot-interrupt-on": ["mcp:a:b c", "mcp:a:ok"] } }),
+    ).toEqual({ "mcp:a:ok": { allowedDecisions: ["approve", "edit", "reject"] } });
+  });
+
+  it("prefers metadata over legacy top-level interruptOn", () => {
+    expect(
+      parseSkillInterruptOn({
+        metadata: { "pizza-bot-interrupt-on": "mcp:a:x=reject" },
+        interruptOn: { "mcp:legacy:y": true },
+      }),
+    ).toEqual({ "mcp:a:x": { allowedDecisions: ["reject"] } });
+  });
+
+  it("reads legacy boolean and decision-list policies", () => {
     expect(
       parseSkillInterruptOn({
         interruptOn: {
@@ -294,18 +411,25 @@ describe("parseSkillInterruptOn", () => {
     });
   });
 
-  it("drops malformed policies and unsupported decisions", () => {
+  it("keeps approval with default decisions for malformed legacy policies", () => {
     expect(
       parseSkillInterruptOn({
         interruptOn: {
           "mcp:test:valid": { allowedDecisions: ["approve", "unknown", "reject"] },
-          "mcp:test:empty": { allowedDecisions: ["unknown"] },
+          "mcp:test:typo": { allowedDecisions: ["aprove"] },
+          "mcp:test:empty": { allowedDecisions: [] },
           "mcp:test:malformed": "yes",
+          "mcp:test:off": false,
+          "mcp:test:has space": true,
           "builtin:eval": true,
         },
       }),
     ).toEqual({
       "mcp:test:valid": { allowedDecisions: ["approve", "reject"] },
+      "mcp:test:typo": { allowedDecisions: ["approve", "edit", "reject"] },
+      "mcp:test:empty": { allowedDecisions: ["approve", "edit", "reject"] },
+      "mcp:test:malformed": { allowedDecisions: ["approve", "edit", "reject"] },
+      "mcp:test:off": false,
     });
   });
 });

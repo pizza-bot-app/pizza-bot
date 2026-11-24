@@ -235,6 +235,24 @@ describe("parseSkillImport", () => {
     },
   );
 
+  it("reads tool grants from metadata and translated allowed-tools", async () => {
+    const content = [
+      "---",
+      "name: review-change",
+      "description: Review a code change.",
+      "allowed-tools: mcp__github__get_diff Bash(git diff:*)",
+      "metadata:",
+      "  pizza-bot-tools: mcp:github:submit_review",
+      "  pizza-bot-interrupt-on: mcp:github:submit_review=approve,reject",
+      "---",
+      "# Review",
+    ].join("\n");
+    await expect(parseSkillImport("skill.md", new TextEncoder().encode(content))).resolves.toMatchObject({
+      declaredTools: ["mcp:github:submit_review", "mcp:github:get_diff", "Bash(git diff:*)"],
+      interruptOn: { "mcp:github:submit_review": { allowedDecisions: ["approve", "reject"] } },
+    });
+  });
+
   it.each(["review.zip", "REVIEW.ZIP", "download", "review.md"])(
     "detects ZIP content in %s and preserves sibling files",
     async (filename) => {
@@ -304,14 +322,22 @@ describe("parseSkillImport", () => {
       { field: "interruptOn", description: "Probe: carefully." },
       { field: "tools", description: "Probe." },
       { field: "tools", description: "Probe: carefully." },
+      { field: "metadata", description: "Probe." },
+      { field: "metadata", description: "Probe: carefully." },
     ])("rejects malformed $field with description $description", async ({ field, description }) => {
+      const policy = {
+        interruptOn:
+          "tools: [mcp:mcp-status:get_mcp_status]\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true\n  note: a: b",
+        tools: "tools: [mcp:mcp-status:get_mcp_status\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true",
+        metadata:
+          "metadata:\n  pizza-bot-tools: mcp:mcp-status:get_mcp_status\n" +
+          "  pizza-bot-interrupt-on: mcp:mcp-status:get_mcp_status\n    note: a: b",
+      }[field];
       const content = [
         "---",
         "name: hitl-probe",
         `description: ${description}`,
-        field === "interruptOn"
-          ? "tools: [mcp:mcp-status:get_mcp_status]\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true\n  note: a: b"
-          : "tools: [mcp:mcp-status:get_mcp_status\ninterruptOn:\n  mcp:mcp-status:get_mcp_status: true",
+        policy,
         "---",
         "# Probe",
       ].join("\n");

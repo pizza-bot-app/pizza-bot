@@ -1,30 +1,31 @@
 ---
 name: browser-automation
 description: Automate and inspect websites in a live Playwright browser. Use when the user asks to navigate a site, exercise a web workflow, fill or submit forms, verify UI behavior, inspect accessibility structure, capture screenshots, or diagnose browser console and network activity.
-tools:
-  - mcp:playwright:browser_click
-  - mcp:playwright:browser_close
-  - mcp:playwright:browser_console_messages
-  - mcp:playwright:browser_drag
-  - mcp:playwright:browser_drop
-  - mcp:playwright:browser_evaluate
-  - mcp:playwright:browser_file_upload
-  - mcp:playwright:browser_fill_form
-  - mcp:playwright:browser_find
-  - mcp:playwright:browser_handle_dialog
-  - mcp:playwright:browser_hover
-  - mcp:playwright:browser_navigate
-  - mcp:playwright:browser_navigate_back
-  - mcp:playwright:browser_network_request
-  - mcp:playwright:browser_network_requests
-  - mcp:playwright:browser_press_key
-  - mcp:playwright:browser_resize
-  - mcp:playwright:browser_select_option
-  - mcp:playwright:browser_snapshot
-  - mcp:playwright:browser_take_screenshot
-  - mcp:playwright:browser_tabs
-  - mcp:playwright:browser_type
-  - mcp:playwright:browser_wait_for
+metadata:
+  pizza-bot-tools: >-
+    mcp:playwright:browser_click
+    mcp:playwright:browser_close
+    mcp:playwright:browser_console_messages
+    mcp:playwright:browser_drag
+    mcp:playwright:browser_drop
+    mcp:playwright:browser_evaluate
+    mcp:playwright:browser_file_upload
+    mcp:playwright:browser_fill_form
+    mcp:playwright:browser_find
+    mcp:playwright:browser_handle_dialog
+    mcp:playwright:browser_hover
+    mcp:playwright:browser_navigate
+    mcp:playwright:browser_navigate_back
+    mcp:playwright:browser_network_request
+    mcp:playwright:browser_network_requests
+    mcp:playwright:browser_press_key
+    mcp:playwright:browser_resize
+    mcp:playwright:browser_select_option
+    mcp:playwright:browser_snapshot
+    mcp:playwright:browser_take_screenshot
+    mcp:playwright:browser_tabs
+    mcp:playwright:browser_type
+    mcp:playwright:browser_wait_for
 ---
 
 # Browser Automation
