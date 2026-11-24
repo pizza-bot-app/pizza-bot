@@ -174,6 +174,7 @@ function McpServerDetail({
       setSelection({ mode: "view", id: created.id });
     } else if (selection?.mode === "edit") {
       await onUpdate(id, entry);
+      setReloadToken((t) => t + 1);
       setSelection({ mode: "view", id });
     }
   };
