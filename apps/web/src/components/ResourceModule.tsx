@@ -46,6 +46,8 @@ interface PendingConfirmation {
 export interface ResourceModuleProps<T> {
   items: T[];
   getId: (item: T) => string;
+  /** Opens on this item instead of the first one. */
+  focusId?: string;
   icon: ReactNode;
   emptyIcon: ReactNode;
   title: string;
@@ -71,6 +73,7 @@ export function initialResourceSelection<T>(
 export function ResourceModule<T>({
   items,
   getId,
+  focusId,
   icon,
   emptyIcon,
   title,
@@ -83,7 +86,9 @@ export function ResourceModule<T>({
   renderDetail,
 }: ResourceModuleProps<T>) {
   const notify = useAppToast();
-  const [selection, setSelection] = useState<ResourceSelection>(null);
+  const [selection, setSelection] = useState<ResourceSelection>(
+    focusId ? { mode: "view", id: focusId } : null,
+  );
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmationError, setConfirmationError] = useState<string | null>(null);

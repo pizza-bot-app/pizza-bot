@@ -3,7 +3,8 @@ import { useRef, useState, type ChangeEvent } from "react";
 import { BookOpen, LoaderCircle, Upload } from "lucide-react";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
 import { SkillEditor } from "./SkillEditor.js";
-import { ResourceModule } from "../ResourceModule.js";
+import { ResourceModule, type ResourceDetailArgs } from "../ResourceModule.js";
+import { SkillView } from "./SkillView.js";
 import { ResourceList } from "../ResourceList.js";
 import { ResourceEditorSkeleton } from "../ResourceDetailSkeleton.js";
 import { useKeyedDoc } from "../../use-keyed-doc.js";
@@ -26,6 +27,7 @@ export interface SkillsModuleProps {
   onDelete: (id: string) => Promise<boolean>;
   onGetBundle: (id: string) => Promise<SkillBundle | undefined>;
   onGenerate: (prompt: string) => Promise<SkillDraft>;
+  onOpenPlugin?: (pluginName: string) => void;
 }
 
 type SkillEntry = SkillCatalogInfo["skills"][number];
@@ -59,6 +61,7 @@ export function SkillsModule({
   onDelete,
   onGetBundle,
   onGenerate,
+  onOpenPlugin,
 }: SkillsModuleProps) {
   const catalog = skills.skills;
   return (
@@ -114,12 +117,9 @@ export function SkillsModule({
           )}
         />
       )}
-      renderDetail={({ selection, selected, setSelection, confirmAction }) => (
+      renderDetail={(args) => (
         <SkillDetail
-          selection={selection}
-          selected={selected}
-          setSelection={setSelection}
-          confirmAction={confirmAction}
+          {...args}
           tools={tools}
           onCreate={onCreate}
           onUpdate={onUpdate}
@@ -127,6 +127,7 @@ export function SkillsModule({
           onDelete={onDelete}
           onGetBundle={onGetBundle}
           onGenerate={onGenerate}
+          onOpenPlugin={onOpenPlugin}
         />
       )}
     />
@@ -193,6 +194,7 @@ function SkillDetail({
   selection,
   selected,
   setSelection,
+  backToList,
   confirmAction,
   tools,
   onCreate,
@@ -201,33 +203,28 @@ function SkillDetail({
   onDelete,
   onGetBundle,
   onGenerate,
-}: {
-  selection: import("../ResourceModule.js").ResourceSelection;
-  selected: SkillEntry | null;
-  setSelection: (next: import("../ResourceModule.js").ResourceSelection) => void;
-  confirmAction: (
-    message: string,
-    action: () => Promise<unknown>,
-    options: {
-      title: string;
-      confirmLabel: string;
-      destructive?: boolean;
-      preserveSelection?: boolean;
-    },
-  ) => Promise<void>;
-} & Pick<SkillsModuleProps, "tools" | "onCreate" | "onUpdate" | "onSetEnabled" | "onDelete" | "onGetBundle" | "onGenerate">) {
+  onOpenPlugin,
+}: ResourceDetailArgs<SkillEntry> &
+  Pick<
+    SkillsModuleProps,
+    "tools" | "onCreate" | "onUpdate" | "onSetEnabled" | "onDelete" | "onGetBundle" | "onGenerate" | "onOpenPlugin"
+  >) {
+  const [savedRevision, setSavedRevision] = useState(0);
   const bundle = useKeyedDoc(
-    selection?.mode === "view" && selected ? selected.id : null,
+    selected && selection?.mode !== "new" ? selected.id : null,
     onGetBundle,
-    selected ? `${selected.source}:${selected.overrides ?? ""}` : "",
+    selected ? `${selected.source}:${selected.overrides ?? ""}:${savedRevision}` : "",
   );
+  const backToView = () => setSelection(selected ? { mode: "view", id: selected.id } : null);
 
   const handleSave = async (b: SkillBundle) => {
     if (selection?.mode === "new") {
       const created = await onCreate(b);
       setSelection({ mode: "view", id: created.id });
-    } else if (selection?.mode === "view") {
+    } else if (selection?.mode === "edit") {
       await onUpdate(b.id, b);
+      setSavedRevision((revision) => revision + 1);
+      setSelection({ mode: "view", id: b.id });
     }
   };
   const missingDependencies =
@@ -250,15 +247,6 @@ function SkillDetail({
     selected?.enabled && selected.status !== "ready"
       ? selected.statusDetail ?? "Enabled, but currently unavailable"
       : undefined;
-  const enablement = selected ? (
-    <CapabilityEnablement
-      enabled={selected.enabled}
-      noun="Skill"
-      blockedReason={blockedReason}
-      stateDescription={stateDescription}
-      onChange={(enabled) => onSetEnabled(selected.id, enabled)}
-    />
-  ) : undefined;
 
   if (selection?.mode === "new") {
     return (
@@ -272,16 +260,17 @@ function SkillDetail({
       />
     );
   }
-  if (selected) {
+  if (!selected) return null;
+
+  if (selection?.mode === "edit") {
+    const customizing = selected.source !== "user";
     if (!bundle) {
       return (
         <ResourceEditorSkeleton
           sectionLabel={L.skillsSection}
-          title={`Edit ${selected.name}`}
-          onCancel={() => setSelection(null)}
-        >
-          {enablement}
-        </ResourceEditorSkeleton>
+          title={`${customizing ? "Customize" : "Edit"} ${selected.name}`}
+          onCancel={backToView}
+        />
       );
     }
     const removal =
@@ -291,9 +280,9 @@ function SkillDetail({
         key={bundle.id}
         skill={bundle}
         tools={tools}
+        customizing={customizing}
         onSave={handleSave}
         onGenerate={onGenerate}
-        enablement={enablement}
         {...(removal
           ? {
               removalAction: {
@@ -302,7 +291,10 @@ function SkillDetail({
                 run: () =>
                   confirmAction(
                     removal.confirmation,
-                    () => onDelete(bundle.id),
+                    async () => {
+                      await onDelete(bundle.id);
+                      if (removal.mode === "revert") backToView();
+                    },
                     {
                       title: removal.title,
                       confirmLabel: removal.confirmLabel,
@@ -313,9 +305,29 @@ function SkillDetail({
               },
             }
           : {})}
-        onCancel={() => setSelection(null)}
+        onCancel={backToView}
       />
     );
   }
-  return null;
+
+  return (
+    <SkillView
+      skill={selected}
+      bundle={bundle}
+      visualState={skillVisualState(selected)}
+      statusLabel={skillStatusLabel(selected)}
+      enablement={
+        <CapabilityEnablement
+          enabled={selected.enabled}
+          noun="Skill"
+          blockedReason={blockedReason}
+          stateDescription={stateDescription}
+          onChange={(enabled) => onSetEnabled(selected.id, enabled)}
+        />
+      }
+      onEdit={() => setSelection({ mode: "edit", id: selected.id })}
+      onOpenPlugin={onOpenPlugin}
+      onBack={backToList}
+    />
+  );
 }

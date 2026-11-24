@@ -73,6 +73,11 @@ export function App() {
   );
 
   const [view, setView] = useState<AppView>("inbox");
+  const [pluginFocus, setPluginFocus] = useState<string | undefined>(undefined);
+  const openPlugin = (pluginName: string) => {
+    setPluginFocus(pluginName);
+    setView("plugins");
+  };
   const [settingsCategory, setSettingsCategory] =
     useState<SettingsCategory>("general");
   const [automationsTab, setAutomationsTab] = useState<"cron" | "webhook">("cron");
@@ -433,6 +438,7 @@ export function App() {
                 onDelete={skillsAdmin.remove}
                 onGetBundle={skillsAdmin.getBundle}
                 onGenerate={skillsAdmin.generate}
+                onOpenPlugin={openPlugin}
               />
             </div>
           ) : view === "mcp" ? (
@@ -446,13 +452,17 @@ export function App() {
                 onDelete={mcpAdmin.remove}
                 onGetDoc={mcpAdmin.getDoc}
                 onGetTools={mcpAdmin.getTools}
-                onOpenPlugins={() => setView("plugins")}
+                onOpenPlugin={openPlugin}
               />
             </div>
           ) : view === "plugins" ? (
             <div className="module-hub">
               <PluginsModule
+                key={pluginFocus}
                 plugins={pluginsAdmin.plugins}
+                focusName={pluginFocus}
+                onOpenSkills={() => setView("skills")}
+                onOpenMcpServers={() => setView("mcp")}
                 onImport={pluginsAdmin.importPlugin}
                 onDelete={pluginsAdmin.remove}
                 onRefresh={pluginsAdmin.refreshPlugin}

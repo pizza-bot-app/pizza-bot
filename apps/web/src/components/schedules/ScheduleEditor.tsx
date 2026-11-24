@@ -10,20 +10,13 @@ import {
   parseCron,
 } from "../../lib/cron.js";
 import { useAppToast } from "../AppToast.js";
-import {
-  WEBHOOK_SECRET_PLACEHOLDER,
-  curlWebhookSecret,
-  initialWebhookSecret,
-} from "./webhook-secret.js";
-import { CapabilityEnablement } from "../CapabilityControls.js";
+import { initialWebhookSecret } from "./webhook-secret.js";
 
 export interface ScheduleEditorProps {
   kind: Extract<TriggerKind, "cron" | "webhook">;
-  apiBase: string;
   defaultTimezone?: string;
   trigger: TriggerDef | null;
   onSave: (patch: Partial<TriggerDef>) => Promise<void>;
-  onEnabledChange?: (enabled: boolean) => Promise<void>;
   onDelete?: () => void;
   onCancel: () => void;
 }
@@ -36,11 +29,9 @@ function freshSecret(): string {
 
 export function ScheduleEditor({
   kind,
-  apiBase,
   defaultTimezone,
   trigger,
   onSave,
-  onEnabledChange,
   onDelete,
   onCancel,
 }: ScheduleEditorProps) {
@@ -64,25 +55,6 @@ export function ScheduleEditor({
     () => (kind === "cron" && cronValid ? nextCronRun(cron, new Date(), effectiveTimezone) : null),
     [kind, cron, cronValid, effectiveTimezone],
   );
-
-  const webhookInvokeUrl = useMemo(() => {
-    if (kind !== "webhook" || !trigger?.id) return null;
-    const base = apiBase.startsWith("http")
-      ? apiBase
-      : `${typeof window !== "undefined" ? window.location.origin : ""}${apiBase}`;
-    return `${base.replace(/\/$/, "")}/triggers/${trigger.id}/invoke`;
-  }, [kind, trigger?.id, apiBase]);
-
-  const curlExample = useMemo(() => {
-    if (!webhookInvokeUrl) return null;
-    const secret = curlWebhookSecret(webhookSecret, webhookSecretDirty);
-    return [
-      `curl -X POST ${webhookInvokeUrl} \\`,
-      `  -H 'Content-Type: application/json' \\`,
-      `  -H 'X-Trigger-Secret: ${secret}' \\`,
-      `  -d '{"prompt": "What should the agent do?"}'`,
-    ].join("\n");
-  }, [webhookInvokeUrl, webhookSecret, webhookSecretDirty]);
 
   const noun = kind === "cron" ? L.schedule : L.webhook;
 
@@ -139,14 +111,6 @@ export function ScheduleEditor({
       </header>
 
       <div className="schedule-editor-body">
-        {!isNew && onEnabledChange && (
-          <CapabilityEnablement
-            enabled={trigger.enabled}
-            noun={noun}
-            onChange={onEnabledChange}
-          />
-        )}
-
         {kind === "cron" && (
           <label className="field">
             <span className="field-label">Cron expression</span>
@@ -226,53 +190,9 @@ export function ScheduleEditor({
                   ? "Save changes to activate this replacement secret."
                   : !webhookSecret && hasStoredWebhookSecret
                     ? "The stored secret cannot be shown. Use your saved copy, or regenerate and save a replacement."
-                    : <>Send as <code>X-Trigger-Secret</code> or <code>Authorization: Bearer …</code> when POSTing to fire this webhook.</>}
+                    : <>Send as <code>X-Trigger-Secret</code> or <code>Authorization: Bearer …</code> when POSTing to fire this webhook. After saving, the webhook’s page shows a sample request.</>}
             </span>
           </label>
-        )}
-
-        {kind === "webhook" && (
-          <div className="field">
-            <span className="field-label">How to trigger</span>
-            {webhookInvokeUrl && curlExample ? (
-              <>
-                <div className="field-inline">
-                  <input className="field-input mono" value={webhookInvokeUrl} readOnly spellCheck={false} />
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    title="Copy URL"
-                    onClick={() => void navigator.clipboard?.writeText(webhookInvokeUrl)}
-                  >
-                    <Copy size={15} />
-                  </button>
-                </div>
-                <div className="webhook-curl">
-                  <pre className="webhook-curl-code">{curlExample}</pre>
-                  <button
-                    type="button"
-                    className="icon-btn webhook-curl-copy"
-                    title="Copy curl command"
-                    onClick={() => void navigator.clipboard?.writeText(curlExample)}
-                  >
-                    <Copy size={15} />
-                  </button>
-                </div>
-                <span className="field-hint">
-                  {webhookSecretDirty ? (
-                    "Save the replacement secret before using this sample request."
-                  ) : webhookSecret ? (
-                    <>POST to fire it. The <code>prompt</code> in the body becomes the agent’s task
-                    (<code>text</code> or a raw JSON string also work).</>
-                  ) : (
-                    <>Replace <code>{WEBHOOK_SECRET_PLACEHOLDER}</code> with the webhook’s saved secret.</>
-                  )}
-                </span>
-              </>
-            ) : (
-              <span className="field-hint">Save this webhook to get its invoke URL and a sample request.</span>
-            )}
-          </div>
         )}
 
         <label className="field">

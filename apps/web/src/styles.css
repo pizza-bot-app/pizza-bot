@@ -1757,8 +1757,26 @@ button.sidebar-folder-row:hover,
 .resource-editor-delete:hover:not(:disabled) { border-color: var(--danger, #e5484d); }
 
 .resource-card-header-action { margin-left: auto; flex: 0 0 auto; }
-.mcp-managed-link { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.mcp-managed-link:disabled { color: var(--dim); cursor: default; text-decoration: none; }
+.resource-plugin-link { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.resource-plugin-link code { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
+.resource-plugin-link:disabled { color: var(--dim); cursor: default; text-decoration: none; }
+.resource-card-lede { margin: -8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--text); }
+.resource-chip-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.resource-chip-list .resource-tool-chip { padding: 3px 10px; }
+.resource-inline-action {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 0; border-top: 1px solid var(--border);
+}
+.resource-inline-action-copy { min-width: 0; }
+.resource-inline-action-title { font-size: 13.5px; font-weight: 700; }
+.resource-inline-action-detail { margin-top: 3px; font-size: 12px; line-height: 1.4; color: var(--dim); overflow-wrap: anywhere; }
+.resource-inline-action .btn-secondary { flex: 0 0 auto; }
+.resource-editor-blocked { font-size: 12px; color: var(--dim); }
+.resource-editor-note {
+  margin: 0; padding: 10px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.45;
+  background: var(--panel); border: 1px solid var(--border); color: var(--dim);
+}
+.field-input:disabled { background: var(--panel-2); color: var(--dim); cursor: not-allowed; }
 .mcp-load-error {
   display: flex; align-items: center; gap: 12px; padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 40%, var(--border));
@@ -1855,7 +1873,7 @@ textarea.resource-systemprompt { font-size: 13px; line-height: 1.55; }
 }
 .schedule-row:hover .schedule-row-actions, .schedule-row:focus-within .schedule-row-actions { opacity: 1; }
 
-.schedule-editor { display: flex; flex-direction: column; gap: 0; max-width: 640px; }
+.schedule-editor { display: flex; flex-direction: column; gap: 0; max-width: 720px; }
 .schedule-editor-head { margin-bottom: 8px; }
 .schedule-editor-title { margin: 0; font-size: 17px; font-weight: 700; }
 .schedule-editor-body { display: flex; flex-direction: column; gap: 18px; padding: 12px 0; }

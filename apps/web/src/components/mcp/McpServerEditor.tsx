@@ -13,8 +13,6 @@ export interface McpServerEditorProps {
   onDelete?: () => void;
   /** When set, Delete stays visible but disabled and explains why. */
   deleteBlockedReason?: string;
-  enablement?: ReactNode;
-  reconnectControl?: ReactNode;
   dependents?: ReactNode;
   /** Receives whether the draft differs from what was loaded, so the caller can guard discards. */
   onCancel: (dirty: boolean) => void;
@@ -92,8 +90,6 @@ export function McpServerEditor({
   onSave,
   onDelete,
   deleteBlockedReason,
-  enablement,
-  reconnectControl,
   dependents,
   onCancel,
 }: McpServerEditorProps) {
@@ -161,9 +157,6 @@ export function McpServerEditor({
       </header>
 
       <div className="resource-editor-body">
-        {enablement}
-        {reconnectControl}
-
         {isNew && (
           <button type="button" className="btn-secondary mcp-paste-json-btn" onClick={() => setPasteJsonOpen(true)}>
             <FileJson size={14} /> Paste JSON
@@ -184,11 +177,7 @@ export function McpServerEditor({
               Saved as <code>{slugify(name, "server")}</code> in <code>.mcp.json</code>
             </span>
           )}
-          {!isNew && (
-            <span className="field-hint">
-              The ID is fixed once created — delete and re-create the server to rename it.
-            </span>
-          )}
+          {!isNew && <span className="field-hint">Names can’t be changed after creation.</span>}
         </label>
 
         <div className="field">
@@ -311,10 +300,15 @@ export function McpServerEditor({
             className="btn-secondary resource-editor-delete"
             onClick={onDelete}
             disabled={saving || Boolean(deleteBlockedReason)}
-            title={deleteBlockedReason}
+            aria-describedby={deleteBlockedReason ? "mcp-delete-blocked" : undefined}
           >
             <Trash2 size={14} /> Delete
           </button>
+        )}
+        {!isNew && deleteBlockedReason && (
+          <span id="mcp-delete-blocked" className="resource-editor-blocked">
+            {deleteBlockedReason}
+          </span>
         )}
         <span className="resource-editor-actions-spacer" />
         <button type="button" className="btn-secondary" onClick={cancel} disabled={saving}>

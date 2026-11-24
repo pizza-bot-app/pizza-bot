@@ -4,7 +4,7 @@ import { AppToastProvider } from "../AppToast.js";
 import { SkillEditor } from "./SkillEditor.js";
 
 describe("SkillEditor", () => {
-  it("renders installation enablement for an existing custom skill", () => {
+  it("explains that customizing a shipped skill saves a user copy", () => {
     const html = renderToStaticMarkup(
       <AppToastProvider>
         <SkillEditor
@@ -21,12 +21,13 @@ describe("SkillEditor", () => {
           tools={{ builtins: [], servers: [] }}
           onSave={vi.fn()}
           onGenerate={vi.fn()}
-          enablement={<div data-testid="skill-enablement">Enabled</div>}
+          customizing
           onCancel={vi.fn()}
         />
       </AppToastProvider>,
     );
 
-    expect(html).toContain('data-testid="skill-enablement"');
+    expect(html).toContain("Customize Notes");
+    expect(html).toContain("Saving creates your own copy of this skill.");
   });
 });
