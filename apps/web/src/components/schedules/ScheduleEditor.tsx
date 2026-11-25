@@ -1,3 +1,4 @@
+import { errorMessage } from "@/api-client";
 import { useMemo, useState } from "react";
 import type { TriggerDef, TriggerKind } from "@pizza-bot/core";
 import { Copy, RefreshCw, ChevronLeft, Trash2 } from "lucide-react";
@@ -88,10 +89,10 @@ export function ScheduleEditor({
         tone: "success",
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e) ?? "Save failed");
       notify({
         title: `Could not save ${kind === "cron" ? "schedule" : "webhook"}`,
-        description: e instanceof Error ? e.message : undefined,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {
