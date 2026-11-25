@@ -587,6 +587,20 @@ describe("AgentHost.deleteThread", () => {
     expect(host.threadActivity.listAfter(0)).toHaveLength(0);
   });
 
+  it("closes a paused trigger occurrence on the deleted thread so recovery cannot relaunch it", async () => {
+    const at = new Date().toISOString();
+    host.triggers.create({ id: "t", kind: "webhook", enabled: true, webhookSecret: "k", graphId: "g" });
+    host.triggers.createOccurrence({ id: "occ", triggerId: "t", scheduledAt: at, reason: "webhook", now: at });
+    host.triggers.beginOccurrence("occ", at, 3);
+    host.triggers.attachRun("occ", "t1", "run-1", "running", at);
+    host.triggers.completeOccurrenceRun("run-1", "t1", "interrupted", at);
+    host.threadStore.create({ threadId: "t1", graphId: "g" });
+
+    await host.deleteThread("t1");
+    expect(host.triggers.getOccurrence("occ")).toMatchObject({ status: "dead", lastError: "thread deleted" });
+    expect(host.triggers.listWaitingOccurrences()).toEqual([]);
+  });
+
   it("reports deleted:false before the checkpoint schema has been initialized", async () => {
     await expect(host.deleteThread("missing")).resolves.toBe(false);
   });
