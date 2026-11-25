@@ -20,7 +20,8 @@ export async function migrateSkillToolGrants(
   const migrated: string[] = [];
   const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === PIZZA_BOT_AGENT.id) continue;
+    const linked = entry.isSymbolicLink();
+    if ((!entry.isDirectory() && !linked) || entry.name === PIZZA_BOT_AGENT.id) continue;
     const id = entry.name;
     const skillMd = join(skillsDir, id, "SKILL.md");
     try {
@@ -29,6 +30,11 @@ export async function migrateSkillToolGrants(
       if (!raw || !match) continue;
       const doc = parseDocument(match[2]!);
       if (doc.errors.length > 0 || !AGENT_KEYS.some((key) => doc.has(key))) continue;
+      // A linked skill is edited at its source, so never rewrite it through the link.
+      if (linked) {
+        log(`skill "${id}": linked skill still declares tools or interruptOn; move them into an agent that mounts it`);
+        continue;
+      }
       const data = doc.toJS() as Record<string, unknown>;
       const description = typeof data.description === "string" ? data.description.trim() : "";
       if (!description) continue;

@@ -151,7 +151,7 @@ describe("FsPluginLoader", () => {
     ]);
     const reg = new ContributionRegistry();
     await loader.load(sources[0]!.manifest, sources[0]!.root, reg);
-    expect(reg.skills.has("health-report")).toBe(true);
+    expect(reg.agents.has("health-report")).toBe(true);
   });
 
   it("does not mutate the registry when a late contribution is invalid", async () => {
