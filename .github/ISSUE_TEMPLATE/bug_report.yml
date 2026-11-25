@@ -53,6 +53,7 @@ body:
         - Requesty
         - Opper
         - UberLLM
+        - Cheaper Inference
         - Ollama
         - Not reached / not applicable
     validations:
