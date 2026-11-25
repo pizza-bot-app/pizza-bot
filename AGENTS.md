@@ -118,8 +118,10 @@ are written — keep them in mind when adding assertions or temp-dir cleanup:
   `0o700`/`0o600` assertions can never hold. Gate them on
   `process.platform !== "win32"` (see `packages/logging` `file-store.test.ts` and
   `packages/storage` `app-db.test.ts`).
-- **Symlinks need elevation.** `symlink()` throws `EPERM` without Developer Mode,
-  so symlink-behavior tests use `it.skipIf(process.platform === "win32")`.
+- **Symlinks need elevation; junctions don't.** `symlink()` throws `EPERM`
+  without Developer Mode, so a test that links a directory passes `"junction"`
+  as the type (ignored elsewhere) and runs everywhere. Only tests that need a
+  file symlink use `it.skipIf(process.platform === "win32")`.
 - **CRLF checkouts.** `core.autocrlf` yields CRLF and the repo has no
   `.gitattributes`, so never assert an exact `\n` against on-disk repo content —
   match `\r?\n`. Production parsers already tolerate both (e.g.
