@@ -680,7 +680,7 @@ another provider can follow the same pattern without changing the runtime,
 transport, or frontend. Each adapter is a peer submodule under
 `packages/inference-providers/src/providers/<id>` (Bedrock keeps its own
 subdirectory for the shim's multiple files). Hosted OpenAI-compatible gateways
-(Requesty, Opper, UberLLM) are not adapters of their own: each is an
+(Requesty, Opper, UberLLM, Cheaper Inference) are not adapters of their own: each is an
 `OpenAiCompatibleSpec` (base URL, env prefix, optional featured listing, and a
 reader for its `/models` entries) run by the shared `OpenAiCompatibleProvider`,
 so adding a gateway means writing a spec. The OpenAI-compatible family and

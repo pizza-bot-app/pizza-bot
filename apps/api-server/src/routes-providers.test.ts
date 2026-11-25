@@ -60,7 +60,7 @@ describe("provider routes", () => {
       body: JSON.stringify(body),
     });
 
-  it("lists all nine built-in providers with their authSchema", async () => {
+  it("lists all ten built-in providers with their authSchema", async () => {
     const providers = await list();
     const ids = providers.map((p) => p.id).sort();
     expect(ids).toEqual(["anthropic", "bedrock", "cheaperinference", "google", "ollama", "openai", "openrouter", "opper", "requesty", "uberllm"]);

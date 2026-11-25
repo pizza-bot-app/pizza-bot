@@ -113,14 +113,12 @@ OpenAI and Anthropic also accept custom base URLs for compatible endpoints;
 OpenAI can explicitly select Responses or Chat Completions, and Anthropic
 supports `x-api-key` or bearer authentication. Requesty accepts a base URL
 override such as `https://router.eu.requesty.ai/v1` for its EU region. Cheaper
-Inference routes to its fixed endpoint and uses bare model ids such as
-`gpt-5.4-mini`. OpenAI,
-OpenRouter, Requesty, Opper, and UberLLM take an optional **Advanced request
-JSON** that is merged into every request, for options such as
-`{"service_tier": "flex"}`. Select
-a model with `PIZZA_MODEL=<provider>:<id>`. The desktop protects entered
-secrets with Electron `safeStorage`; server configuration persists only
-environment-variable references.
+Inference uses bare model ids such as `gpt-5.4-mini`. OpenAI, OpenRouter,
+Requesty, Opper, UberLLM, and Cheaper Inference take an optional **Advanced
+request JSON** that is merged into every request, for options such as
+`{"service_tier": "flex"}`. Select a model with `PIZZA_MODEL=<provider>:<id>`.
+The desktop protects entered secrets with Electron `safeStorage`; server
+configuration persists only environment-variable references.
 
 ## Extend it
 
