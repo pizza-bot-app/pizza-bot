@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -94,6 +94,27 @@ describe("agent catalogs", () => {
 });
 
 describe("migrateSkillToolGrants", () => {
+  it("leaves a linked skill untouched and says its grants need an agent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "migrate-"));
+    const source = join(root, "source", "mailer");
+    const skillsDir = join(root, "skills");
+    const agentsDir = join(root, "agents");
+    const original = "---\nname: mailer\ndescription: Sends mail.\ntools:\n  - mcp:mail:send\n---\n# Mailer\n";
+    await mkdir(source, { recursive: true });
+    await mkdir(skillsDir);
+    await writeFile(join(source, "SKILL.md"), original);
+    // A junction needs no privilege on Windows; other platforms ignore the type.
+    await symlink(source, join(skillsDir, "mailer"), "junction");
+
+    const logs: string[] = [];
+    expect(await migrateSkillToolGrants(skillsDir, agentsDir, (msg) => logs.push(msg))).toEqual([]);
+    expect(await readFile(join(source, "SKILL.md"), "utf8")).toBe(original);
+    await expect(readdir(agentsDir)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(logs).toEqual([
+      'skill "mailer": linked skill still declares tools or interruptOn; move them into an agent that mounts it',
+    ]);
+  });
+
   it("moves a user skill's tool grants into an agent that mounts it", async () => {
     const root = await mkdtemp(join(tmpdir(), "migrate-"));
     const skillsDir = join(root, "skills");
