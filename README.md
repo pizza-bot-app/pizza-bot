@@ -51,7 +51,8 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 - **Delegate to specialists.** Skills become tool-scoped subagents whose progress
   appears in the Activity panel.
 - **Bring your model provider.** Amazon Bedrock, Anthropic, Google Gemini,
-  OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference, and Ollama are supported.
+  OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference, LiteLLM, and
+  Ollama are supported.
 - **Keep control of consequential actions.** Human-in-the-loop approvals,
   long-term memory, file attachments, and desktop notifications are built into
   the workflow.
@@ -103,8 +104,9 @@ CLI development, desktop packages, and remote backends.
 
 A running api-server needs access to at least one model provider; HTTP clients
 do not. Configure Amazon Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter,
-Requesty, Opper, UberLLM, Cheaper Inference, or Ollama in **Settings > Providers**. Bedrock accepts an AWS
-profile, AWS access keys, or a Bedrock API key, with an optional region
+Requesty, Opper, UberLLM, Cheaper Inference, LiteLLM, or Ollama in
+**Settings > Providers**. Bedrock accepts an AWS profile, AWS access keys, or a
+Bedrock API key, with an optional region
 override; otherwise `AWS_REGION` or `us-west-2` is used. Bedrock combines its
 native catalog with the regional Mantle catalog and routes models through
 Converse, OpenAI Responses or Chat Completions, or Anthropic Messages according
@@ -113,12 +115,14 @@ OpenAI and Anthropic also accept custom base URLs for compatible endpoints;
 OpenAI can explicitly select Responses or Chat Completions, and Anthropic
 supports `x-api-key` or bearer authentication. Requesty accepts a base URL
 override such as `https://router.eu.requesty.ai/v1` for its EU region. Cheaper
-Inference uses bare model ids such as `gpt-5.4-mini`. OpenAI, OpenRouter,
-Requesty, Opper, UberLLM, and Cheaper Inference take an optional **Advanced
-request JSON** that is merged into every request, for options such as
-`{"service_tier": "flex"}`. Select a model with `PIZZA_MODEL=<provider>:<id>`.
-The desktop protects entered secrets with Electron `safeStorage`; server
-configuration persists only environment-variable references.
+Inference uses bare model ids such as `gpt-5.4-mini`. LiteLLM connects to a
+proxy URL (default `http://localhost:4000/v1`) and needs a key only when the
+proxy has a master key. OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper
+Inference, and LiteLLM take an optional **Advanced request JSON** that is merged
+into every request, for options such as `{"service_tier": "flex"}`. Select a
+model with `PIZZA_MODEL=<provider>:<id>`. The desktop protects entered secrets
+with Electron `safeStorage`; server configuration persists only
+environment-variable references.
 
 ## Extend it
 

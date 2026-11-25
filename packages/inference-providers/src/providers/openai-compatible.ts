@@ -3,6 +3,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import type {
   ModelDescriptor,
   ModelProvider,
+  ProviderAuthField,
   ProviderAuthMethod,
   ResolvedProviderConfig,
 } from "@pizza-bot/core";
@@ -25,6 +26,9 @@ import { createOpenAiChatModel } from "./openai.js";
 
 const DEFAULT_MAX_TOKENS = 8_192;
 const FETCH_TIMEOUT_MS = 5_000;
+// ChatOpenAI falls back to OPENAI_API_KEY when given no key, which would send a
+// real OpenAI key to the gateway; keyless specs pass this and strip the header.
+const KEYLESS_PLACEHOLDER = "keyless";
 
 export type RawModelEntry = Record<string, unknown>;
 
@@ -50,6 +54,15 @@ export interface OpenAiCompatibleSpec {
   featuredModelsPath?: string;
   /** Returns undefined to leave an entry (embeddings, images, offline models) out of the picker. */
   readModel?(entry: RawModelEntry, featured: boolean): CompatibleModelFacts | undefined;
+  /**
+   * Replaces the `/models` (and featured) listing. `fetchListing` GETs a path
+   * under the base URL and returns its `data` array; a thrown catalog error is surfaced as is.
+   */
+  discoverModels?(
+    fetchListing: (path: string) => Promise<RawModelEntry[]>,
+  ): Promise<CompatibleModelFacts[]>;
+  /** With no key, requests go out without an `Authorization` header. */
+  keyOptional?: boolean;
 }
 
 export interface OpenAiCompatibleProviderOptions {
@@ -84,27 +97,30 @@ export class OpenAiCompatibleProvider implements ModelProvider {
 
   constructor(private readonly spec: OpenAiCompatibleSpec, opts: OpenAiCompatibleProviderOptions = {}) {
     this.id = spec.id;
+    const apiKeyField: ProviderAuthField = {
+      key: "apiKey",
+      label: `${spec.label} API key`,
+      type: "password",
+      required: !spec.keyOptional,
+    };
+    const maxTokensField: ProviderAuthField = {
+      key: "maxTokens",
+      label: "Output token budget",
+      type: "text",
+      required: false,
+      default: String(DEFAULT_MAX_TOKENS),
+    };
+    const baseUrlField: ProviderAuthField = {
+      key: "baseUrl",
+      label: "Base URL",
+      type: "text",
+      required: false,
+      default: spec.defaultBaseUrl,
+    };
     this.authSchema = [{
       id: "api-key",
       label: "API key",
-      fields: [
-        { key: "apiKey", label: `${spec.label} API key`, type: "password", required: true },
-        {
-          key: "maxTokens",
-          label: "Output token budget",
-          type: "text",
-          required: false,
-          default: String(DEFAULT_MAX_TOKENS),
-        },
-        {
-          key: "baseUrl",
-          label: "Base URL",
-          type: "text",
-          required: false,
-          default: spec.defaultBaseUrl,
-        },
-        REQUEST_OVERRIDES_FIELD,
-      ],
+      fields: [apiKeyField, maxTokensField, baseUrlField, REQUEST_OVERRIDES_FIELD],
     }];
     this.apiKey = opts.apiKey;
     this.baseUrl = opts.baseUrl;
@@ -121,7 +137,8 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     // Parse before mutating so a rejected save leaves the live provider untouched.
     const requestOverrides = parseRequestOverrides(cfg.values.requestOverrides);
     const key = cfg.values.apiKey?.trim();
-    if (key) this.apiKey = key;
+    // A blank key on a keyless-capable gateway means "go keyless", not "keep the old key".
+    if (key || this.spec.keyOptional) this.apiKey = key || undefined;
     this.maxTokens = positiveInteger(cfg.values.maxTokens) ?? DEFAULT_MAX_TOKENS;
     this.baseUrl = cfg.values.baseUrl?.trim() || undefined;
     this.requestOverrides = requestOverrides;
@@ -132,20 +149,15 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     if (this.models) return this.models;
     const { label } = this.spec;
     const apiKey = this.resolveApiKey();
-    if (!apiKey) throw missingCatalogCredentials(label);
+    if (!apiKey && !this.spec.keyOptional) throw missingCatalogCredentials(label);
 
     try {
-      const featuredPath = this.spec.featuredModelsPath;
-      const [featured, catalog] = await Promise.all([
-        featuredPath ? this.fetchModels(featuredPath, apiKey).catch(() => []) : [],
-        this.fetchModels("/models", apiKey),
-      ]);
-      const readModel = this.spec.readModel ?? readCommonModelFields;
+      const fetchListing = (path: string) => this.fetchModels(path, apiKey);
+      const listed: (CompatibleModelFacts | undefined)[] = this.spec.discoverModels
+        ? await this.spec.discoverModels(fetchListing)
+        : await this.discoverFromModels(fetchListing);
       const seen = new Set<string>();
-      const discovered = [
-        ...featured.map((entry) => readModel(entry, true)),
-        ...catalog.map((entry) => readModel(entry, false)),
-      ].flatMap((facts): ModelDescriptor[] => {
+      const discovered = listed.flatMap((facts): ModelDescriptor[] => {
         if (!facts || seen.has(facts.id)) return [];
         seen.add(facts.id);
         const { id, label: modelLabel, ...limits } = facts;
@@ -171,7 +183,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
 
   async buildModel(modelId: string): Promise<BaseChatModel> {
     const apiKey = this.resolveApiKey();
-    if (!apiKey) {
+    if (!apiKey && !this.spec.keyOptional) {
       throw new OpenAiCompatibleBuildError(
         `No ${this.spec.label} API key configured (set ${this.spec.envPrefix}_API_KEY).`,
         "AUTH_EXPIRED",
@@ -183,7 +195,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     const descriptor = this.descriptors.get(modelId);
     return createOpenAiChatModel({
       modelId,
-      apiKey,
+      apiKey: apiKey ?? KEYLESS_PLACEHOLDER,
       maxTokens: Math.min(
         this.maxTokens,
         descriptor?.maxOutputTokens ?? Number.POSITIVE_INFINITY,
@@ -191,16 +203,31 @@ export class OpenAiCompatibleProvider implements ModelProvider {
       ),
       apiMode: "chat-completions",
       baseUrl: this.resolveBaseUrl(),
-      fetch: this.fetchFn,
+      fetch: apiKey ? this.fetchFn : withoutAuthorization(this.fetchFn),
       learnedMaxTokens: this.learnedMaxTokens,
       ...(descriptor ? { descriptor } : {}),
       ...(this.requestOverrides ? { requestOverrides: this.requestOverrides } : {}),
     });
   }
 
-  private async fetchModels(path: string, apiKey: string): Promise<RawModelEntry[]> {
+  private async discoverFromModels(
+    fetchListing: (path: string) => Promise<RawModelEntry[]>,
+  ): Promise<(CompatibleModelFacts | undefined)[]> {
+    const featuredPath = this.spec.featuredModelsPath;
+    const [featured, catalog] = await Promise.all([
+      featuredPath ? fetchListing(featuredPath).catch(() => []) : [],
+      fetchListing("/models"),
+    ]);
+    const readModel = this.spec.readModel ?? readCommonModelFields;
+    return [
+      ...featured.map((entry) => readModel(entry, true)),
+      ...catalog.map((entry) => readModel(entry, false)),
+    ];
+  }
+
+  private async fetchModels(path: string, apiKey: string | undefined): Promise<RawModelEntry[]> {
     const response = await this.fetchFn(`${this.resolveBaseUrl()}${path}`, {
-      headers: { authorization: `Bearer ${apiKey}` },
+      ...(apiKey ? { headers: { authorization: `Bearer ${apiKey}` } } : {}),
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!response.ok) throw catalogHttpError(this.spec.label, response.status);
@@ -237,6 +264,14 @@ export function readCommonModelFields(entry: RawModelEntry): CompatibleModelFact
 export function positiveInteger(value: unknown): number | undefined {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function withoutAuthorization(fetchFn: typeof fetch): typeof fetch {
+  return (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.delete("authorization");
+    return fetchFn(input, { ...init, headers });
+  };
 }
 
 function booleanOf(value: unknown): boolean | undefined {

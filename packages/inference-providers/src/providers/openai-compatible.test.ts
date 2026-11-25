@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HumanMessage } from "@langchain/core/messages";
 import { ModelsDevCatalogLoader } from "../models-dev.js";
+import { catalogHttpError } from "../catalog-error.js";
 import { OpenAiCompatibleProvider, type OpenAiCompatibleSpec } from "./openai-compatible.js";
 
 const SPEC: OpenAiCompatibleSpec = {
@@ -236,5 +237,80 @@ describe("OpenAiCompatibleProvider", () => {
       ["baseUrl", "text"],
       ["requestOverrides", "json"],
     ]);
+  });
+
+  it("marks the key optional when the spec allows keyless access", () => {
+    const provider = new OpenAiCompatibleProvider({ ...SPEC, keyOptional: true });
+
+    expect(provider.authSchema[0]?.fields.find((field) => field.key === "apiKey")?.required).toBe(false);
+  });
+
+  describe("with an optional key", () => {
+    const KEYLESS: OpenAiCompatibleSpec = { ...SPEC, keyOptional: true };
+
+    it("lists and chats without an Authorization header or the OPENAI_API_KEY fallback", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-real-openai-key");
+      const fetchFn = vi.fn(async (input: Parameters<typeof fetch>[0], _init?: RequestInit) =>
+        String(input).endsWith("/models")
+          ? new Response(JSON.stringify({ data: [{ id: "m" }] }), { status: 200 })
+          : chatReply());
+      const provider = new OpenAiCompatibleProvider(KEYLESS, { fetch: fetchFn, modelsDev: noModelsDev });
+
+      await expect(provider.listModels()).resolves.toHaveLength(1);
+      await (await provider.buildModel("m")).invoke([new HumanMessage("hi")]);
+
+      const [listing, chat] = fetchFn.mock.calls;
+      expect(listing?.[1]?.headers).toBeUndefined();
+      expect(String(chat?.[0])).toBe("https://gateway.example/v1/chat/completions");
+      expect(new Headers(chat?.[1]?.headers).get("authorization")).toBeNull();
+    });
+
+    it("clears a stored key when the saved config leaves it blank", async () => {
+      const fetchFn = vi.fn(async (_input: Parameters<typeof fetch>[0], _init?: RequestInit) =>
+        new Response(JSON.stringify({ data: [] }), { status: 200 }));
+      const provider = new OpenAiCompatibleProvider(KEYLESS, {
+        apiKey: "old",
+        fetch: fetchFn,
+        modelsDev: noModelsDev,
+      });
+
+      provider.configure({ method: "api-key", values: { apiKey: " " } });
+      await provider.listModels();
+
+      expect(fetchFn.mock.calls[0]?.[1]).not.toHaveProperty("headers");
+    });
+  });
+
+  describe("with a custom discovery hook", () => {
+    it("dedupes the hook's models and authenticates its listing requests", async () => {
+      const fetchFn = catalogFetch({ "https://gateway.example/v1/catalog": { data: [{ name: "a" }] } });
+      const provider = new OpenAiCompatibleProvider({
+        ...SPEC,
+        async discoverModels(fetchListing) {
+          const entries = await fetchListing("/catalog");
+          return [...entries, ...entries].map((entry) => ({ id: String(entry.name), label: "Custom" }));
+        },
+      }, { apiKey: "k", fetch: fetchFn, modelsDev: noModelsDev });
+
+      await expect(provider.listModels()).resolves.toEqual([
+        { id: "a", provider: "gateway", displayName: "a (Custom)" },
+      ]);
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      expect(fetchFn).toHaveBeenCalledWith(
+        "https://gateway.example/v1/catalog",
+        expect.objectContaining({ headers: { authorization: "Bearer k" } }),
+      );
+    });
+
+    it("surfaces a catalog error the hook throws", async () => {
+      const provider = new OpenAiCompatibleProvider({
+        ...SPEC,
+        discoverModels: async () => {
+          throw catalogHttpError("Gateway", 401);
+        },
+      }, { apiKey: "k", modelsDev: noModelsDev });
+
+      await expect(provider.listModels()).rejects.toMatchObject({ code: "authentication" });
+    });
   });
 });
