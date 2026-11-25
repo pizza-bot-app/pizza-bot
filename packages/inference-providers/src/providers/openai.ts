@@ -25,6 +25,11 @@ import {
   missingCatalogCredentials,
 } from "../catalog-error.js";
 import { normalizeMultimodalToolResultsForOpenAiResponses } from "./openai-multimodal-fix.js";
+import {
+  parseRequestOverrides,
+  REQUEST_OVERRIDES_FIELD,
+  type RequestOverrides,
+} from "../request-overrides.js";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 // The `openai` SDK refuses to construct a client without a credential, so an
@@ -123,6 +128,7 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
         type: "text",
         required: false,
       },
+      REQUEST_OVERRIDES_FIELD,
     ],
   },
 ];
@@ -140,6 +146,7 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
   private maxTokens: number;
   private catalogProvider: string | undefined;
   private apiMode: OpenAiApiMode;
+  private requestOverrides: RequestOverrides | undefined;
 
   constructor(opts: OpenAiProviderOptions = {}) {
     this.models = opts.models;
@@ -156,6 +163,7 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
   }
 
   configure(cfg: ResolvedProviderConfig): void {
+    const requestOverrides = parseRequestOverrides(cfg.values.requestOverrides);
     const key = cfg.values.apiKey?.trim();
     if (key) this.apiKey = key;
     this.baseUrl = cfg.values.baseUrl?.trim() || undefined;
@@ -166,6 +174,7 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
         "An API key is required unless you set a Base URL for an OpenAI-compatible endpoint.",
       );
     }
+    this.requestOverrides = requestOverrides;
     this.maxTokens = positiveInteger(cfg.values.maxTokens) ?? DEFAULT_MAX_TOKENS;
     this.catalogProvider = cfg.values.catalogProvider?.trim() || undefined;
     this.apiMode = parseApiMode(cfg.values.apiMode);
@@ -258,6 +267,7 @@ export class OpenAiLangChainModelProvider implements ModelProvider {
       fetch: this.fetchFn,
       ...(descriptor ? { descriptor } : {}),
       ...(configuredBaseUrl ? { baseUrl: configuredBaseUrl } : {}),
+      ...(this.requestOverrides ? { requestOverrides: this.requestOverrides } : {}),
     });
   }
 }
@@ -271,6 +281,8 @@ export interface OpenAiChatModelOptions {
   learnedMaxTokens?: Map<string, number>;
   baseUrl?: string;
   fetch?: typeof fetch;
+  /** Spread into the request body after LangChain's own fields, so these win. */
+  requestOverrides?: RequestOverrides;
 }
 
 function normalizeOpenAIModelError(error: unknown): unknown {
@@ -341,12 +353,14 @@ export async function createOpenAiChatModel(
     learnedMaxTokens,
     baseUrl,
     fetch: fetchFn,
+    requestOverrides,
   } = options;
   const fields = {
     model: modelId,
     apiKey,
     maxTokens,
     useResponsesApi: apiMode === "responses",
+    ...(requestOverrides ? { modelKwargs: requestOverrides } : {}),
     ...((baseUrl || fetchFn)
       ? {
           configuration: {

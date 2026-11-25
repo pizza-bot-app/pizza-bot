@@ -199,3 +199,26 @@ describe("OpenRouter attachment conversion", () => {
     }]);
   });
 });
+
+describe("OpenRouter request overrides", () => {
+  it("passes advanced request JSON through to the request body", async () => {
+    const provider = new OpenRouterLangChainModelProvider({ models: [] });
+    provider.configure({
+      method: "api-key",
+      values: { apiKey: "test-key", requestOverrides: '{"service_tier":"flex"}' },
+    });
+
+    expect(await provider.buildModel("openai/gpt-4o")).toMatchObject({
+      modelKwargs: { service_tier: "flex" },
+    });
+  });
+
+  it("rejects a reserved field when settings are saved", () => {
+    const provider = new OpenRouterLangChainModelProvider({ models: [] });
+
+    expect(() => provider.configure({
+      method: "api-key",
+      values: { apiKey: "test-key", requestOverrides: '{"messages":[]}' },
+    })).toThrow('cannot set "messages"');
+  });
+});

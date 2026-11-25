@@ -679,7 +679,15 @@ Google Gemini, OpenAI, OpenRouter, Requesty, Opper, and Ollama are peer
 another provider can follow the same pattern without changing the runtime,
 transport, or frontend. Each adapter is a peer submodule under
 `packages/inference-providers/src/providers/<id>` (Bedrock keeps its own
-subdirectory for the shim's multiple files). Provider quirks stay
+subdirectory for the shim's multiple files). Hosted OpenAI-compatible gateways
+(Requesty, Opper) are not adapters of their own: each is an
+`OpenAiCompatibleSpec` (base URL, env prefix, optional featured listing, and a
+reader for its `/models` entries) run by the shared `OpenAiCompatibleProvider`,
+so adding a gateway means writing a spec. The OpenAI-compatible family and
+OpenRouter also accept an "Advanced request JSON" setting that is merged into
+every request body. It is validated when settings are saved and rejects fields
+the agent depends on (`model`, `messages`, `tools`, `stream`, …) and the output
+cap, which the token budget setting owns. Provider quirks stay
 provider-local: the Bedrock adapter
 (`packages/inference-providers/src/providers/bedrock`) owns the `maxTokens`
 default

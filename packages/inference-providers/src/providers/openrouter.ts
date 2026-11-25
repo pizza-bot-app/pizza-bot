@@ -13,6 +13,11 @@ import {
 } from "../models-dev.js";
 import { withContextWindow } from "../model-profile.js";
 import {
+  parseRequestOverrides,
+  REQUEST_OVERRIDES_FIELD,
+  type RequestOverrides,
+} from "../request-overrides.js";
+import {
   catalogConnectionError,
   catalogHttpError,
   missingCatalogCredentials,
@@ -86,6 +91,7 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
         required: false,
         default: DEFAULT_SITE_NAME,
       },
+      REQUEST_OVERRIDES_FIELD,
     ],
   },
 ];
@@ -102,6 +108,7 @@ export class OpenRouterLangChainModelProvider implements ModelProvider {
   private maxTokens: number;
   private siteUrl: string | undefined;
   private siteName: string;
+  private requestOverrides: RequestOverrides | undefined;
 
   constructor(opts: OpenRouterProviderOptions = {}) {
     this.apiKey = opts.apiKey;
@@ -118,11 +125,13 @@ export class OpenRouterLangChainModelProvider implements ModelProvider {
   }
 
   configure(cfg: ResolvedProviderConfig): void {
+    const requestOverrides = parseRequestOverrides(cfg.values.requestOverrides);
     const key = cfg.values.apiKey?.trim();
     if (key) this.apiKey = key;
     this.maxTokens = positiveInteger(cfg.values.maxTokens) ?? DEFAULT_MAX_TOKENS;
     this.siteUrl = cfg.values.siteUrl?.trim() || undefined;
     this.siteName = cfg.values.siteName?.trim() || DEFAULT_SITE_NAME;
+    this.requestOverrides = requestOverrides;
   }
 
   async listModels(): Promise<ModelDescriptor[]> {
@@ -202,6 +211,7 @@ export class OpenRouterLangChainModelProvider implements ModelProvider {
       maxTokens,
       siteName: this.siteName,
       ...(this.siteUrl ? { siteUrl: this.siteUrl } : {}),
+      ...(this.requestOverrides ? { modelKwargs: this.requestOverrides } : {}),
     });
   }
 

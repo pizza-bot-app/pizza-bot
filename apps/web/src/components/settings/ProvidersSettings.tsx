@@ -602,6 +602,15 @@ function FieldInput({
             </option>
           ))}
         </select>
+      ) : field.type === "json" ? (
+        <textarea
+          className="field-input mono"
+          rows={4}
+          spellCheck={false}
+          value={value}
+          placeholder={field.default ?? L.jsonFieldPlaceholder}
+          onChange={(e) => onChange(e.target.value)}
+        />
       ) : (
         <input
           className="field-input"
@@ -623,6 +632,7 @@ function FieldInput({
           onChange={(e) => onChange(e.target.value)}
         />
       )}
+      {field.type === "json" && <span className="field-hint">{L.jsonFieldHint}</span>}
       {field.type === "password" && (
         <span className={`field-hint${unavailable ? " error" : ""}`}>
           {unavailable
