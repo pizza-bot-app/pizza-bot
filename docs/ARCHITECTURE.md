@@ -513,7 +513,10 @@ with no expressions, so a graph without `llm`/`agent` nodes is deterministic.
 - **Recovery** replays a crashed graph occurrence on its own thread with
   `continueFromCheckpoint`. If the thread has a checkpoint, the run resumes it
   instead of re-running finished nodes. If it has none, the run starts from the
-  same seed.
+  same seed. A `waiting` occurrence whose thread no longer awaits input lost
+  its resumed run to the crash, so it is continued the same way; a
+  conversation occurrence in that state is marked failed instead, because
+  re-running its prompt would repeat its side effects.
 - **Tool nodes do not apply a skill's `interruptOn` approval.** Gate a tool node
   that has side effects with a `human` node in front of it.
 - **The live view** reads plain v3 frames. `tasks` frames mark node start and
