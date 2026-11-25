@@ -1,0 +1,3 @@
+# agent-review runs from the pull request's own copy of .github, so a change
+# here could rewrite the gate that reviews it; these paths need a human owner.
+/.github/ @JoeDo @igorfil
