@@ -11,6 +11,8 @@ export interface GraphListing {
 }
 
 export class GraphRegistry {
+  private readonly pendingWrites = new Map<string, Promise<unknown>>();
+
   constructor(readonly dir: string) {}
 
   async list(): Promise<GraphListing> {
@@ -43,18 +45,32 @@ export class GraphRegistry {
     const target = join(this.dir, `${spec.id}.json`);
     const temp = `${target}.${randomUUID()}.tmp`;
     await writeFile(temp, `${JSON.stringify(spec, null, 2)}\n`, "utf8");
-    try {
-      await renameWithRetry(temp, target);
-    } catch (error) {
-      await rm(temp, { force: true });
-      throw error;
-    }
+    await this.serialized(spec.id, async () => {
+      try {
+        await renameWithRetry(temp, target);
+      } catch (error) {
+        await rm(temp, { force: true });
+        throw error;
+      }
+    });
   }
 
   async delete(id: string): Promise<boolean> {
     if (!(await this.get(id))) return false;
-    await rm(join(this.dir, `${id}.json`), { force: true });
+    await this.serialized(id, () => rm(join(this.dir, `${id}.json`), { force: true }));
     return true;
+  }
+
+  // Two renames onto one file collide with EPERM on Windows far more often than a
+  // rename and a read do, so writes to a graph take turns; the retry covers readers.
+  private serialized<T>(id: string, write: () => Promise<T>): Promise<T> {
+    const turn = (this.pendingWrites.get(id) ?? Promise.resolve()).then(write, write);
+    const settled = turn.catch(() => undefined);
+    this.pendingWrites.set(id, settled);
+    void settled.then(() => {
+      if (this.pendingWrites.get(id) === settled) this.pendingWrites.delete(id);
+    });
+    return turn;
   }
 
   private async load(file: string): Promise<{ ok: true; spec: GraphSpec } | { ok: false; errors: string[] }> {
