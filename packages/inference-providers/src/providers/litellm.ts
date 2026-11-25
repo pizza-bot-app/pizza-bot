@@ -28,9 +28,12 @@ export const LITELLM_SPEC: OpenAiCompatibleSpec = {
     try {
       return (await fetchListing("/model/info")).flatMap(readModelInfo);
     } catch (error) {
-      if (error instanceof ModelCatalogError && error.code === "authentication") throw error;
+      // Only a missing or unparseable /model/info falls back; an unreachable proxy fails once.
+      const missingEndpoint =
+        (error instanceof ModelCatalogError && error.code === "endpoint") || error instanceof SyntaxError;
+      if (!missingEndpoint) throw error;
       return (await fetchListing("/models")).flatMap((entry) =>
-        typeof entry.id === "string" && entry.id ? [{ id: entry.id }] : [],
+        isConcreteModel(entry.id) ? [{ id: entry.id }] : [],
       );
     }
   },
@@ -40,7 +43,7 @@ function readModelInfo(entry: RawModelEntry): CompatibleModelFacts[] {
   const id = entry.model_name;
   const info = (entry.model_info ?? {}) as LiteLLMModelInfo;
   // Embedding, image, audio and rerank deployments cannot drive the agent.
-  if (typeof id !== "string" || !id || (info.mode && info.mode !== "chat")) return [];
+  if (!isConcreteModel(id) || (info.mode && info.mode !== "chat")) return [];
   return [{
     id,
     contextWindow: positiveInteger(info.max_input_tokens),
@@ -48,6 +51,11 @@ function readModelInfo(entry: RawModelEntry): CompatibleModelFacts[] {
     supportsTools: info.supports_function_calling ?? undefined,
     supportsVision: info.supports_vision ?? undefined,
   }];
+}
+
+// Wildcard routes such as `openai/*` are listed by name but cannot be requested as a model.
+function isConcreteModel(id: unknown): id is string {
+  return typeof id === "string" && id.length > 0 && !id.includes("*");
 }
 
 export class LiteLLMLangChainModelProvider extends OpenAiCompatibleProvider {

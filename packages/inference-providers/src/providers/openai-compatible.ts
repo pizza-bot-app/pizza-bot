@@ -94,6 +94,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
   private baseUrl: string | undefined;
   private maxTokens: number;
   private requestOverrides: RequestOverrides | undefined;
+  private configured: boolean;
 
   constructor(private readonly spec: OpenAiCompatibleSpec, opts: OpenAiCompatibleProviderOptions = {}) {
     this.id = spec.id;
@@ -124,6 +125,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     }];
     this.apiKey = opts.apiKey;
     this.baseUrl = opts.baseUrl;
+    this.configured = opts.apiKey !== undefined || opts.baseUrl !== undefined;
     this.maxTokens = positiveInteger(opts.maxTokens) ?? DEFAULT_MAX_TOKENS;
     this.models = opts.models;
     this.fetchFn = opts.fetch ?? fetch;
@@ -142,6 +144,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     this.maxTokens = positiveInteger(cfg.values.maxTokens) ?? DEFAULT_MAX_TOKENS;
     this.baseUrl = cfg.values.baseUrl?.trim() || undefined;
     this.requestOverrides = requestOverrides;
+    this.configured = true;
     if (!this.models) this.descriptors.clear();
   }
 
@@ -150,6 +153,11 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     const { label } = this.spec;
     const apiKey = this.resolveApiKey();
     if (!apiKey && !this.spec.keyOptional) throw missingCatalogCredentials(label);
+    // A keyless default URL (often localhost) is only probed once the user has set the provider up;
+    // otherwise every catalog load would wait on a port that may accept and never answer.
+    if (!apiKey && !this.configured && !process.env[`${this.spec.envPrefix}_BASE_URL`]) {
+      throw missingCatalogCredentials(label);
+    }
 
     try {
       const fetchListing = (path: string) => this.fetchModels(path, apiKey);

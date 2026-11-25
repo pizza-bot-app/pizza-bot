@@ -91,6 +91,38 @@ describe("LiteLLM model discovery", () => {
     ]);
   });
 
+  it("does not retry /models when the proxy is unreachable", async () => {
+    const fetchFn = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    const provider = new LiteLLMLangChainModelProvider({
+      baseUrl: "https://litellm.example/v1",
+      fetch: fetchFn,
+    });
+
+    await expect(provider.listModels()).rejects.toMatchObject({ code: "network" });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves wildcard routes out of the picker", async () => {
+    const provider = new LiteLLMLangChainModelProvider({
+      baseUrl: "https://litellm.example/v1",
+      fetch: catalogFetch({
+        "https://litellm.example/v1/model/info": {
+          data: [
+            { model_name: "openai/*", model_info: { mode: "chat" } },
+            { model_name: "*", model_info: { mode: "chat" } },
+            { model_name: "gpt-4o-mini", model_info: { mode: "chat" } },
+          ],
+        },
+      }),
+    });
+
+    await expect(provider.listModels()).resolves.toEqual([
+      expect.objectContaining({ id: "gpt-4o-mini" }),
+    ]);
+  });
+
   it("surfaces a rejected key instead of falling back", async () => {
     const fetchFn = vi.fn(async () => new Response("unauthorized", { status: 401 }));
     const provider = new LiteLLMLangChainModelProvider({ apiKey: "sk-wrong", fetch: fetchFn });
@@ -128,6 +160,7 @@ describe("LiteLLM chat model", () => {
       });
     });
     const provider = new LiteLLMLangChainModelProvider({ fetch: fetchFn });
+    provider.configure({ method: "api-key", values: {} });
 
     const model = await provider.buildModel("claude-sonnet");
     const result = await model.invoke([new HumanMessage("ping")]);

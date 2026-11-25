@@ -255,6 +255,7 @@ describe("OpenAiCompatibleProvider", () => {
           ? new Response(JSON.stringify({ data: [{ id: "m" }] }), { status: 200 })
           : chatReply());
       const provider = new OpenAiCompatibleProvider(KEYLESS, { fetch: fetchFn, modelsDev: noModelsDev });
+      provider.configure({ method: "api-key", values: {} });
 
       await expect(provider.listModels()).resolves.toHaveLength(1);
       await (await provider.buildModel("m")).invoke([new HumanMessage("hi")]);
@@ -263,6 +264,18 @@ describe("OpenAiCompatibleProvider", () => {
       expect(listing?.[1]?.headers).toBeUndefined();
       expect(String(chat?.[0])).toBe("https://gateway.example/v1/chat/completions");
       expect(new Headers(chat?.[1]?.headers).get("authorization")).toBeNull();
+    });
+
+    it("does not probe the default URL until the provider is set up", async () => {
+      const fetchFn = vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
+      const unconfigured = new OpenAiCompatibleProvider(KEYLESS, { fetch: fetchFn });
+
+      await expect(unconfigured.listModels()).rejects.toMatchObject({ code: "credentials" });
+      expect(fetchFn).not.toHaveBeenCalled();
+
+      vi.stubEnv("GATEWAY_BASE_URL", "https://env-gateway.example/v1");
+      await expect(unconfigured.listModels()).resolves.toEqual([]);
+      expect(fetchFn).toHaveBeenCalledTimes(1);
     });
 
     it("clears a stored key when the saved config leaves it blank", async () => {
