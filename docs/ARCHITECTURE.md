@@ -523,6 +523,20 @@ with no expressions, so a graph without `llm`/`agent` nodes is deterministic.
   result; `lifecycle` and `checkpoints` frames give the subgraph tree and the
   step timeline. `tests/langgraph-compat/graph-run-conformance.test.ts` pins
   these shapes.
+- **The web renders a graph thread as a graph, never as a chat.** A thread with
+  a `graphId` opens `GraphRunPane` instead of the chat pane, so it has no
+  composer and no tool-approval card for a `human` pause. `graph-run-store.ts`
+  keeps one SDK `StreamController` per open run. Its projection
+  (`apps/web/src/projection/graph-run.ts`) folds two sources by task id:
+  checkpoint history, and the live root `tasks` channel. History is needed
+  because the server evicts a run's frames shortly after the run ends. The
+  topology is drawn with React Flow from the spec, not from `getGraph()`.
+  Branch edges come from `cases`/`default`, and the edge a run took is the
+  predecessor that finished last before the next node started. A `human` node
+  is answered with `input.respond` `{ interruptId, response }`. An `agent`
+  node's tool approvals resume with the usual decisions. Its transcript is the
+  SDK messages projection at `<node>:<task>`, which is only available while the
+  run's frames are buffered; after that the view shows the node's output value.
 
 ---
 

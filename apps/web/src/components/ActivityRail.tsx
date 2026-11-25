@@ -255,7 +255,7 @@ function DelegationGroup({
   );
 }
 
-function SubagentTranscript({ messages, settled }: { messages: UIMessageLike[]; settled: boolean }) {
+export function SubagentTranscript({ messages, settled }: { messages: UIMessageLike[]; settled: boolean }) {
   const parts = messages.flatMap((m) => m.parts.map((p) => ({ role: m.role, part: p })));
   return (
     <div className="subagent-transcript">
@@ -298,7 +298,7 @@ function ToolStatusIcon({ state }: { state?: string }) {
   return <Loader2 className="activity-icon activity-icon-active spin" size={12} />;
 }
 
-function outputText(output: unknown): string | undefined {
+export function outputText(output: unknown): string | undefined {
   if (output === undefined || output === null) return undefined;
   if (typeof output === "string") return output;
   const content = messageContent(output);

@@ -1,6 +1,7 @@
 export type AppView =
   | "inbox"
   | "automations"
+  | "graphs"
   | "memories"
   | "agents"
   | "skills"
@@ -18,6 +19,7 @@ export function adminVisibility(view: AppView) {
     mcp: view === "mcp",
     memories: view === "memories",
     triggers: view === "automations",
+    graphs: view === "graphs",
     plugins: view === "plugins",
   };
 }

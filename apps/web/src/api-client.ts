@@ -15,6 +15,7 @@ import type {
   LocalFolder,
   LocalFolderBrowseResult,
   LocalFolderList,
+  GraphSpec,
 } from "@pizza-bot/core";
 import type { ThreadStateValues } from "@pizza-bot/core";
 import {
@@ -477,6 +478,19 @@ export class ApiClient {
     );
   }
 
+  async listGraphs(): Promise<GraphListing> {
+    return this.json("list graphs", "/graphs");
+  }
+
+  /** Returns undefined for a missing or unparsable graph. */
+  async getGraph(id: string): Promise<GraphSpec | undefined> {
+    return this.optional("get graph", `/graphs/${encodeURIComponent(id)}`);
+  }
+
+  async listGraphRuns(id: string): Promise<ThreadInfo[]> {
+    return this.json("list graph runs", `/graphs/${encodeURIComponent(id)}/runs`);
+  }
+
   /** Returns highlighted FTS hits. */
   async searchMessages(query: string, limit = 50): Promise<SearchHit[]> {
     return this.json("search messages", `/threads/search?q=${encodeURIComponent(query)}&limit=${limit}`);
@@ -785,8 +799,15 @@ export interface ThreadInfo {
   parentThreadId?: string;
   parentCheckpointId?: string;
   modelId?: string;
+  /** Set for a graph run; the thread renders as a graph, not a conversation. */
+  graphId?: string;
   lastMessage?: string;
   lastMessageRole?: string;
+}
+
+export interface GraphListing {
+  graphs: GraphSpec[];
+  invalid: Array<{ file: string; errors: string[] }>;
 }
 
 export interface FolderInfo {

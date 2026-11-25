@@ -16,7 +16,7 @@ import {
 } from "./use-thread-slice.js";
 import { protocolStreamStore } from "./protocol-stream-store.js";
 import { resolveApiBase, resolveApiHeaders } from "./api-config.js";
-import { useAgentsAdmin, useSkillsAdmin, useMcpServersAdmin, useMemoriesAdmin, useModels, usePluginsAdmin, useProvidersAdmin, useStatus, useTriggers } from "./use-app-data.js";
+import { useAgentsAdmin, useGraphs, useSkillsAdmin, useMcpServersAdmin, useMemoriesAdmin, useModels, usePluginsAdmin, useProvidersAdmin, useStatus, useTriggers } from "./use-app-data.js";
 import { PIZZA_BOT_AGENT } from "@pizza-bot/core";
 import { SkillsModule } from "./components/skills/SkillsModule.js";
 import { AgentsModule } from "./components/agents/AgentsModule.js";
@@ -24,6 +24,8 @@ import { AgentNamesContext } from "./components/agent-names.js";
 import { McpServersModule } from "./components/mcp/McpServersModule.js";
 import { MemoriesModule } from "./components/memories/MemoriesModule.js";
 import { TriggerModule } from "./components/schedules/TriggerModule.js";
+import { GraphsModule } from "./components/graphs/GraphsModule.js";
+import { GraphRunPane } from "./components/graphs/GraphRunPane.js";
 import {
   SettingsModule,
   type SettingsCategory,
@@ -149,17 +151,30 @@ export function App() {
   );
 
   const triggers = useTriggers(client, 5_000, visibleAdmin.triggers);
+  const graphs = useGraphs(client, 5_000, visibleAdmin.graphs);
 
   const { theme, persona, features, agent: agentSettings } = useSettings(client);
 
   const [threadTitles, setThreadTitles] = useState<Map<string, string>>(() => new Map());
   const [threadModels, setThreadModels] = useState<Map<string, string>>(() => new Map());
+  // A thread's graph is fixed at creation, so entries are only ever added.
+  const [threadGraphIds, setThreadGraphIds] = useState<Map<string, string>>(() => new Map());
+  const noteGraphThreads = useCallback((rows: ThreadInfo[]) => {
+    setThreadGraphIds((prev) => {
+      const added = rows.filter((row) => row.graphId && !prev.has(row.threadId));
+      if (added.length === 0) return prev;
+      const next = new Map(prev);
+      for (const row of added) next.set(row.threadId, row.graphId!);
+      return next;
+    });
+  }, []);
   const [selectedThreadModels, setSelectedThreadModels] = useState<Map<string, string>>(
     () => new Map(),
   );
 
   const seedThreadMetadata = useCallback((rows: ThreadInfo[]) => {
     setThreadCount(rows.length);
+    noteGraphThreads(rows);
     setThreadTitles((prev) => {
       let changed = false;
       const next = new Map(prev);
@@ -194,7 +209,7 @@ export function App() {
         setActiveThreadId(threadId);
       }
     }
-  }, []);
+  }, [noteGraphThreads]);
 
   // Only the active pane renders; every thread's run remains owned by the store.
   // A thread is in this set once opened from a persisted source, meaning it should
@@ -270,7 +285,7 @@ export function App() {
   // A feature disabled while its view is open must not strand the user there.
   useEffect(() => {
     if (
-      (view === "automations" && !features.enableAutomations) ||
+      ((view === "automations" || view === "graphs") && !features.enableAutomations) ||
       (view === "memories" && !features.enableMemories)
     ) {
       setView("inbox");
@@ -304,6 +319,19 @@ export function App() {
     },
     [openThread],
   );
+  const onOpenGraphRun = useCallback(
+    (run: ThreadInfo) => {
+      noteGraphThreads([run]);
+      setThreadTitles((prev) =>
+        prev.get(run.threadId) === run.title ? prev : new Map(prev).set(run.threadId, run.title),
+      );
+      setSearchTarget(null);
+      setView("inbox");
+      openThread(run.threadId, true);
+    },
+    [noteGraphThreads, openThread],
+  );
+
   const onSearchTargetHandled = useCallback((token: number) => {
     setSearchTarget((current) => (current?.token === token ? null : current));
   }, []);
@@ -388,7 +416,9 @@ export function App() {
     : undefined;
   const activeModel = selectableModels.models.find((model) => model.id === activeModelId);
 
-  const active = useThreadSliceReadOnly(activeThreadId);
+  const activeGraphId = activeThreadId ? threadGraphIds.get(activeThreadId) : undefined;
+  const active = useThreadSliceReadOnly(activeGraphId ? null : activeThreadId);
+  const railVisible = showRail && !activeGraphId;
   const delegations = active.delegations;
   const status = active.status;
   const isRunning = status === "streaming";
@@ -428,6 +458,10 @@ export function App() {
                 onDelete={triggers.remove}
                 onRun={triggers.run}
               />
+            </div>
+          ) : view === "graphs" ? (
+            <div className="module-hub">
+              <GraphsModule client={client} listing={graphs.listing} onOpenRun={onOpenGraphRun} />
             </div>
           ) : view === "memories" ? (
             <div className="module-hub">
@@ -551,17 +585,19 @@ export function App() {
             >
               <ModuleHeader icon={<Inbox size={18} />} title={L.inboxSection} count={threadCount}>
                 <span className="module-header-spacer" />
-                <button
-                  className={`rail-toggle${showRail ? " active" : ""}`}
-                  title={showRail ? "Hide activity" : "Show activity"}
-                  aria-pressed={showRail}
-                  onClick={() => setShowRail((v) => !v)}
-                >
-                  <Activity size={15} /> Activity
-                  {Object.keys(delegations).length > 0 && (
-                    <span className="rail-toggle-indicator" aria-hidden="true" />
-                  )}
-                </button>
+                {!activeGraphId && (
+                  <button
+                    className={`rail-toggle${showRail ? " active" : ""}`}
+                    title={showRail ? "Hide activity" : "Show activity"}
+                    aria-pressed={showRail}
+                    onClick={() => setShowRail((v) => !v)}
+                  >
+                    <Activity size={15} /> Activity
+                    {Object.keys(delegations).length > 0 && (
+                      <span className="rail-toggle-indicator" aria-hidden="true" />
+                    )}
+                  </button>
+                )}
               </ModuleHeader>
 
               <div className="inbox-body">
@@ -581,10 +617,20 @@ export function App() {
                 />
 
                 <main className="content">
-                  <div className={panesClass(showRail)}>
+                  <div className={panesClass(railVisible)}>
                     <section className="chat-pane">
                       <div className="pane-slot" style={{ display: "flex" }}>
-                        {activeThreadId ? (
+                        {activeThreadId && activeGraphId ? (
+                          <GraphRunPane
+                            key={activeThreadId}
+                            client={client}
+                            threadId={activeThreadId}
+                            graphId={activeGraphId}
+                            title={activeThreadTitle ?? activeGraphId}
+                            onRename={(title) => onRename(activeThreadId, title)}
+                            {...(isMobile ? { onBack: onBackToList } : {})}
+                          />
+                        ) : activeThreadId ? (
                           <ChatPane
                             key={activeThreadId}
                             threadId={activeThreadId}
@@ -632,14 +678,14 @@ export function App() {
                         )}
                       </div>
                     </section>
-                    {isMobile && showRail && (
+                    {isMobile && railVisible && (
                       <div
                         className="pane-drawer-backdrop"
                         aria-hidden="true"
                         onClick={() => setShowRail(false)}
                       />
                     )}
-                    {showRail && (
+                    {railVisible && (
                       <aside className="rail-pane">
                         <ActivityRail
                           delegations={delegations}

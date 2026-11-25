@@ -7,6 +7,7 @@ import {
   Cable,
   Inbox,
   MoreHorizontal,
+  Network,
   Pizza,
   Puzzle,
   ScrollText,
@@ -47,6 +48,12 @@ const automationsDestination: NavDestination = {
   view: "automations",
   label: L.automationsSection,
   icon: Workflow,
+};
+
+const graphsDestination: NavDestination = {
+  view: "graphs",
+  label: L.graphsSection,
+  icon: Network,
 };
 
 const memoriesDestination: NavDestination = {
@@ -153,7 +160,7 @@ export function AppNavigation({
     skillsDestination,
     mcpDestination,
     ...(enableMemories ? [memoriesDestination] : []),
-    ...(enableAutomations ? [automationsDestination] : []),
+    ...(enableAutomations ? [automationsDestination, graphsDestination] : []),
   ];
   const mobileDestinations = [
     inboxDestination,
@@ -163,7 +170,7 @@ export function AppNavigation({
   const mobileFeatureDestinations = [
     mcpDestination,
     ...(enableMemories ? [memoriesDestination] : []),
-    ...(enableAutomations ? [automationsDestination] : []),
+    ...(enableAutomations ? [automationsDestination, graphsDestination] : []),
   ];
   const utilityDestinations = [
     pluginsDestination,

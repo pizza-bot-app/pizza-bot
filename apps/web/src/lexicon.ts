@@ -7,6 +7,7 @@ export const L = {
   schedulesSection: "Schedules",
   webhooksSection: "Webhooks",
   automationsSection: "Automations",
+  graphsSection: "Graphs",
   pluginsSection: "Plugins",
   settingsSection: "Settings",
   settingsCategoriesLabel: "Settings categories",

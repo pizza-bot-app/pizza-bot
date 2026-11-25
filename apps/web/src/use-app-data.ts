@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ApiClient,
+  GraphListing,
   ModelsInfo,
   StatusInfo,
   SkillCatalogInfo,
@@ -343,6 +344,18 @@ export function useTriggers(client: ApiClient, intervalMs = 5_000, enabled = tru
 
   return { triggers, loading, refresh, create, update, remove, invoke, run };
 }
+
+export function useGraphs(client: ApiClient, intervalMs = 5_000, enabled = true) {
+  const { data: listing, loading, refresh } = useAdminData(
+    useCallback(() => client.listGraphs(), [client]),
+    EMPTY_GRAPH_LISTING,
+    intervalMs,
+    enabled,
+  );
+  return { listing, loading, refresh };
+}
+
+const EMPTY_GRAPH_LISTING: GraphListing = { graphs: [], invalid: [] };
 
 export interface ServerStatus {
   status: StatusInfo | undefined;
