@@ -50,7 +50,9 @@ runs:
 
         start() {
           local dir=$1 api=$2 web=$3 name=$4
-          (cd "$dir" &&
+          # `cd` must be its own statement: `cd && cmd &` would background the
+          # whole list and leave the second server in the caller's directory.
+          (cd "$dir" || exit 1
             PORT=$api PIZZA_DATA_ROOT="$(mktemp -d)" PIZZA_ALLOWED_ORIGINS="http://localhost:$web" \
               nohup npx tsx apps/api-server/src/index.ts > "$RUNNER_TEMP/$name-api.log" 2>&1 &
             PIZZA_API_TARGET="http://localhost:$api" \
