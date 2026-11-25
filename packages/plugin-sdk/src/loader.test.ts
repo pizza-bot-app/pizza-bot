@@ -131,19 +131,21 @@ describe("FsPluginLoader", () => {
     expect(String(errors[0]?.error)).toContain("Invalid plugin manifest");
   });
 
-  // Creating a symlink needs elevated privilege on Windows (EPERM otherwise).
-  it.skipIf(process.platform === "win32")("finds a plugin through a top-level symlink and skips broken or file links", async () => {
+  // A junction needs no privilege on Windows; other platforms ignore the type.
+  it("finds a plugin through a top-level symlink and skips broken or file links", async () => {
     const pluginsDir = await mkdtemp(join(tmpdir(), "plugin-links-"));
-    await symlink(EXAMPLE_ROOT, join(pluginsDir, "linked"));
-    await symlink(join(pluginsDir, "missing"), join(pluginsDir, "broken"));
+    await symlink(EXAMPLE_ROOT, join(pluginsDir, "linked"), "junction");
+    await symlink(join(pluginsDir, "missing"), join(pluginsDir, "broken"), "junction");
     await writeFile(join(pluginsDir, "notes.txt"), "not a plugin");
-    await symlink(join(pluginsDir, "notes.txt"), join(pluginsDir, "file-link"));
+    await symlink(join(pluginsDir, "notes.txt"), join(pluginsDir, "file-link"), "junction");
 
     const errors: unknown[] = [];
+    const logs: string[] = [];
     const loader = new FsPluginLoader();
-    const sources = await loader.find(pluginsDir, (_root, error) => errors.push(error));
+    const sources = await loader.find(pluginsDir, (_root, error) => errors.push(error), (msg) => logs.push(msg));
 
     expect(errors).toEqual([]);
+    expect(logs.filter((line) => line.includes("does not resolve to a directory"))).toHaveLength(2);
     expect(sources.map(({ root, manifest }) => [root, manifest.name])).toEqual([
       [join(pluginsDir, "linked"), "mcp-status"],
     ]);

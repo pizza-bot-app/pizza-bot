@@ -67,6 +67,7 @@ export class FsPluginLoader implements PluginLoader {
     onError: (pluginDir: string, err: unknown) => void = (_d, e) => {
       throw e;
     },
+    log: (msg: string) => void = () => {},
   ): Promise<PluginSource[]> {
     const entries = await readdir(pluginsDir, { withFileTypes: true }).catch(
       () => [],
@@ -75,12 +76,16 @@ export class FsPluginLoader implements PluginLoader {
     for (const entry of entries) {
       const root = join(pluginsDir, entry.name);
       try {
-        // A top-level symlink counts when it resolves to a directory; a broken
-        // link is ENOENT and skipped like a folder without a manifest.
-        const isDir =
-          entry.isDirectory() ||
-          (entry.isSymbolicLink() && (await stat(root)).isDirectory());
-        if (!isDir) continue;
+        // Only a top-level link that resolves to a directory counts.
+        if (entry.isSymbolicLink()) {
+          const target = await stat(root).catch(() => null);
+          if (!target?.isDirectory()) {
+            log(`skipping plugin at ${root}: a symlink that does not resolve to a directory`);
+            continue;
+          }
+        } else if (!entry.isDirectory()) {
+          continue;
+        }
         found.push({
           root,
           manifest: await this.readManifest(join(root, MANIFEST_REL)),

@@ -658,12 +658,12 @@ describe("skill routes", () => {
     await writeFile(join(target, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
     await writeFile(join(target, "SKILL.md"), "original", "utf8");
     const link = join(skillsDir, "shared");
-    await symlink(target, link, "dir");
+    // A junction needs no privilege on Windows; other platforms ignore the type.
+    await symlink(target, link, "junction");
     return { link, target };
   }
 
-  // Creating a symlink needs elevated privilege on Windows (EPERM otherwise).
-  it.skipIf(process.platform === "win32")("refuses to edit a linked skill and leaves its target untouched", async () => {
+  it("refuses to edit a linked skill and leaves its target untouched", async () => {
     const { app, skillsDir } = await fixture();
     const { link, target } = await linkedSkill(skillsDir);
 
@@ -683,7 +683,7 @@ describe("skill routes", () => {
     expect(await readdir(join(target, ".git"))).toEqual(["HEAD"]);
   });
 
-  it.skipIf(process.platform === "win32")("deletes only the link of a linked skill", async () => {
+  it("deletes only the link of a linked skill", async () => {
     const { app, skillsDir } = await fixture();
     const { link, target } = await linkedSkill(skillsDir);
 

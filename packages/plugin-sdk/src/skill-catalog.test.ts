@@ -360,16 +360,16 @@ describe("loadUserSkills", () => {
     expect(catalog.get("plain")?.declaredTools).toEqual([]);
   });
 
-  // Creating a symlink needs elevated privilege on Windows (EPERM otherwise).
-  it.skipIf(process.platform === "win32")("follows a top-level symlink to a skill folder and marks it linked", async () => {
+  // A junction needs no privilege on Windows; other platforms ignore the type.
+  it("follows a top-level symlink to a skill folder and marks it linked", async () => {
     const source = await seedUserSkills([
       { id: "shared", frontmatter: "name: shared\ndescription: Lives in another repo." },
     ]);
     const outside = await mkdtemp(join(tmpdir(), "skill-link-outside-"));
     await writeFile(join(outside, "secret.txt"), "outside\n");
-    await symlink(outside, join(source, "shared", "nested-link"));
+    await symlink(outside, join(source, "shared", "nested-link"), "junction");
     const dir = await mkdtemp(join(tmpdir(), "skill-links-"));
-    await symlink(join(source, "shared"), join(dir, "linked"));
+    await symlink(join(source, "shared"), join(dir, "linked"), "junction");
 
     const linked = (await loadUserSkills(dir)).get("linked");
     expect(linked).toMatchObject({
@@ -381,12 +381,12 @@ describe("loadUserSkills", () => {
     expect(linked?.files.map((file) => file.path)).toEqual(["/skills/linked/SKILL.md"]);
   });
 
-  it.skipIf(process.platform === "win32")("skips broken links and links to files, logging them", async () => {
+  it("skips broken links and links to files, logging them", async () => {
     const dir = await mkdtemp(join(tmpdir(), "skill-links-"));
     const file = join(dir, "SKILL.md.txt");
     await writeFile(file, "---\nname: file\ndescription: A file, not a folder.\n---\n");
-    await symlink(file, join(dir, "file-link"));
-    await symlink(join(dir, "missing"), join(dir, "broken-link"));
+    await symlink(file, join(dir, "file-link"), "junction");
+    await symlink(join(dir, "missing"), join(dir, "broken-link"), "junction");
 
     const logs: string[] = [];
     const catalog = await loadUserSkills(dir, (msg) => logs.push(msg));

@@ -120,8 +120,8 @@ describe("AgentHost.reloadMcpServers", () => {
     ).toBeUndefined();
   }, 30_000);
 
-  // Creating a symlink needs elevated privilege on Windows (EPERM otherwise).
-  it.skipIf(process.platform === "win32")("deletes only the link of a symlinked plugin and stops its MCP server", async () => {
+  // A junction needs no privilege on Windows; other platforms ignore the type.
+  it("deletes only the link of a symlinked plugin and stops its MCP server", async () => {
     const installDir = await host.pluginsInstallDirectory();
     expect(installDir).toBeTypeOf("string");
     const name = "linked-plugin";
@@ -138,7 +138,7 @@ describe("AgentHost.reloadMcpServers", () => {
       );
       mkdirSync(installDir as string, { recursive: true });
       const link = join(installDir as string, name);
-      symlinkSync(target, link, "dir");
+      symlinkSync(target, link, "junction");
 
       await host.reloadPlugins();
       expect(await host.toolCatalog()).toHaveProperty("linked");
