@@ -561,6 +561,8 @@ export class AgentHost {
       this.attachments?.deleteByThread(threadId);
       this.threadActivity.deleteByThread(threadId);
       const deleted = this.threadStore.delete(threadId);
+      // Startup recovery would otherwise relaunch a paused trigger run on the deleted thread.
+      this.triggers.killWaitingOccurrencesForThread(threadId, "thread deleted", new Date().toISOString());
       this.search.deleteThread(threadId);
       // SqliteSaver.deleteThread skips its lazy schema setup on an unopened database.
       await this.persistence.checkpointer.getTuple({

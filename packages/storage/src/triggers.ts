@@ -446,6 +446,17 @@ export class TriggerStore {
       .run(error, now, id);
   }
 
+  /** Close the paused occurrences of a deleted thread; nothing could answer them. */
+  killWaitingOccurrencesForThread(threadId: string, error: string, now: string): void {
+    this.db
+      .prepare(
+        `UPDATE trigger_occurrences
+         SET status = 'dead', last_error = ?, updated_at = ?
+         WHERE thread_id = ? AND status = 'waiting'`,
+      )
+      .run(error, now, threadId);
+  }
+
   killOccurrence(id: string, error: string, now: string): void {
     this.db
       .prepare(
