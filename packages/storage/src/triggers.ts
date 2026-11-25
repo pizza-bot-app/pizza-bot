@@ -309,6 +309,29 @@ export class TriggerStore {
       .map(rowToOccurrence);
   }
 
+  listWaitingOccurrences(): TriggerOccurrence[] {
+    return this.db
+      .prepare<[], TriggerOccurrenceRow>(
+        `SELECT * FROM trigger_occurrences
+         WHERE status = 'waiting'
+         ORDER BY scheduled_at ASC`,
+      )
+      .all()
+      .map(rowToOccurrence);
+  }
+
+  /** Move a `waiting` occurrence back to `running` so recovery can launch it. */
+  reopenWaitingOccurrence(id: string, now: string): boolean {
+    return (
+      this.db
+        .prepare(
+          `UPDATE trigger_occurrences SET status = 'running', updated_at = ?
+           WHERE id = ? AND status = 'waiting'`,
+        )
+        .run(now, id).changes === 1
+    );
+  }
+
   /**
    * Reserve an occurrence for launch, advancing the crash-recovery attempt
    * budget. Kills it once the budget is exhausted so a poison occurrence can't

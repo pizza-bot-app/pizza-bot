@@ -252,6 +252,29 @@ export class TriggerService {
     for (const occurrence of this.store.listRecoverableOccurrences()) {
       this.launchOccurrence(occurrence.id);
     }
+    if (this.awaitsInput) {
+      for (const occurrence of this.store.listWaitingOccurrences()) void this.recoverInterruptedResume(occurrence);
+    }
+  }
+
+  // A crash during a resumed run leaves its occurrence `waiting` on a thread that
+  // no longer awaits input; no later answer or run end would ever close it.
+  private async recoverInterruptedResume(occurrence: TriggerOccurrence): Promise<void> {
+    if (!occurrence.threadId) return;
+    const paused = await this.awaitsInput!(occurrence.threadId).catch(() => true);
+    if (paused) return;
+    const now = this.nowIso();
+    if (!this.store.reopenWaitingOccurrence(occurrence.id, now)) return;
+    if (!this.store.get(occurrence.triggerId)?.graphId) {
+      // A conversation has no checkpoint to continue from; relaunching would re-run its prompt.
+      this.store.failOccurrence(occurrence.id, "the server stopped during the resumed run", now);
+      return;
+    }
+    try {
+      this.launchOccurrence(occurrence.id);
+    } catch (error) {
+      this.log(`recovering occurrence ${occurrence.id} failed: ${errorMessage(error)}`);
+    }
   }
 
   private subscribeEvents(): void {
