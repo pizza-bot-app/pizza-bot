@@ -43,7 +43,12 @@ export class GraphRegistry {
     const target = join(this.dir, `${spec.id}.json`);
     const temp = `${target}.${randomUUID()}.tmp`;
     await writeFile(temp, `${JSON.stringify(spec, null, 2)}\n`, "utf8");
-    await rename(temp, target);
+    try {
+      await renameWithRetry(temp, target);
+    } catch (error) {
+      await rm(temp, { force: true });
+      throw error;
+    }
   }
 
   async delete(id: string): Promise<boolean> {
@@ -55,7 +60,8 @@ export class GraphRegistry {
   private async load(file: string): Promise<{ ok: true; spec: GraphSpec } | { ok: false; errors: string[] }> {
     let text: string;
     try {
-      text = await readFile(join(this.dir, file), "utf8");
+      // Windows PowerShell 5.1 writes UTF-8 with a byte-order mark, which JSON.parse rejects.
+      text = (await readFile(join(this.dir, file), "utf8")).replace(/^\uFEFF/, "");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ok: false, errors: ["not found"] };
       throw error;
@@ -67,5 +73,23 @@ export class GraphRegistry {
       return { ok: false, errors: [`invalid JSON: ${(error as Error).message}`] };
     }
     return parseGraphSpec(raw);
+  }
+}
+
+const RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+const RENAME_ATTEMPTS = 5;
+
+// Windows refuses to rename over a file another handle has open (a concurrent
+// read or save); the lock is brief, so a short backoff clears it.
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= RENAME_ATTEMPTS || !code || !RENAME_RETRY_CODES.has(code)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt));
+    }
   }
 }
