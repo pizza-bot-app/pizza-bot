@@ -1,4 +1,5 @@
 import {
+  BUILTIN_EVAL_TOOL_DESCRIPTION,
   BUILTIN_EVAL_TOOL_REF,
   ModelRegistry,
   ModelUnavailableError,
@@ -615,6 +616,10 @@ export class AgentHost {
     return this.mcpCatalog;
   }
 
+  mcpToolDescription(ref: string): string | undefined {
+    return toolDescription(this.mcpTools[ref], "") || undefined;
+  }
+
   async skillCatalog(): Promise<SkillInfo[]> {
     await this.warmup;
     const states = new Map(this.skillAvailability.map((state) => [state.id, state]));
@@ -692,7 +697,7 @@ export class AgentHost {
     const tools: SkillGeneratorTool[] = [
       {
         ref: BUILTIN_EVAL_TOOL_REF,
-        description: "Evaluate calculations and deterministic expressions.",
+        description: BUILTIN_EVAL_TOOL_DESCRIPTION,
       },
       ...Object.entries(catalog).flatMap(([server, names]) => [
         {
@@ -1151,7 +1156,7 @@ export class AgentHost {
     if (!known) return undefined;
     return (this.mcpCatalog[id] ?? [])
       .map((name) => {
-        const description = toolDescription(this.mcpTools[`mcp:${id}:${name}`], "");
+        const description = this.mcpToolDescription(`mcp:${id}:${name}`);
         return description ? { name, description } : { name };
       })
       .sort((a, b) => a.name.localeCompare(b.name));

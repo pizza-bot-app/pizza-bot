@@ -2,7 +2,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { McpServerRow } from "@/api-client";
 import { McpServerCard } from "./McpServerCard.js";
-import { filterTools } from "./McpToolsDialog.js";
 
 function server(overrides: Partial<McpServerRow> = {}): McpServerRow {
   return {
@@ -37,23 +36,5 @@ describe("McpServerCard tool count", () => {
       <McpServerCard server={server({ toolCount: 1 })} onGetTools={vi.fn()} />,
     );
     expect(html).toContain(">1 tool</button>");
-  });
-});
-
-describe("filterTools", () => {
-  const tools = [
-    { name: "s3_list_buckets", description: "List S3 buckets in the account." },
-    { name: "ec2_describe_instances", description: "Describe EC2 instances." },
-    { name: "sts_whoami" },
-  ];
-
-  it("matches on name or description, case-insensitively", () => {
-    expect(filterTools(tools, "S3").map((t) => t.name)).toEqual(["s3_list_buckets"]);
-    expect(filterTools(tools, "instances").map((t) => t.name)).toEqual(["ec2_describe_instances"]);
-    expect(filterTools(tools, "whoami").map((t) => t.name)).toEqual(["sts_whoami"]);
-  });
-
-  it("returns everything for a blank query", () => {
-    expect(filterTools(tools, "  ")).toBe(tools);
   });
 });

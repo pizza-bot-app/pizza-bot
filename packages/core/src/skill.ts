@@ -8,6 +8,8 @@ export const SKILL_MD = "SKILL.md";
 
 export const BUILTIN_EVAL_TOOL_REF = "builtin:eval";
 
+export const BUILTIN_EVAL_TOOL_DESCRIPTION = "Evaluate calculations and deterministic expressions.";
+
 export const toolRefSchema = z
   .string()
   .refine(

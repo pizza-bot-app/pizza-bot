@@ -314,6 +314,7 @@ function SkillDetail({
     <SkillView
       skill={selected}
       bundle={bundle}
+      tools={tools}
       visualState={skillVisualState(selected)}
       statusLabel={skillStatusLabel(selected)}
       enablement={
