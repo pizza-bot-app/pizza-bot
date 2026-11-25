@@ -49,8 +49,12 @@ jobs:
           node-version: 24
           cache: npm
 
-      # Install and build before the role session exists, so install scripts
-      # and the build never see AWS credentials.
+      # Trust boundary: only branches in this repository reach the steps below,
+      # and their authors already have write access, enough to push a workflow
+      # that assumes the Bedrock role. The ordering and the subprocess scrub
+      # keep credentials out of incidental output, not away from that code:
+      # with id-token: write it can mint its own OIDC token, and the servers
+      # ui-preview starts keep running through the later steps.
       - name: Install
         run: npm ci
 
@@ -83,9 +87,9 @@ jobs:
       - id: review
         uses: anthropics/claude-code-action@v1
         env:
-          # Strips cloud credentials from every command Claude runs, so the pull
-          # request's own code executes without the Bedrock role. GITHUB_TOKEN
-          # survives the scrub, which is why the job's permissions stay narrow.
+          # Strips cloud credentials from the environment of every command
+          # Claude runs; see the trust boundary note above. GITHUB_TOKEN
+          # survives the scrub.
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
           PIZZA_DATA_ROOT: ${{ runner.temp }}/pizza-data
         with:
@@ -119,6 +123,12 @@ jobs:
 
       - if: always() && steps.ui.outputs.started == 'true'
         uses: ./.github/actions/ui-shots-post
+        # The action comes from the pull request's checkout, so it gets no AWS
+        # credentials; it needs only the GitHub token.
+        env:
+          AWS_ACCESS_KEY_ID: ""
+          AWS_SECRET_ACCESS_KEY: ""
+          AWS_SESSION_TOKEN: ""
         with:
           pr: ${{ github.event.pull_request.number }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
