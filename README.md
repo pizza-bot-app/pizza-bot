@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icons/icon.png" alt="Pizza Bot" width="160" />
+  <img src="assets/icons/illustration.png" alt="Pizza Bot" width="160" />
 </p>
 
 <h1 align="center">Pizza Bot</h1>
