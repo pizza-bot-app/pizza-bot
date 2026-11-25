@@ -101,7 +101,7 @@ jobs:
             You are the required reviewer for ${{ github.repository }}/pull/${{ github.event.pull_request.number }}.
             The checkout is installed and built. CI separately runs the full build, typecheck, lint, and test suite, so do not re-run them wholesale.
 
-            1. Invoke the `code-review:code-review` skill with args `--comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}`.
+            1. Invoke the `code-review:code-review` skill with args `--comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}`. Skip its eligibility checks: this run gates the merge, so always review the current head, even if Claude has already reviewed or commented on an earlier push.
             2. For each finding the review would rank important, try to confirm it by executing code: run the relevant tests with `npx vitest run --dir <workspace>`, or write a small failing test or `npx tsx` probe under `.agent-review/` and run it. Live model calls are unavailable; use the scripted-model harness in tests/langgraph-compat when a probe needs the runtime.
             3. Return verdict "block" if any important finding stands, whether it is confirmed by execution or clear from reading the code. Otherwise return "ship".
           # --allowedTools REPLACES the action's default tool set, so the read
