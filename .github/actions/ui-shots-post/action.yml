@@ -1,0 +1,98 @@
+name: Post UI screenshots
+description: >
+  Publishes the before-<view>.png / after-<view>.png pairs Claude saved in
+  .ui-shots/ as a before/after table on the pull request. GitHub has no API to
+  attach images to a comment, so the images are committed to the
+  ui-screenshots branch and the comment links their raw URLs.
+inputs:
+  pr:
+    required: true
+  github-token:
+    required: true
+  sticky:
+    description: Edit the previous screenshot comment instead of adding one
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ inputs.pr }}
+        STICKY: ${{ inputs.sticky }}
+        BRANCH: ui-screenshots
+      run: |
+        set -euo pipefail
+        shots="$GITHUB_WORKSPACE/.ui-shots"
+        clean="$RUNNER_TEMP/ui-shots-clean"
+        rm -rf "$clean" && mkdir -p "$clean"
+
+        # Files and captions were produced by a session that ran the pull
+        # request's code: accept only small, plainly named PNGs, and strip
+        # captions of markup, mentions, and links before they reach a comment.
+        for f in "$shots"/*.png; do
+          [ -f "$f" ] || continue
+          name=$(basename "$f")
+          [[ "$name" =~ ^(before|after)-[a-z0-9-]{1,40}\.png$ ]] || { echo "skip $name: name"; continue; }
+          [ "$(stat -c %s "$f")" -le 5242880 ] || { echo "skip $name: size"; continue; }
+          [ "$(head -c 8 "$f" | xxd -p)" = "89504e470d0a1a0a" ] || { echo "skip $name: not png"; continue; }
+          cp "$f" "$clean/$name"
+        done
+        if ! ls "$clean"/*.png >/dev/null 2>&1; then
+          echo "No screenshots to post."
+          exit 0
+        fi
+        caption() {
+          jq -r --arg k "$1" 'if type == "object" then (.[$k] // "") else "" end | tostring' \
+            "$shots/captions.json" 2>/dev/null |
+            tr -d '\000-\037' | tr -d '@<>|[]`\\' | sed -E 's#https?://##g' | cut -c1-200
+        }
+
+        head_sha=$(git rev-parse HEAD)
+        dest="pr-$PR/${head_sha:0:12}-$GITHUB_RUN_ID"
+        repo="$RUNNER_TEMP/ui-shots-repo"
+        git init -q "$repo"
+        git -C "$repo" config user.name "github-actions[bot]"
+        git -C "$repo" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git -C "$repo" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        # Runs on different pull requests push here concurrently; retry on a
+        # rejected push by rebasing onto whoever won.
+        for attempt in 1 2 3 4 5; do
+          if git -C "$repo" fetch -q --depth 1 origin "$BRANCH" 2>/dev/null; then
+            git -C "$repo" checkout -q -B "$BRANCH" FETCH_HEAD
+          else
+            git -C "$repo" checkout -q --orphan "$BRANCH"
+          fi
+          mkdir -p "$repo/$dest" && cp "$clean"/*.png "$repo/$dest/"
+          git -C "$repo" add -A
+          git -C "$repo" commit -q -m "Screenshots for pull request $PR at ${head_sha:0:12}" || true
+          git -C "$repo" push -q origin "HEAD:$BRANCH" && break
+          [ "$attempt" = 5 ] && exit 1
+          sleep $((attempt * 3))
+        done
+        raw="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/$(git -C "$repo" rev-parse HEAD)/$dest"
+
+        body="$RUNNER_TEMP/ui-shots-body.md"
+        {
+          echo "<!-- ui-screenshots -->"
+          echo "### UI screenshots"
+          echo "Before is the merge base; after is \`${head_sha:0:12}\`. [Run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          echo
+          echo "| View | Before | After |"
+          echo "| --- | --- | --- |"
+          for view in $(ls "$clean" | sed -E 's/^(before|after)-//; s/\.png$//' | sort -u); do
+            cell() { [ -f "$clean/$1-$view.png" ] && echo "<img src=\"$raw/$1-$view.png\" width=\"420\">" || echo "_none_"; }
+            echo "| **$view**<br>$(caption "$view") | $(cell before) | $(cell after) |"
+          done
+        } > "$body"
+
+        existing=""
+        if [ "$STICKY" = "true" ]; then
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- ui-screenshots -->"))) | .id' | tail -n1)
+        fi
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@"$body" >/dev/null
+        else
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$body"
+        fi
