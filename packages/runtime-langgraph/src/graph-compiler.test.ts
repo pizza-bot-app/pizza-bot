@@ -115,6 +115,9 @@ describe("compileGraphSpec", () => {
 
     await expect(h.run({ command: { interruptId: data.interrupt_id, decisions: [{ decision: "approve" }] } }))
       .rejects.toThrow("takes a response, not an approval decision");
+    await expect(h.run({ command: { interruptId: "bogus", response: "yes" } }))
+      .rejects.toThrow("No pending step has interrupt id bogus");
+    expect((await h.graph.getState(h.threadId)).next).toEqual(["ask"]);
 
     const resumed = await h.run({ command: { interruptId: data.interrupt_id, response: "yes" } });
     expect(finishedNodes(resumed)).toEqual(["ask", "summarize"]);

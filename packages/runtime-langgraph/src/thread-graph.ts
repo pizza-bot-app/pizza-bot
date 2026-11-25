@@ -112,12 +112,16 @@ export class LangGraphThreadGraph implements AgentHandle {
 
   async *streamProtocol(input: RunInput, opts: RunOptions): AsyncIterable<ProtocolEvent> {
     const config = { configurable: { thread_id: opts.threadId } };
-    if ("command" in input && !("response" in input.command)) {
+    if ("command" in input) {
       const snap = await this.compiled.getState(config);
       const pending = (snap.tasks ?? []).flatMap((task) => task.interrupts ?? []);
       const target = pending.find((it) => it.id === input.command.interruptId);
-      // An approval decision is not an answer; the human node would store it as one.
-      if ((target?.value as { type?: unknown } | undefined)?.type === "graph.human") {
+      if ("response" in input.command) {
+        // LangGraph reads a resume map keyed by anything but real interrupt ids as a
+        // single value, which would answer every pending human step at once.
+        if (!target) throw new Error(`No pending step has interrupt id ${input.command.interruptId}.`);
+      } else if ((target?.value as { type?: unknown } | undefined)?.type === "graph.human") {
+        // An approval decision is not an answer; the human node would store it as one.
         throw new Error("A graph human step takes a response, not an approval decision.");
       }
     }
