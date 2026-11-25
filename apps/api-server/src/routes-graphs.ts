@@ -31,6 +31,11 @@ export function graphRoutes(host: AgentHost): Hono {
     if (targetedBy.length > 0) {
       return c.json({ error: "in_use", detail: `triggers ${targetedBy.join(", ")} run this graph` }, 409);
     }
+    // A graph thread resolves its state through its spec, so deleting the spec would strand its runs.
+    const runs = host.threadStore.listByGraph(id).length;
+    if (runs > 0) {
+      return c.json({ error: "in_use", detail: `${runs} run${runs === 1 ? "" : "s"} of this graph still exist; delete them first` }, 409);
+    }
     return (await host.graphRegistry.delete(id))
       ? c.json({ deleted: true })
       : c.json({ error: "not_found" }, 404);
@@ -38,7 +43,7 @@ export function graphRoutes(host: AgentHost): Hono {
 
   app.get("/graphs/:id/runs", (c) => {
     const id = c.req.param("id");
-    return c.json(host.threadStore.list().filter((thread) => thread.graphId === id));
+    return c.json(host.threadStore.listByGraph(id));
   });
 
   app.post("/graphs/:id/runs", async (c) => {

@@ -166,6 +166,13 @@ export class ThreadStore {
     return rows.map(toThread);
   }
 
+  listByGraph(graphId: string): ThreadRecord[] {
+    const rows = this.db
+      .prepare<[string], ThreadRow>("SELECT * FROM threads WHERE graph_id = ? ORDER BY last_activity_at DESC")
+      .all(graphId);
+    return rows.map(toThread);
+  }
+
   get(threadId: string): ThreadRecord | undefined {
     const row = this.db
       .prepare<[string], ThreadRow>("SELECT * FROM threads WHERE thread_id = ?")

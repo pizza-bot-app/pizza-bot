@@ -72,7 +72,7 @@ describe("graph routes", () => {
     expect((await app.request("/graphs/..%2Fescape")).status).toBe(404);
   });
 
-  it("starts a manual run on a fresh thread and refuses to delete a graph a trigger runs", async () => {
+  it("starts a manual run on a fresh thread and refuses to delete a graph a trigger or a run still uses", async () => {
     const { app, host, starts } = setup();
     await app.request("/graphs/digest", put(spec));
     const run = await app.request("/graphs/digest/runs", {
@@ -90,6 +90,14 @@ describe("graph routes", () => {
     host.triggers.create({ id: "t", kind: "cron", cron: "0 9 * * *", graphId: "digest", enabled: true });
     expect((await app.request("/graphs/digest", { method: "DELETE" })).status).toBe(409);
     host.triggers.delete("t");
+
+    host.threadStore.create({ threadId: "thread_graph_1", graphId: "digest" });
+    const stranded = await app.request("/graphs/digest", { method: "DELETE" });
+    expect(stranded.status).toBe(409);
+    expect(await stranded.json()).toMatchObject({ error: "in_use", detail: expect.stringContaining("1 run ") });
+    expect(await (await app.request("/graphs/digest/runs")).json()).toMatchObject([{ threadId: "thread_graph_1" }]);
+    host.threadStore.delete("thread_graph_1");
+
     expect((await app.request("/graphs/digest", { method: "DELETE" })).status).toBe(200);
     expect((await app.request("/graphs/digest")).status).toBe(404);
   });
