@@ -1,7 +1,7 @@
 /** Pins the v3 frames a compiled GraphSpec emits, including an agent node's nested approval pause. */
 import { describe, expect, it } from "vitest";
 import { compileGraphSpec, createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
-import { PIZZA_BOT_AGENT, parseGraphSpec, type SkillCatalog } from "@pizza-bot/core";
+import { PIZZA_BOT_AGENT, parseGraphSpec, type AgentCatalog } from "@pizza-bot/core";
 import { MemorySaver, type ProtocolEvent } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -25,19 +25,17 @@ class ScriptedModel extends BaseChatModel<Record<string, never>> {
   }
 }
 
-const skills: SkillCatalog = new Map([[
+const agents: AgentCatalog = new Map([[
   "specialist",
   {
     id: "specialist",
     name: "specialist",
     description: "Handles delegated sends.",
+    systemPrompt: "Send the mail.",
     source: "user",
     declaredTools: ["mcp:mailer:send"],
+    skills: [],
     interruptOn: { "mcp:mailer:send": { allowedDecisions: ["approve", "reject"] } },
-    files: [{
-      path: "/skills/specialist/SKILL.md",
-      content: "---\nname: specialist\ndescription: Handles delegated sends.\n---\n\nSend the mail.\n",
-    }],
   },
 ]]);
 
@@ -56,7 +54,7 @@ describe("compiled GraphSpec protocol stream (offline)", () => {
       ]),
       tools: { "mcp:mailer:send": tool(() => "sent", { name: "mailer__send", description: "send", schema: z.object({}) }) },
       catalog: { mailer: ["send"] },
-      skills,
+      agents,
       checkpointer,
     });
     const parsed = parseGraphSpec({
