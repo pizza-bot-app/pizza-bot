@@ -23,6 +23,12 @@ import { expandMcpEnvVars } from "./mcp-servers-config.js";
 import { ContributionRegistry, type PluginLoader } from "./registry.js";
 
 const MANIFEST_REL = ".claude-plugin/plugin.json";
+const VCS_METADATA = new Set([".git", ".hg", ".svn"]);
+
+/** Version-control metadata (a directory, or a `.git` file in worktrees/submodules) is never skill content. */
+export function isVcsMetadata(name: string): boolean {
+  return VCS_METADATA.has(name);
+}
 const mcpServersFileSchema = z.object({
   mcpServers: z.record(z.string(), z.unknown()),
 });
@@ -61,15 +67,25 @@ export class FsPluginLoader implements PluginLoader {
     onError: (pluginDir: string, err: unknown) => void = (_d, e) => {
       throw e;
     },
+    log: (msg: string) => void = () => {},
   ): Promise<PluginSource[]> {
     const entries = await readdir(pluginsDir, { withFileTypes: true }).catch(
       () => [],
     );
     const found: PluginSource[] = [];
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
       const root = join(pluginsDir, entry.name);
       try {
+        // Only a top-level link that resolves to a directory counts.
+        if (entry.isSymbolicLink()) {
+          const target = await stat(root).catch(() => null);
+          if (!target?.isDirectory()) {
+            log(`skipping plugin at ${root}: a symlink that does not resolve to a directory`);
+            continue;
+          }
+        } else if (!entry.isDirectory()) {
+          continue;
+        }
         found.push({
           root,
           manifest: await this.readManifest(join(root, MANIFEST_REL)),
@@ -150,6 +166,7 @@ export class FsPluginLoader implements PluginLoader {
       if (st.isDirectory()) {
         const children = await readdir(abs, { withFileTypes: true });
         for (const child of children) {
+          if (isVcsMetadata(child.name)) continue;
           const isMarkdown = extname(child.name) === ".md";
           if (!child.isDirectory() && !child.isSymbolicLink() && !isMarkdown) {
             continue;

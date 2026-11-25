@@ -9,7 +9,7 @@ import { ResourceList } from "../ResourceList.js";
 import { ResourceEditorSkeleton } from "../ResourceDetailSkeleton.js";
 import { useKeyedDoc } from "../../use-keyed-doc.js";
 import { L } from "../../lexicon.js";
-import { skillRemovalPresentation } from "./skill-actions.js";
+import { skillRemovalPresentation, skillUnlinkAction } from "./skill-actions.js";
 import { useAppToast } from "../AppToast.js";
 import {
   CapabilityEnablement,
@@ -327,6 +327,7 @@ function SkillDetail({
         />
       }
       onEdit={() => setSelection({ mode: "edit", id: selected.id })}
+      onUnlink={skillUnlinkAction(selected, confirmAction, onDelete)}
       onOpenPlugin={onOpenPlugin}
       onBack={backToList}
     />

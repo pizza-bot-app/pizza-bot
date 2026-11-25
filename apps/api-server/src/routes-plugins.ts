@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { PluginLoadStatus } from "@pizza-bot/plugin-api";
 import { createHash } from "node:crypto";
+import { lstat, realpath } from "node:fs/promises";
 import type { AgentHost } from "./agent-host.js";
 import {
   MAX_PLUGIN_ARCHIVE_BYTES,
@@ -28,6 +29,9 @@ export interface PluginsResponse {
     };
     // True only for plugins installed into the writable install dir (deletable through this API).
     removable: boolean;
+    // True when the plugin folder is a symlink; removing it drops only the link.
+    linked: boolean;
+    linkTarget?: string;
     contributions: {
       skills: number;
       mcpServers: number;
@@ -39,6 +43,13 @@ export interface PluginsResponse {
       detail?: string;
     };
   }>;
+}
+
+async function pluginLink(root: string): Promise<{ linked: boolean; linkTarget?: string }> {
+  const st = await lstat(root).catch(() => null);
+  if (!st?.isSymbolicLink()) return { linked: false };
+  const linkTarget = await realpath(root).catch(() => undefined);
+  return linkTarget ? { linked: true, linkTarget } : { linked: true };
 }
 
 function pluginReportId(root: string): string {
@@ -141,6 +152,7 @@ export function pluginRoutes(host: AgentHost): Hono {
           ...(m?.engines?.pizzaBot ? { engine: m.engines.pizzaBot } : {}),
           ...(m?.capabilities ? { capabilities: m.capabilities } : {}),
           removable: await host.pluginIsInstalled(report.name),
+          ...(await pluginLink(report.root)),
           contributions: {
             skills: count(loaded.registry.skills.values()),
             mcpServers: count(loaded.registry.mcpServers.values()),

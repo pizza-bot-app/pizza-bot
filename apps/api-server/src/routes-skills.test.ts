@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -24,7 +24,9 @@ const PLUGIN_FIXTURE = resolve(
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
+  );
 });
 
 async function fixture(
@@ -647,5 +649,49 @@ describe("skill routes", () => {
 
     expect(response.status).toBe(400);
     expect(await readFile(join(dir, "SKILL.md"), "utf8")).toBe("original");
+  });
+
+  async function linkedSkill(skillsDir: string): Promise<{ link: string; target: string }> {
+    const target = await mkdtemp(join(tmpdir(), "pizza-linked-skill-"));
+    roots.push(target);
+    await mkdir(join(target, ".git"));
+    await writeFile(join(target, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+    await writeFile(join(target, "SKILL.md"), "original", "utf8");
+    const link = join(skillsDir, "shared");
+    // A junction needs no privilege on Windows; other platforms ignore the type.
+    await symlink(target, link, "junction");
+    return { link, target };
+  }
+
+  it("refuses to edit a linked skill and leaves its target untouched", async () => {
+    const { app, skillsDir } = await fixture();
+    const { link, target } = await linkedSkill(skillsDir);
+
+    const response = await app.request("/skills/shared", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(bundle),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "linked",
+      detail: `This skill is linked from ${await realpath(target)}; edit it at the source.`,
+    });
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(target, "SKILL.md"), "utf8")).toBe("original");
+    expect(await readdir(join(target, ".git"))).toEqual(["HEAD"]);
+  });
+
+  it("deletes only the link of a linked skill", async () => {
+    const { app, skillsDir } = await fixture();
+    const { link, target } = await linkedSkill(skillsDir);
+
+    const response = await app.request("/skills/shared", { method: "DELETE" });
+
+    expect(response.status).toBe(200);
+    await expect(lstat(link)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(join(target, "SKILL.md"), "utf8")).toBe("original");
+    expect(await readdir(join(target, ".git"))).toEqual(["HEAD"]);
   });
 });

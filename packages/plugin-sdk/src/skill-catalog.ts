@@ -1,5 +1,5 @@
 /** Loads plugin and user Agent Skills into the runtime catalog shape. */
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import {
   PIZZA_BOT_AGENT,
@@ -13,6 +13,7 @@ import {
   type SkillFile,
 } from "@pizza-bot/core";
 import type { ContributionRegistry } from "./registry.js";
+import { isVcsMetadata } from "./loader.js";
 import { parseFrontmatter } from "./frontmatter.js";
 
 const SKILL_MD = "SKILL.md";
@@ -75,11 +76,23 @@ async function loadSkillsDirectory(
   const catalog: SkillCatalog = new Map();
   const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
     const id = entry.name;
     const dir = join(skillsDir, id);
+    // Only the top-level folder may be a link; files inside a bundle never are.
+    let linkTarget: string | undefined;
+    if (entry.isSymbolicLink()) {
+      linkTarget = await realpath(dir).catch(() => undefined);
+      const target = linkTarget ? await stat(linkTarget).catch(() => null) : null;
+      if (!target?.isDirectory()) {
+        log(`skipping ${source} skill "${id}": ${dir} is a symlink that does not resolve to a directory`);
+        continue;
+      }
+    } else if (!entry.isDirectory()) {
+      continue;
+    }
     try {
-      const skill = await readSkillBundle(id, dir, { source });
+      const bundle = await readSkillBundle(id, dir, { source });
+      const skill = bundle && linkTarget ? { ...bundle, linked: true, linkTarget } : bundle;
       if (skill) {
         catalog.set(id, skill);
         log(`${source} skill "${id}" (${skill.files.length} file(s))`);
@@ -217,6 +230,8 @@ async function collectBundleFiles(rootPath: string): Promise<Array<{ rel: string
   const visit = async (directory: string): Promise<void> => {
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
+      // A linked skill folder is often a git checkout; seeding its metadata would bloat every run.
+      if (isVcsMetadata(entry.name)) continue;
       const absolute = resolve(directory, entry.name);
       if (absolute !== root && !absolute.startsWith(`${root}${sep}`)) continue;
       // Skill bundles are data. Never follow symlinks outside (or around) root.

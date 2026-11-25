@@ -54,8 +54,11 @@ instructions, and its declared tools define the complete tool surface.
 
 User skills live under `<PIZZA_DATA_ROOT>/skills/<id>/SKILL.md`. They can
 override a Built-in or Plugin skill with the same id without modifying the
-original. Deleting an override reveals the Built-in or Plugin skill again. A
-minimal MCP-backed skill looks like:
+original. Deleting an override reveals the Built-in or Plugin skill again.
+A `<id>` entry may be a symlink to a folder, for example to keep skills in a git
+repo; linked skills are read-only in the app (edit them at the source), and
+Unlink removes only the link. A skill linked in while Pizza Bot is running
+appears after a restart (#217). A minimal MCP-backed skill looks like:
 
 ```markdown
 ---
@@ -104,7 +107,8 @@ The screen retains every discovered bundle and reports whether it loaded, was
 disabled by its manifest, is incompatible with this Pizza Bot release, or
 failed validation or activation. Disabled plugins are re-enabled by editing
 their manifest and setting top-level `enabled` to `true`, then reloading plugins
-or restarting Pizza Bot.
+or restarting Pizza Bot. An installed plugin folder may be a symlink to a folder
+kept elsewhere; Remove deletes only the link and leaves the folder in place.
 
 See the [plugins guide](../plugins/README.md) for the supported manifest subset,
 resource paths, materializers, and packaging shipped plugin dependencies.

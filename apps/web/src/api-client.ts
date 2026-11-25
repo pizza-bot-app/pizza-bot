@@ -830,6 +830,9 @@ export interface SkillCatalogEntryInfo {
   source: "plugin" | "builtin" | "user";
   overrides?: "plugin" | "builtin";
   pluginName?: string;
+  /** The skill folder is a symlink; it is read-only here and edited at `linkTarget`. */
+  linked?: boolean;
+  linkTarget?: string;
   declaredTools: string[];
   enabled: boolean;
   status: "disabled" | "loading" | "ready" | "unavailable";
@@ -933,6 +936,9 @@ export interface PluginInfo {
     optional: string[];
   };
   removable: boolean;
+  /** The plugin folder is a symlink; removing it drops only the link. */
+  linked?: boolean;
+  linkTarget?: string;
   contributions: { skills: number; mcpServers: number };
   materialization?: {
     state: "synced" | "stale" | "error";

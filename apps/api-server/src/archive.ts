@@ -26,7 +26,8 @@ export interface ReadArchiveLimits {
 /**
  * Reads every regular file from a ZIP buffer, rejecting archives that exceed the
  * given limits or carry unsafe paths, symlinks, or duplicate entries. macOS
- * metadata (`__MACOSX/`, `.DS_Store`) and directory entries are dropped.
+ * metadata (`__MACOSX/`, `.DS_Store`), version-control metadata (`.git`, `.hg`,
+ * `.svn`), and directory entries are dropped.
  */
 export async function readZipArchive(
   bytes: Uint8Array,
@@ -209,9 +210,14 @@ function isSymlink(entry: Entry): boolean {
   return (unixMode & 0xf000) === 0xa000;
 }
 
+const VCS_METADATA = new Set([".git", ".hg", ".svn"]);
+
 function isMetadataNoise(path: string): boolean {
   const segments = path.split("/");
-  return segments.includes("__MACOSX") || segments.at(-1) === ".DS_Store";
+  return (
+    segments.some((segment) => segment === "__MACOSX" || VCS_METADATA.has(segment)) ||
+    segments.at(-1) === ".DS_Store"
+  );
 }
 
 function formatMiB(bytes: number): string {

@@ -7,6 +7,7 @@ import {
   writeFileSync,
   readFileSync,
   rmSync,
+  symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
@@ -117,6 +118,39 @@ describe("AgentHost.reloadMcpServers", () => {
         id: "locking",
       }),
     ).toBeUndefined();
+  }, 30_000);
+
+  // A junction needs no privilege on Windows; other platforms ignore the type.
+  it("deletes only the link of a symlinked plugin and stops its MCP server", async () => {
+    const installDir = await host.pluginsInstallDirectory();
+    expect(installDir).toBeTypeOf("string");
+    const name = "linked-plugin";
+    const target = mkdtempSync(join(tmpdir(), "host-mcp-linked-plugin-"));
+    try {
+      mkdirSync(join(target, ".claude-plugin"), { recursive: true });
+      writeFileSync(
+        join(target, ".claude-plugin", "plugin.json"),
+        JSON.stringify({ name, mcpServers: "./.mcp.json" }),
+      );
+      writeFileSync(
+        join(target, ".mcp.json"),
+        JSON.stringify({ mcpServers: { linked: { command: "node", args: [STATUS_SERVER] } } }),
+      );
+      mkdirSync(installDir as string, { recursive: true });
+      const link = join(installDir as string, name);
+      symlinkSync(target, link, "junction");
+
+      await host.reloadPlugins();
+      expect(await host.toolCatalog()).toHaveProperty("linked");
+
+      await expect(host.deletePlugin(name)).resolves.toBe(true);
+      expect(existsSync(link)).toBe(false);
+      expect(existsSync(join(target, ".claude-plugin", "plugin.json"))).toBe(true);
+      expect(existsSync(join(target, ".mcp.json"))).toBe(true);
+      expect(await host.toolCatalog()).not.toHaveProperty("linked");
+    } finally {
+      rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   }, 30_000);
 
   it("rediscovers an MCP plugin installed while the host is running", async () => {

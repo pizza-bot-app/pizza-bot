@@ -97,7 +97,9 @@ export function PluginsModule({
             onOpenMcpServers={onOpenMcpServers}
             onRemove={() =>
               void confirmAction(
-                `Remove “${selected.displayName ?? selected.name}”? Its skills and MCP servers will no longer be available.`,
+                `Remove “${selected.displayName ?? selected.name}”? Its skills and MCP servers will no longer be available.${
+                  selected.linked ? " Only the link is removed; the linked folder stays in place." : ""
+                }`,
                 () => onDelete(selected.name),
                 {
                   title: "Remove plugin?",
@@ -174,7 +176,9 @@ function PluginView({
         </>
       }
       provenance={
-        plugin.removable ? (
+        plugin.linked ? (
+          <span>Linked from {plugin.linkTarget ?? "another folder"}</span>
+        ) : plugin.removable ? (
           plugin.homepage ? (
             <a className="resource-card-link" href={plugin.homepage} target="_blank" rel="noreferrer">
               Homepage ↗

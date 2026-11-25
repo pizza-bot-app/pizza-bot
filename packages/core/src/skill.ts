@@ -144,6 +144,9 @@ export interface SkillCatalogEntry {
   /** Shipped source hidden by this user override, if any. */
   overrides?: "plugin" | "builtin";
   pluginName?: string;
+  /** The skill folder is a symlink; it is read-only here and edited at `linkTarget`. */
+  linked?: boolean;
+  linkTarget?: string;
   files: SkillFile[];
   /**
    * Tool references the skill needs, in the same `mcp:<server>:<tool>` (or
@@ -164,6 +167,8 @@ export interface SkillInfo {
   source: SkillCatalogEntry["source"];
   overrides?: NonNullable<SkillCatalogEntry["overrides"]>;
   pluginName?: string;
+  linked?: boolean;
+  linkTarget?: string;
   declaredTools: string[];
   interruptOn: SkillInterruptOn;
   enabled?: boolean;
@@ -186,6 +191,8 @@ export function skillInfoOf(entry: SkillCatalogEntry): SkillInfo {
     source: entry.source,
     ...(entry.overrides ? { overrides: entry.overrides } : {}),
     ...(entry.pluginName ? { pluginName: entry.pluginName } : {}),
+    ...(entry.linked ? { linked: true } : {}),
+    ...(entry.linkTarget ? { linkTarget: entry.linkTarget } : {}),
     declaredTools: entry.declaredTools,
     interruptOn: entry.interruptOn,
   };

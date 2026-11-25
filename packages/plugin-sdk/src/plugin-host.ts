@@ -207,7 +207,7 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
         detail,
       });
       log(`skipping plugin at ${d}: ${detail}`);
-    });
+    }, log);
     for (const source of found) {
       const report = (
         status: PluginLoadStatus,

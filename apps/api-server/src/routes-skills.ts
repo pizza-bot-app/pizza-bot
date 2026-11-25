@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { mkdir, readdir, writeFile, rm } from "node:fs/promises";
+import { lstat, mkdir, readdir, readlink, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import {
   SKILL_MD,
@@ -306,6 +306,21 @@ async function userSkillExists(skillsDir: string, id: string): Promise<boolean> 
   return entries !== null && entries.includes(SKILL_MD);
 }
 
+/** The resolved target when the top-level skill folder is a symlink; such skills are edited at the source. */
+async function skillLinkTarget(skillsDir: string, id: string): Promise<string | undefined> {
+  const path = join(skillsDir, id);
+  const st = await lstat(path).catch(() => null);
+  if (!st?.isSymbolicLink()) return undefined;
+  return realpath(path).catch(() => readlink(path));
+}
+
+function linkedConflict(target: string): Record<string, unknown> {
+  return {
+    error: "linked",
+    detail: `This skill is linked from ${target}; edit it at the source.`,
+  };
+}
+
 export function skillRoutes(host: AgentHost): Hono {
   const app = fileResourceRoutes<string, SkillFields>({
     base: "/skills",
@@ -316,9 +331,16 @@ export function skillRoutes(host: AgentHost): Hono {
     patchable: (_skillsDir, id) =>
       host.skillFor(id).then((entry) => entry !== undefined && entry.source !== "user"),
     reserved: (_skillsDir, id) => host.skillFor(id).then((e) => Boolean(e)),
+    writeConflict: async (skillsDir, id) => {
+      const target = await skillLinkTarget(skillsDir, id);
+      return target ? linkedConflict(target) : undefined;
+    },
     write: (skillsDir, id, parsed) => writeSkill(skillsDir, id, parsed),
     remove: async (skillsDir, id) => {
-      await rm(join(skillsDir, id), { recursive: true, force: true });
+      const path = join(skillsDir, id);
+      // Deleting a linked skill drops only the link; the target is the user's own folder.
+      if (await skillLinkTarget(skillsDir, id)) await unlink(path);
+      else await rm(path, { recursive: true, force: true });
       host.clearUserSkillPreference(id);
     },
     reload: () => host.reloadSkills(),
@@ -397,6 +419,8 @@ export function skillRoutes(host: AgentHost): Hono {
         409,
       );
     }
+    const linkTarget = await skillLinkTarget(skillsDir, skill.id);
+    if (linkTarget) return c.json(linkedConflict(linkTarget), 409);
 
     await writeImportedSkill(skillsDir, skill);
     await host.reloadSkills();
