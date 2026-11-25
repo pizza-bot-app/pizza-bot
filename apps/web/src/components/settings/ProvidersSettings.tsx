@@ -314,11 +314,11 @@ function ProviderRow({
         { method: method.id, values: out },
         modelPreferences,
       );
-      notify({ title: `${provider.id} saved`, tone: "success" });
+      notify({ title: `${providerLabel(provider.id)} saved`, tone: "success" });
     } catch (e) {
       setError(errorMessage(e) ?? "Save failed");
       notify({
-        title: `Could not save ${provider.id}`,
+        title: `Could not save ${providerLabel(provider.id)}`,
         description: errorMessage(e),
         tone: "error",
       });
@@ -334,11 +334,11 @@ function ProviderRow({
       await onRemove(provider.id);
       setValues(seedValues(method, undefined));
       setModelPreferences({ mode: "all", selected: [] });
-      notify({ title: `${provider.id} removed`, tone: "success" });
+      notify({ title: `${providerLabel(provider.id)} removed`, tone: "success" });
     } catch (e) {
       setError(errorMessage(e) ?? "Remove failed");
       notify({
-        title: `Could not remove ${provider.id}`,
+        title: `Could not remove ${providerLabel(provider.id)}`,
         description: errorMessage(e),
         tone: "error",
       });
