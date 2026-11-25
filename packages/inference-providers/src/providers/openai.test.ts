@@ -170,6 +170,18 @@ describe("OpenAI output token cap recovery", () => {
 });
 
 describe("OpenAI model construction", () => {
+  it("passes advanced request JSON through to the request body", async () => {
+    const provider = new OpenAiLangChainModelProvider({ models: [] });
+    provider.configure({
+      method: "api-key",
+      values: { apiKey: "test-key", requestOverrides: '{"service_tier":"flex"}' },
+    });
+
+    expect(await provider.buildModel("gpt-4o")).toMatchObject({
+      modelKwargs: { service_tier: "flex" },
+    });
+  });
+
   it("does not require catalog discovery to succeed", async () => {
     const provider = new OpenAiLangChainModelProvider({
       apiKey: "test-key",

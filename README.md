@@ -112,7 +112,9 @@ to their advertised API family.
 OpenAI and Anthropic also accept custom base URLs for compatible endpoints;
 OpenAI can explicitly select Responses or Chat Completions, and Anthropic
 supports `x-api-key` or bearer authentication. Requesty accepts a base URL
-override such as `https://router.eu.requesty.ai/v1` for its EU region. Select
+override such as `https://router.eu.requesty.ai/v1` for its EU region. OpenAI,
+OpenRouter, Requesty, and Opper take an optional **Advanced request JSON** that is
+merged into every request, for options such as `{"service_tier": "flex"}`. Select
 a model with `PIZZA_MODEL=<provider>:<id>`. The desktop protects entered
 secrets with Electron `safeStorage`; server configuration persists only
 environment-variable references.

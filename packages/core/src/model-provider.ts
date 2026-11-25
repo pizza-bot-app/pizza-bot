@@ -207,7 +207,8 @@ function qualifiedModelId(model: ModelDescriptor): string {
 export interface ProviderAuthField {
   key: string;
   label: string;
-  type: "text" | "password" | "select";
+  /** `json` values are stored as raw text; the provider parses and validates them. */
+  type: "text" | "password" | "select" | "json";
   required: boolean;
   options?: readonly { value: string; label: string }[];
   default?: string;

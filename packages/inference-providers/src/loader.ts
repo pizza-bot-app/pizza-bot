@@ -33,7 +33,15 @@ export async function registerBuiltinProviders(registry: ModelRegistry, configs?
     const saved = configs?.getConfig(provider.id);
     if (saved && provider.configure) {
       // Expand secret references in memory; persisted config remains indirect.
-      provider.configure(expandMcpEnvVars({ method: saved.method, values: saved.values }));
+      // A saved config can stop validating once its env references change, and one
+      // provider must not keep the backend from starting; it stays unconfigured.
+      try {
+        provider.configure(expandMcpEnvVars({ method: saved.method, values: saved.values }));
+      } catch (err) {
+        console.warn(
+          `[providers] ignoring saved ${provider.id} settings: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
     registry.register(provider);
     const preferences = configs?.getModelPreferences(provider.id);
