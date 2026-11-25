@@ -33,9 +33,9 @@
 ![Pizza Bot inbox showing unread work, an approval request, a completed launch brief, and delegated agent activity](docs/assets/pizza-bot-inbox.png)
 
 Agents keep working when you navigate away or disconnect; only the api-server
-process must remain running. A stateful DeepAgents/LangGraph runtime serves the
-same React experience in Electron and the browser, and the desktop app, web app,
-and terminal CLI all talk to the api-server over HTTP/SSE.
+process must remain running. The same experience runs in Electron and the
+browser, and the desktop app, web app, and terminal CLI all talk to the
+api-server over HTTP/SSE.
 
 Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 
@@ -69,6 +69,10 @@ Installers are attached to every
 | macOS (Apple silicon, Intel) | `.dmg`, `.zip` | Signed and notarized |
 | Windows (x64) | `-setup.exe` | |
 | Linux (x64, arm64) | `.deb`, `.rpm` | Not signed; verify against `SHA256SUMS` |
+
+Each release also publishes a multi-architecture backend image,
+`ghcr.io/pizza-bot-app/pizza-bot`; see the
+[backend guide](docs/STANDALONE_BACKEND.md) for running it.
 
 ## Quick start
 
@@ -179,8 +183,8 @@ reporting process.
 
 ## Contributors
 
-Pizza Bot was designed, built, and brought into the open by its Executive Chefs
-and Sous Chefs:
+Pizza Bot was designed, built, and brought into the open by its Executive Chefs,
+Sous Chefs, and Chefs Emeritus:
 
 ### Executive Chefs
 
@@ -189,10 +193,13 @@ and Sous Chefs:
 
 ### Sous Chefs
 
-<a href="https://github.com/flavioschuindt" title="Flávio Schuindt (@flavioschuindt)"><img src="https://github.com/flavioschuindt.png?size=64" width="64" height="64" alt="Flávio Schuindt (@flavioschuindt)" /></a>
 <a href="https://github.com/jwert-aws" title="Jacob Wert (@jwert-aws)"><img src="https://github.com/jwert-aws.png?size=64" width="64" height="64" alt="Jacob Wert (@jwert-aws)" /></a>
-<a href="https://github.com/michaelkarachewski" title="Michael Karachewski (@michaelkarachewski)"><img src="https://github.com/michaelkarachewski.png?size=64" width="64" height="64" alt="Michael Karachewski (@michaelkarachewski)" /></a>
 <a href="https://github.com/spideron" title="Itzik Paz (@spideron)"><img src="https://github.com/spideron.png?size=64" width="64" height="64" alt="Itzik Paz (@spideron)" /></a>
+
+### Chefs Emeritus
+
+<a href="https://github.com/flavioschuindt" title="Flávio Schuindt (@flavioschuindt)"><img src="https://github.com/flavioschuindt.png?size=64" width="64" height="64" alt="Flávio Schuindt (@flavioschuindt)" /></a>
+<a href="https://github.com/michaelkarachewski" title="Michael Karachewski (@michaelkarachewski)"><img src="https://github.com/michaelkarachewski.png?size=64" width="64" height="64" alt="Michael Karachewski (@michaelkarachewski)" /></a>
 
 Pizza Bot was also shaped by more than 2,000 users across Amazon who tested
 earlier versions and shared feedback from real-world use. Their bug reports,
