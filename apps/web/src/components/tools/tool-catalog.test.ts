@@ -130,4 +130,8 @@ describe("coveringWildcard", () => {
     expect(coveringWildcard("mcp:files:read_file", ["mcp:files:list_*", "mcp:files:read_file"])).toBeUndefined();
     expect(coveringWildcard("mcp:files:list_directory", ["mcp:files:list_*"])).toBe("mcp:files:list_*");
   });
+
+  it("never treats a built-in as covered by an MCP server sharing its name", () => {
+    expect(coveringWildcard("builtin:eval", ["mcp:eval:*"])).toBeUndefined();
+  });
 });

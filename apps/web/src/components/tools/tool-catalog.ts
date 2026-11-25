@@ -119,11 +119,14 @@ export function patternSuggestions(
 
 /** The first wildcard in `refs`, other than `ref` itself, whose matches include everything `ref` grants. */
 export function coveringWildcard(ref: string, refs: readonly string[]): string | undefined {
-  const [, server, name = ""] = ref.split(":");
+  const [source, server, name = ""] = ref.split(":");
+  if (source !== "mcp") return undefined;
   const own = name.endsWith("*") ? name.slice(0, -1) : name;
   return refs.find((other) => {
     if (other === ref || !isWildcard(other)) return false;
-    const [, otherServer, pattern = ""] = other.split(":");
-    return otherServer === server && pattern.endsWith("*") && own.startsWith(pattern.slice(0, -1));
+    const [otherSource, otherServer, pattern = ""] = other.split(":");
+    return (
+      otherSource === "mcp" && otherServer === server && pattern.endsWith("*") && own.startsWith(pattern.slice(0, -1))
+    );
   });
 }
