@@ -2,7 +2,9 @@ name: Claude
 
 # Comment events fire in this repository's context rather than the fork's, so
 # unlike claude-code-review.yml this workflow reaches Bedrock on a fork pull
-# request. It is the only way to review one.
+# request. It is the only way to review one. Because that context carries this
+# repository's write token and AWS role, the pull request's code is built and
+# run only when its branch lives in this repository.
 on:
   issue_comment:
     types: [created]
@@ -37,7 +39,7 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       # The action enforces write access itself, but only after the credential
       # steps have run. On a public repository any comment containing the
@@ -55,9 +57,42 @@ jobs:
             *) echo "::error::${{ github.actor }} lacks write access (permission: $level)" && exit 1 ;;
           esac
 
+      - id: pr
+        name: Resolve pull request
+        if: github.event.issue.pull_request || github.event.pull_request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json isCrossRepository,headRefName,baseRefName --jq '
+            "same_repo=\(.isCrossRepository | not)\nhead_ref=\(.headRefName)\nbase_ref=\(.baseRefName)"' >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          ref: ${{ steps.pr.outputs.same_repo == 'true' && steps.pr.outputs.head_ref || '' }}
+          fetch-depth: 0
+
+      # No npm cache: this context shares main's cache scope, and the code
+      # built here must not be able to plant entries main's builds restore.
+      - if: steps.pr.outputs.same_repo == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Before the role session exists, so install scripts and the build never
+      # see AWS credentials.
+      - if: steps.pr.outputs.same_repo == 'true'
+        name: Install and build
+        run: npm ci --no-audit --no-fund && npm run build
+
+      # hashFiles: older branches predate the action and still get a normal
+      # answer, just without screenshots.
+      - id: ui
+        if: steps.pr.outputs.same_repo == 'true' && hashFiles('.github/actions/ui-preview/action.yml') != ''
+        uses: ./.github/actions/ui-preview
+        with:
+          base-ref: ${{ steps.pr.outputs.base_ref }}
+          force: ${{ contains(github.event.comment.body || github.event.review.body, 'screenshot') }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v6
@@ -66,6 +101,11 @@ jobs:
           aws-region: us-west-2
 
       - uses: anthropics/claude-code-action@v1
+        env:
+          # Strips cloud credentials from every command Claude runs, so the pull
+          # request's code executes without the Bedrock role.
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+          PIZZA_DATA_ROOT: ${{ runner.temp }}/pizza-data
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           use_bedrock: "true"
@@ -76,9 +116,19 @@ jobs:
           #
           # Overshooting --max-turns fails the job even when the review itself
           # succeeded and posted, so keep the cap clear of what a real review
-          # costs; timeout-minutes is the actual runaway guard. No --allowedTools
-          # here on purpose: naming any tool would replace the action's curated
-          # default set, which is already the right one for answering a mention.
+          # costs; timeout-minutes is the actual runaway guard. In this
+          # comment-triggered mode the action appends --allowedTools to its own
+          # defaults rather than replacing them; the extra tools run the pull
+          # request's code, so they are granted only on same-repository branches.
           claude_args: |
             --model global.anthropic.claude-opus-5-5
-            --max-turns 60
+            --max-turns 100
+            ${{ steps.pr.outputs.same_repo == 'true' && '--allowedTools "Bash(npm test:*),Bash(npx vitest:*),Bash(npx tsx:*),Bash(npx tsc:*),Bash(npm run:*),mcp__playwright"' || '' }}
+            ${{ steps.ui.outputs.started == 'true' && format('--mcp-config {0} --append-system-prompt-file .github/prompts/ui-screenshots.md', steps.ui.outputs.mcp_config) || '' }}
+
+      - if: always() && steps.ui.outputs.started == 'true'
+        uses: ./.github/actions/ui-shots-post
+        with:
+          pr: ${{ github.event.issue.number || github.event.pull_request.number }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sticky: "false"

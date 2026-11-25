@@ -1,0 +1,75 @@
+name: UI preview
+description: >
+  Starts the pull request's web app (head, :5173) beside its merge base
+  (base, :5174) and writes a Playwright MCP config so Claude can screenshot
+  both. Expects the head checked out and built in the workspace. Runs the pull
+  request's code, so callers must admit only same-repository branches.
+inputs:
+  base-ref:
+    description: Branch the pull request targets
+    required: true
+  force:
+    description: Start the apps even when apps/web is untouched
+    default: "false"
+outputs:
+  started:
+    description: '"true" when both apps are serving'
+    value: ${{ steps.diff.outputs.ui == 'true' && 'true' || 'false' }}
+  mcp_config:
+    description: Path to the Playwright MCP config for claude_args
+    value: ${{ runner.temp }}/playwright-mcp.json
+runs:
+  using: composite
+  steps:
+    - id: diff
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        FORCE: ${{ inputs.force }}
+      run: |
+        git fetch --no-tags --quiet origin "$BASE_REF"
+        base=$(git merge-base HEAD "origin/$BASE_REF")
+        echo "base=$base" >> "$GITHUB_OUTPUT"
+        if [ "$FORCE" = "true" ] || ! git diff --quiet "$base" HEAD -- apps/web; then
+          echo "ui=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - if: steps.diff.outputs.ui == 'true'
+      shell: bash
+      env:
+        BASE_SHA: ${{ steps.diff.outputs.base }}
+      run: |
+        set -euo pipefail
+        base_dir="$RUNNER_TEMP/base"
+        git worktree add --detach "$base_dir" "$BASE_SHA"
+        (cd "$base_dir" && npm ci --no-audit --no-fund &&
+          npx turbo run build --filter=@pizza-bot/api-server... --filter=@pizza-bot/web...)
+
+        node plugins/playwright-mcp/install-browser.mjs
+        (cd plugins/playwright-mcp && npx playwright install-deps chromium)
+
+        start() {
+          local dir=$1 api=$2 web=$3 name=$4
+          (cd "$dir" &&
+            PORT=$api PIZZA_DATA_ROOT="$(mktemp -d)" PIZZA_ALLOWED_ORIGINS="http://localhost:$web" \
+              nohup npx tsx apps/api-server/src/index.ts > "$RUNNER_TEMP/$name-api.log" 2>&1 &
+            PIZZA_API_TARGET="http://localhost:$api" \
+              nohup npm run dev -w @pizza-bot/web -- --port "$web" --strictPort > "$RUNNER_TEMP/$name-web.log" 2>&1 &)
+        }
+        start "$GITHUB_WORKSPACE" 8080 5173 head
+        start "$base_dir" 8081 5174 base
+        for _ in $(seq 120); do
+          curl -fs localhost:8080/ping >/dev/null && curl -fs localhost:8081/ping >/dev/null &&
+            curl -fs localhost:5173 >/dev/null && curl -fs localhost:5174 >/dev/null && break
+          sleep 1
+        done || true
+        curl -fs localhost:5173 >/dev/null && curl -fs localhost:5174 >/dev/null ||
+          { tail -n 40 "$RUNNER_TEMP"/*-api.log "$RUNNER_TEMP"/*-web.log; exit 1; }
+
+        # Shots land in the workspace so Claude can write captions.json beside
+        # them under the action's edit permissions; keep them out of commits.
+        mkdir -p .ui-shots && echo ".ui-shots/" >> .git/info/exclude
+        mcp_cli=$(node -p "require('path').join(require('path').dirname(require.resolve('@playwright/mcp/package.json', { paths: ['plugins/playwright-mcp'] })), 'cli.js')")
+        jq -n --arg cli "$mcp_cli" --arg out "$GITHUB_WORKSPACE/.ui-shots" \
+          '{mcpServers: {playwright: {command: "node", args: [$cli, "--headless", "--isolated", "--viewport-size", "1440x900", "--output-dir", $out]}}}' \
+          > "$RUNNER_TEMP/playwright-mcp.json"
