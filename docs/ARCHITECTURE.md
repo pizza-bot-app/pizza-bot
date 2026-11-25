@@ -498,7 +498,9 @@ with no expressions, so a graph without `llm`/`agent` nodes is deterministic.
 - **One graph per thread.** A graph run is a thread whose `graphId` is fixed at
   creation. `AgentHost.threadGraph` routes every state read and stream for that
   thread to the compiled graph, never to the assistant. Chat messages and forks
-  are refused on graph threads.
+  are refused on graph threads. A spec that a trigger targets or any run still
+  uses can't be deleted (`409 in_use`), because its runs resolve their state
+  through it.
 - **Input.** The run starts from `input` state: `{ trigger, prompt?, body? }`
   for a trigger (a webhook body is delivered as JSON, not mined for a prompt), or
   the caller's object for `POST /graphs/:id/runs`.
