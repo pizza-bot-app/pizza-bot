@@ -21,6 +21,12 @@ inputs:
       The action appends a per-architecture `scope`, so pass a `type=gha` value.
     required: false
     default: ""
+  use-cache:
+    description: >-
+      "false" builds without restoring cache entries. Releases pass it because
+      comment-triggered workflows run pull request code in main's cache scope.
+    required: false
+    default: "true"
   push-image:
     description: >-
       Registry image to push the backend image to by digest, untagged, after
@@ -52,7 +58,7 @@ runs:
         target: runtime
         load: true
         tags: pizza-bot-backend:candidate
-        cache-from: type=gha,scope=backend-image-${{ runner.arch }}
+        cache-from: ${{ inputs.use-cache == 'true' && format('type=gha,scope=backend-image-{0}', runner.arch) || '' }}
         cache-to: ${{ inputs.cache-to != '' && format('{0},scope=backend-image-{1}', inputs.cache-to, runner.arch) || '' }}
 
     - name: Smoke backend image
@@ -79,7 +85,7 @@ runs:
         target: runtime-with-browser
         load: true
         tags: pizza-bot-backend-browser:candidate
-        cache-from: type=gha,scope=backend-image-${{ runner.arch }}
+        cache-from: ${{ inputs.use-cache == 'true' && format('type=gha,scope=backend-image-{0}', runner.arch) || '' }}
         cache-to: ${{ inputs.cache-to != '' && format('{0},scope=backend-image-{1}', inputs.cache-to, runner.arch) || '' }}
 
     - name: Smoke Playwright in browser-enabled image
@@ -102,4 +108,4 @@ runs:
         target: runtime
         labels: ${{ inputs.labels }}
         outputs: type=image,name=${{ inputs.push-image }},push-by-digest=true,name-canonical=true,push=true
-        cache-from: type=gha,scope=backend-image-${{ runner.arch }}
+        cache-from: ${{ inputs.use-cache == 'true' && format('type=gha,scope=backend-image-{0}', runner.arch) || '' }}
