@@ -9,9 +9,11 @@ describe("admin visibility", () => {
       mcp: false,
       memories: false,
       triggers: false,
+      graphs: false,
       plugins: false,
     });
     expect(adminVisibility("automations").triggers).toBe(true);
+    expect(adminVisibility("graphs").graphs).toBe(true);
     expect(adminVisibility("agents").agents).toBe(true);
     expect(adminVisibility("skills").skills).toBe(true);
     expect(adminVisibility("mcp").mcp).toBe(true);
