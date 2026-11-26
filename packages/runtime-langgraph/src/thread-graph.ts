@@ -120,8 +120,11 @@ export class LangGraphThreadGraph implements AgentHandle {
         // LangGraph reads a resume map keyed by anything but real interrupt ids as a
         // single value, which would answer every pending human step at once.
         if (!target) throw new Error(`No pending step has interrupt id ${input.command.interruptId}.`);
-      } else if ((target?.value as { type?: unknown } | undefined)?.type === "graph.human") {
-        // An approval decision is not an answer; the human node would store it as one.
+      } else if (
+        isHumanRequest(target?.value) ||
+        (!target && pending.some((it) => isHumanRequest(it.value)))
+      ) {
+        // An approval decision is not an answer; a pending human node would store it as one.
         throw new Error("A graph human step takes a response, not an approval decision.");
       }
     }
@@ -212,4 +215,8 @@ export function contentText(content: unknown): string {
         : "",
     )
     .join("");
+}
+
+function isHumanRequest(value: unknown): boolean {
+  return (value as { type?: unknown } | undefined)?.type === "graph.human";
 }
