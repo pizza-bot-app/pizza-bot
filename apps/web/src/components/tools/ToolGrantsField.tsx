@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from "r
 import type { ToolCatalogInfo } from "@/api-client";
 import type { InterruptOnPolicy } from "@pizza-bot/core";
 import { Plus, X } from "lucide-react";
-import { coveringWildcard, describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "./tool-catalog.js";
+import { coveringWildcard, describeGrantedTool, toggleAskFirst, filterTools, patternSuggestions, toolGroups } from "./tool-catalog.js";
 import { ToolChip, ToolFilterInput, ToolRow } from "./ToolList.js";
 
 /** Granted tool chips with per-tool "Ask first", plus the grouped picker that adds grants. */
@@ -22,6 +22,7 @@ export function ToolGrantsField({
   hint: string;
 }) {
   const asksFirst = (ref: string) => interruptOn[ref] !== undefined && interruptOn[ref] !== false;
+  const uncheckedPolicies = useRef(new Map<string, InterruptOnPolicy[string]>());
   return (
     <div className="field">
       <span className="field-label">Tools</span>
@@ -55,15 +56,8 @@ export function ToolGrantsField({
                     checked={coveredBy !== undefined || asksFirst(ref)}
                     disabled={coveredBy !== undefined}
                     onChange={(event) =>
-                      setInterruptOn((previous) => {
-                        const next = { ...previous };
-                        if (event.target.checked) {
-                          next[ref] = { allowedDecisions: ["approve", "edit", "reject"] };
-                        } else {
-                          delete next[ref];
-                        }
-                        return next;
-                      })
+                      setInterruptOn((previous) =>
+                        toggleAskFirst(previous, ref, event.target.checked, uncheckedPolicies.current))
                     }
                   />
                   Ask first

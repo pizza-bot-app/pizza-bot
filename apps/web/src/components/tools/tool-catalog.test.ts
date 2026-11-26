@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ToolCatalogInfo } from "@/api-client";
-import { coveringWildcard, describeGrantedTool, filterTools, patternSuggestions, toolGroups } from "./tool-catalog.js";
+import { coveringWildcard, describeGrantedTool, filterTools, patternSuggestions, toggleAskFirst, toolGroups } from "./tool-catalog.js";
 
 const catalog: ToolCatalogInfo = {
   builtins: [{ ref: "builtin:eval", name: "eval", description: "Evaluate expressions." }],
@@ -133,5 +133,21 @@ describe("coveringWildcard", () => {
 
   it("never treats a built-in as covered by an MCP server sharing its name", () => {
     expect(coveringWildcard("builtin:eval", ["mcp:eval:*"])).toBeUndefined();
+  });
+});
+
+describe("toggleAskFirst", () => {
+  it("restores a tool's full policy when Ask first is turned back on", () => {
+    const unchecked = new Map();
+    const grounded = { allowedDecisions: ["approve" as const], verifiedArgs: ["body"] };
+    const off = toggleAskFirst({ "mcp:mail:send": grounded }, "mcp:mail:send", false, unchecked);
+    expect(off).toEqual({});
+    expect(toggleAskFirst(off, "mcp:mail:send", true, unchecked)).toEqual({ "mcp:mail:send": grounded });
+  });
+
+  it("defaults a newly gated tool to approve, edit, and reject", () => {
+    expect(toggleAskFirst({}, "mcp:mail:send", true, new Map())).toEqual({
+      "mcp:mail:send": { allowedDecisions: ["approve", "edit", "reject"] },
+    });
   });
 });
