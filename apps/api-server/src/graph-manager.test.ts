@@ -166,6 +166,13 @@ describe("GraphManager", () => {
       expect((await registry.rootAgentFor("researcher")).agent).not.toBe(first.agent);
     });
 
+    it("offers only a ready agent as a thread's top-level agent", async () => {
+      const registry = await withAgents(agent("researcher"), agent("orphaned", { model: "ghost:nope" }));
+      expect(registry.hasRootAgent("researcher")).toBe(true);
+      expect(registry.hasRootAgent("orphaned")).toBe(false);
+      expect(registry.hasRootAgent("broken")).toBe(false);
+    });
+
     it("names why an agent cannot run", async () => {
       const registry = await withAgents(agent("researcher"));
       await expect(registry.rootAgentFor("broken")).rejects.toThrow(

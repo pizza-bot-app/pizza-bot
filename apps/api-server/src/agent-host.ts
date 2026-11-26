@@ -701,10 +701,14 @@ export class AgentHost {
     threadId: string,
     resumeFallback: boolean,
   ): Promise<boolean> {
+    const thread = this.threadStore.get(threadId);
+    const recorded = resumeFallback || (thread?.awaitingAction ?? false);
+    // The assistant's graph, which reads an unready agent's thread, cannot see its pending approvals.
+    if (thread?.agentId && !this.graphs?.hasRootAgent(thread.agentId)) return recorded;
     try {
       return stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId));
     } catch {
-      return resumeFallback || (this.threadStore.get(threadId)?.awaitingAction ?? false);
+      return recorded;
     }
   }
 

@@ -564,6 +564,10 @@ describe("AgentHost agent threads", () => {
       join(dataRoot, "agents", "researcher.md"),
       "---\nname: researcher\ndescription: Finds sources.\n---\n\nYou research topics.\n",
     );
+    writeFileSync(
+      join(dataRoot, "agents", "orphaned.md"),
+      "---\nname: orphaned\ndescription: Pins a model nobody provides.\nmodel: ghost:nope\n---\n\nYou work.\n",
+    );
     host = await AgentHost.create({ dataRoot, pluginsDir });
   });
 
@@ -581,6 +585,27 @@ describe("AgentHost agent threads", () => {
     expect(agentGraph).not.toBe(host.agent);
     expect(await host.threadGraph("with-ghost")).toBe(host.agent);
     expect(await host.threadGraph("plain")).toBe(host.agent);
+  });
+
+  it("still opens a thread whose agent pins a model that cannot load", async () => {
+    host.threadStore.create({ threadId: "with-orphan", agentId: "orphaned" });
+
+    const graph = await host.threadGraph("with-orphan");
+    expect(graph).toBe(host.agent);
+    await expect(graph.getState("with-orphan")).resolves.toBeDefined();
+  });
+
+  it("keeps a pending decision on a thread whose agent cannot load", async () => {
+    await host.agentFor();
+    host.threadStore.create({ threadId: "waiting", agentId: "orphaned" });
+    host.threadStore.update("waiting", { awaitingAction: true });
+
+    host.protocolRuns.start("waiting", {
+      messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "hello" }] }],
+    });
+    await vi.waitFor(() => expect(host.threadStore.get("waiting")?.unread).toBe(true), { timeout: 10_000 });
+
+    expect(host.threadStore.get("waiting")?.awaitingAction).toBe(true);
   });
 
   it("reads a Todo check-in thread through the agent's background graph", async () => {

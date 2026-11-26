@@ -358,7 +358,10 @@ export class GraphManager {
 
   /** Whether the agent is enabled and ready to run as a thread's top-level agent. */
   hasRootAgent(agentId: string): boolean {
-    return this.dependencies.agents?.has(agentId) ?? false;
+    if (!this.dependencies.agents?.has(agentId)) return false;
+    // `dependencies` still lists an agent whose pinned model failed to resolve.
+    const state = this.agentAvailability().find((agent) => agent.id === agentId);
+    return !state || state.status === "ready";
   }
 
   private unavailableAgentMessage(agentId: string): string {
