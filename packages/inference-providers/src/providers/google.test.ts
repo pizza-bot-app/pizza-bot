@@ -436,7 +436,7 @@ describe("Google Vertex AI Express model-not-found recovery", () => {
     "retries on the key's own project when Express cannot find the model (%s)",
     async (mode) => {
       const fetchFn = vi.fn()
-        .mockResolvedValueOnce(Response.json(notFound("195922579897"), { status: 404 }))
+        .mockResolvedValueOnce(Response.json(notFound("123456789012"), { status: 404 }))
         .mockImplementation(async () => Response.json(reply));
       vi.stubGlobal("fetch", fetchFn);
 
@@ -444,21 +444,21 @@ describe("Google Vertex AI Express model-not-found recovery", () => {
 
       expect(fetchFn).toHaveBeenCalledTimes(2);
       expect(urlOf(fetchFn.mock.calls[1]!)).toMatch(
-        /^https:\/\/aiplatform\.googleapis\.com\/v1\/projects\/195922579897\/locations\/global\/publishers\/google\/models\/gemini-4-neon:/,
+        /^https:\/\/aiplatform\.googleapis\.com\/v1\/projects\/123456789012\/locations\/global\/publishers\/google\/models\/gemini-4-neon:/,
       );
     },
   );
 
   it("keeps later models on the learned project until the settings change", async () => {
     const fetchFn = vi.fn()
-      .mockResolvedValueOnce(Response.json(notFound("195922579897"), { status: 404 }))
+      .mockResolvedValueOnce(Response.json(notFound("123456789012"), { status: 404 }))
       .mockImplementation(async () => Response.json(reply));
     vi.stubGlobal("fetch", fetchFn);
     const provider = vertexProvider();
 
     await call(provider, "invoke");
     await call(provider, "invoke");
-    expect(urlOf(fetchFn.mock.calls[2]!)).toMatch(/\/projects\/195922579897\/locations\/global\//);
+    expect(urlOf(fetchFn.mock.calls[2]!)).toMatch(/\/projects\/123456789012\/locations\/global\//);
     expect(provider.authSchema[0]?.fields.find((f) => f.key === "platform")?.options)
       .toContainEqual({ value: "gcp", label: "Vertex AI" });
 
@@ -469,7 +469,7 @@ describe("Google Vertex AI Express model-not-found recovery", () => {
 
   it("reports the project endpoint's own failure when the retry fails too", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () =>
-      Response.json(notFound("195922579897"), { status: 404 })));
+      Response.json(notFound("123456789012"), { status: 404 })));
 
     const error = await failure(vertexProvider(), "invoke");
     expect(error.message).not.toMatch(/Vertex AI Express serves only/);
@@ -489,7 +489,7 @@ describe("Google Vertex AI Express model-not-found recovery", () => {
 
   it("leaves the failure alone once a project is set", async () => {
     const fetchFn = vi.fn().mockImplementation(async () =>
-      Response.json(notFound("195922579897"), { status: 404 }));
+      Response.json(notFound("123456789012"), { status: 404 }));
     vi.stubGlobal("fetch", fetchFn);
 
     const error = await failure(vertexProvider({ project: "my-project" }), "invoke");
