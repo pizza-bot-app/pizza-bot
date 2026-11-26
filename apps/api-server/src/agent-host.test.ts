@@ -122,6 +122,22 @@ describe("AgentHost lifecycle and identity", () => {
     recover.mockRestore();
   });
 
+  it("offers builtin:execute only while a shell sandbox is configured", async () => {
+    expect(host.builtinTools().map((tool) => tool.ref)).toEqual(["builtin:eval"]);
+
+    const sandbox = {
+      backend: { id: "fake-vm", execute: async () => ({ output: "", exitCode: 0, truncated: false }) },
+      deleteThread: async () => {},
+      close: async () => {},
+    };
+    const sandboxed = await AgentHost.create({ dataRoot, pluginsDir, sandbox: sandbox as never });
+    try {
+      expect(sandboxed.builtinTools().map((tool) => tool.ref)).toEqual(["builtin:eval", "builtin:execute"]);
+    } finally {
+      await sandboxed.close();
+    }
+  });
+
   it("keeps user skills under the data root", async () => {
     expect(await host.skillsDirectory()).toBe(join(dataRoot, "skills"));
   });

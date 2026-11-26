@@ -40,6 +40,12 @@ license and third-party notice texts are included in THIRD_PARTY_LICENSES.txt:
 https://github.com/microsoft/playwright-mcp
 https://github.com/microsoft/playwright
 
+Desktop builds that bundle the optional smolvm sandbox also include
+resources/smolvm/THIRD_PARTY_NOTICES.txt (source: apps/desktop-shell/smolvm-notices.txt).
+It covers smolvm, libkrun, libkrunfw (with its GPL-2.0 Linux kernel), MoltenVK,
+libepoxy, virglrenderer, and the Alpine Linux guest userland including BusyBox,
+with their license texts and the source locations for the GPL and LGPL parts.
+
 Files in apps/web/src/components/ui are derived from shadcn/ui:
 https://github.com/shadcn-ui/ui
 

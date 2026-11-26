@@ -85,8 +85,11 @@ report. Publish only when the user asks.
   `inherit`, to run on the conversation's model. A model that cannot be resolved
   makes the agent unavailable rather than silently switching models.
 - `tools` lists `mcp:<server>:<tool>` refs (`mcp:<server>:*` and prefix patterns
-  match many) and `builtin:eval` for the sandboxed interpreter. It is the agent's
-  complete tool surface beyond the filesystem.
+  match many), `builtin:eval` for the sandboxed interpreter, and
+  `builtin:execute` for shell commands in the conversation's VM. It is the
+  agent's complete tool surface beyond the filesystem. An agent granting
+  `builtin:execute` stays unavailable unless a shell sandbox is configured
+  ([STANDALONE_BACKEND.md](STANDALONE_BACKEND.md#shell-sandbox)).
 - `skills` mounts skills on the agent's own skills middleware.
 - `interruptOn` pauses a granted MCP tool for a human decision.
 - `metadata.display-name` sets the name shown in the UI.

@@ -6,14 +6,21 @@ export const BUILTIN_EVAL_TOOL_REF = "builtin:eval";
 
 export const BUILTIN_EVAL_TOOL_DESCRIPTION = "Evaluate calculations and deterministic expressions.";
 
+/** Offered only while a shell sandbox is configured (`PIZZA_SANDBOX`). */
+export const BUILTIN_EXECUTE_TOOL_REF = "builtin:execute";
+
+export const BUILTIN_EXECUTE_TOOL_DESCRIPTION = "Run shell commands in this conversation's sandbox VM.";
+
+const BUILTIN_TOOL_REFS: ReadonlySet<string> = new Set([BUILTIN_EVAL_TOOL_REF, BUILTIN_EXECUTE_TOOL_REF]);
+
 /** An absent `model` and this value both mean the conversation's model. */
 export const INHERIT_MODEL = "inherit";
 
 export const toolRefSchema = z
   .string()
   .refine(
-    (ref) => ref === BUILTIN_EVAL_TOOL_REF || /^mcp:[^:\s]+:[^:\s]+$/.test(ref),
-    "Tool ref must be builtin:eval or mcp:<server>:<tool> (wildcards allowed)",
+    (ref) => BUILTIN_TOOL_REFS.has(ref) || /^mcp:[^:\s]+:[^:\s]+$/.test(ref),
+    "Tool ref must be builtin:eval, builtin:execute, or mcp:<server>:<tool> (wildcards allowed)",
   );
 
 export const interruptToolRefSchema = toolRefSchema.refine(
