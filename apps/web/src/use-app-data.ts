@@ -15,7 +15,7 @@ import type {
   ProviderView,
   PluginInfo,
 } from "@/api-client";
-import type { Todo, TodoCreateInput, TodoPatch, TriggerDef } from "@pizza-bot/core";
+import type { Todo, TodoAssignment, TodoCreateInput, TodoPatch, TriggerDef } from "@pizza-bot/core";
 
 function useAdminData<D>(
   load: () => Promise<D>,
@@ -353,7 +353,10 @@ export function useTodos(client: ApiClient) {
   );
 
   const create = refreshAfter((input: TodoCreateInput) => client.createTodo(input), refresh);
-  const update = refreshAfter((id: string, patch: TodoPatch) => client.updateTodo(id, patch), refresh);
+  const update = refreshAfter(
+    (id: string, patch: TodoPatch & TodoAssignment) => client.updateTodo(id, patch),
+    refresh,
+  );
   const remove = refreshAfter((id: string) => client.deleteTodo(id), refresh);
   const linkThread = refreshAfter(
     (id: string, threadId: string) => client.linkTodoThread(id, threadId),
@@ -363,8 +366,9 @@ export function useTodos(client: ApiClient) {
     (id: string, threadId: string) => client.unlinkTodoThread(id, threadId),
     refresh,
   );
+  const checkIn = refreshAfter((id: string) => client.checkInTodo(id), refresh);
 
-  return { todos, loading, refresh, create, update, remove, linkThread, unlinkThread };
+  return { todos, loading, refresh, create, update, remove, linkThread, unlinkThread, checkIn };
 }
 
 export function useGraphs(client: ApiClient, intervalMs = 5_000, enabled = true) {

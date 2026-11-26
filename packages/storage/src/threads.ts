@@ -26,6 +26,9 @@ export interface ThreadRecord {
   agentId?: string;
   /** The agent's pinned home thread; each agent has at most one. */
   agentHome?: boolean;
+  /** A Todo owner's check-in thread: hidden from the Inbox unless it awaits the user. */
+  background?: boolean;
+  todoId?: string;
   lastMessage?: string;
   lastMessageRole?: string;
 }
@@ -44,6 +47,8 @@ interface ThreadRow {
   graph_id: string | null;
   agent_id: string | null;
   agent_home: number;
+  background: number;
+  todo_id: string | null;
   created_at: string;
   last_activity_at: string;
   last_message: string | null;
@@ -62,6 +67,8 @@ export interface NewThreadInput {
   graphId?: string;
   agentId?: string;
   agentHome?: boolean;
+  background?: boolean;
+  todoId?: string;
   createdAt?: string;
 }
 
@@ -125,6 +132,12 @@ export class ThreadStore {
     if (!columns.some((column) => column.name === "agent_home")) {
       this.db.exec("ALTER TABLE threads ADD COLUMN agent_home INTEGER NOT NULL DEFAULT 0");
     }
+    if (!columns.some((column) => column.name === "background")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN background INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!columns.some((column) => column.name === "todo_id")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN todo_id TEXT");
+    }
     this.db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_threads_agent_home ON threads (agent_id) WHERE agent_home = 1",
     );
@@ -154,17 +167,19 @@ export class ThreadStore {
       ...(input.graphId !== undefined ? { graphId: input.graphId } : {}),
       ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
       ...(input.agentId !== undefined && input.agentHome ? { agentHome: true } : {}),
+      ...(input.background ? { background: true } : {}),
+      ...(input.todoId !== undefined ? { todoId: input.todoId } : {}),
     };
     this.db
       .prepare(
         `INSERT INTO threads
            (thread_id, title, folder_id, parent_thread_id, parent_checkpoint_id, source, pinned, unread,
-            awaiting_action, model_id, graph_id, agent_id, agent_home, created_at, last_activity_at,
-            last_message, last_message_role)
+            awaiting_action, model_id, graph_id, agent_id, agent_home, background, todo_id, created_at,
+            last_activity_at, last_message, last_message_role)
          VALUES
            (@thread_id, @title, @folder_id, @parent_thread_id, @parent_checkpoint_id, @source, @pinned, @unread,
-            @awaiting_action, @model_id, @graph_id, @agent_id, @agent_home, @created_at, @last_activity_at,
-            @last_message, @last_message_role)`,
+            @awaiting_action, @model_id, @graph_id, @agent_id, @agent_home, @background, @todo_id, @created_at,
+            @last_activity_at, @last_message, @last_message_role)`,
       )
       .run(toRow(rec));
     this.emit({ type: "upsert", threadId: rec.threadId });
@@ -176,10 +191,12 @@ export class ThreadStore {
     return this.get(input.threadId) ?? this.create(input);
   }
 
+  /** The Inbox: background threads appear only while they await the user. */
   list(limit = 200): ThreadRecord[] {
     const rows = this.db
       .prepare<[number], ThreadRow>(
-        "SELECT * FROM threads ORDER BY pinned DESC, last_activity_at DESC LIMIT ?",
+        `SELECT * FROM threads WHERE background = 0 OR awaiting_action = 1
+         ORDER BY pinned DESC, last_activity_at DESC LIMIT ?`,
       )
       .all(limit);
     return rows.map(toThread);
@@ -281,6 +298,8 @@ function toThread(row: ThreadRow): ThreadRecord {
   if (row.graph_id !== null) rec.graphId = row.graph_id;
   if (row.agent_id !== null) rec.agentId = row.agent_id;
   if (row.agent_home === 1) rec.agentHome = true;
+  if (row.background === 1) rec.background = true;
+  if (row.todo_id !== null) rec.todoId = row.todo_id;
   if (row.last_message !== null) rec.lastMessage = row.last_message;
   if (row.last_message_role !== null) rec.lastMessageRole = row.last_message_role;
   return rec;
@@ -301,6 +320,8 @@ function toRow(rec: ThreadRecord): ThreadRow {
     graph_id: rec.graphId ?? null,
     agent_id: rec.agentId ?? null,
     agent_home: rec.agentHome ? 1 : 0,
+    background: rec.background ? 1 : 0,
+    todo_id: rec.todoId ?? null,
     created_at: rec.createdAt,
     last_activity_at: rec.lastActivityAt,
     last_message: rec.lastMessage ?? null,

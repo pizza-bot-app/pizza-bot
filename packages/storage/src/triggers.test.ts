@@ -84,6 +84,14 @@ describe("TriggerStore: CRUD", () => {
     expect(s.update("old", { graphId: "digest" })?.graphId).toBe("digest");
   });
 
+  it("ties a check-in schedule to its Todo for good", () => {
+    const s = openTriggerStore(tmpDb());
+    s.create({ id: "c", kind: "cron", cron: "0 9 * * *", todoId: "todo-1", enabled: true });
+    expect(s.forTodo("todo-1")?.id).toBe("c");
+    expect(s.update("c", { cron: "0 * * * *" })).toMatchObject({ todoId: "todo-1", cron: "0 * * * *" });
+    expect(s.forTodo("todo-2")).toBeUndefined();
+  });
+
   it("targets a graph until the graph id is patched blank", () => {
     const s = openTriggerStore(tmpDb());
     s.create({ id: "g", kind: "webhook", graphId: "triage", enabled: true, webhookSecret: "k" });

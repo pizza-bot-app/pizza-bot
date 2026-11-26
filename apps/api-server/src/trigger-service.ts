@@ -37,6 +37,11 @@ export interface TriggerServiceOptions {
   /** Whether a thread is still paused for a person after a run on it ends. */
   awaitsInput?: (threadId: string) => Promise<boolean>;
   newThreadId?: () => string;
+  /** Resolves a Todo check-in to its owner's background thread and prompt, or a reason to skip it. */
+  todoCheckIn?: (
+    trigger: TriggerDef,
+    occurrence: TriggerOccurrence,
+  ) => { threadId: string; prompt: string } | { skip: string };
   maxAttempts?: number;
   log?: (msg: string) => void;
 }
@@ -56,6 +61,7 @@ export class TriggerService {
   private readonly isEnabled: () => boolean;
   private readonly awaitsInput: ((threadId: string) => Promise<boolean>) | undefined;
   private readonly mintThreadId: () => string;
+  private readonly todoCheckIn: TriggerServiceOptions["todoCheckIn"];
   private readonly maxAttempts: number;
   private readonly log: (msg: string) => void;
   private active = false;
@@ -74,6 +80,7 @@ export class TriggerService {
     this.awaitsInput = opts.awaitsInput;
     this.mintThreadId =
       opts.newThreadId ?? (() => `thread_trigger_${Date.now().toString(36)}_${threadCounter++}`);
+    this.todoCheckIn = opts.todoCheckIn;
     this.maxAttempts = opts.maxAttempts ?? 3;
     this.log = opts.log ?? ((message) => console.log(`[trigger-service] ${message}`));
   }
@@ -141,13 +148,19 @@ export class TriggerService {
     return handle ? { handle } : undefined;
   }
 
-  runNow(triggerId: string): { handle: RunHandle } | undefined {
+  runNow(triggerId: string, reason: "manual" | "handoff" = "manual"): { handle: RunHandle } | undefined {
     if (!this.isEnabled()) return undefined;
     const trigger = this.store.get(triggerId);
     if (!trigger || !trigger.enabled) return undefined;
-    const occurrence = this.createOccurrence(trigger.id, "manual");
+    const occurrence = this.createOccurrence(trigger.id, reason);
     const handle = this.launchOccurrence(occurrence.id);
     return handle ? { handle } : undefined;
+  }
+
+  /** When an enabled scheduled trigger fires next, if it is armed. */
+  nextRunAt(triggerId: string): string | undefined {
+    const next = this.jobs.get(triggerId)?.nextDate();
+    return next ? (next.toUTC().toISO() ?? undefined) : undefined;
   }
 
   private evaluate(): void {
@@ -178,7 +191,8 @@ export class TriggerService {
   }
 
   private reconcileSchedules(force: boolean): boolean {
-    const triggers = this.store.listEnabled("cron");
+    // A Todo checked in on only when asked or handed off keeps a trigger with no schedule.
+    const triggers = this.store.listEnabled("cron").filter((trigger) => trigger.cron || !trigger.todoId);
     const fingerprint = JSON.stringify(
       triggers.map((trigger) => [trigger.id, trigger.cron, trigger.timezone ?? this.tz]),
     );
@@ -339,16 +353,27 @@ export class TriggerService {
       return undefined;
     }
 
+    let checkIn: { threadId: string; prompt: string } | undefined;
+    if (trigger.todoId) {
+      const resolved = this.todoCheckIn?.(trigger, begun) ?? { skip: "Todo check-ins are not available" };
+      if ("skip" in resolved) {
+        this.store.killOccurrence(begun.id, resolved.skip, this.nowIso());
+        this.log(`skipped ${trigger.id} (${begun.reason}): ${resolved.skip}`);
+        return undefined;
+      }
+      checkIn = resolved;
+    }
+
     // A recovered graph occurrence continues its own checkpoint rather than
     // re-running nodes (and their side effects) that already finished.
     const continuing = trigger.graphId !== undefined && begun.attempt > 1 && begun.threadId !== undefined;
-    const threadId = continuing ? begun.threadId! : this.mintThreadId();
+    const threadId = checkIn?.threadId ?? (continuing ? begun.threadId! : this.mintThreadId());
     const input: RunInput = trigger.graphId
       ? {
           graphInput: graphRunInput(trigger, begun),
           ...(continuing ? { continueFromCheckpoint: true } : {}),
         }
-      : conversationInput(trigger, begun);
+      : conversationInput(trigger, checkIn ? { ...begun, promptOverride: checkIn.prompt } : begun);
 
     try {
       // Reserve the run id and record it on the occurrence BEFORE launching, so a
@@ -366,6 +391,7 @@ export class TriggerService {
           trigger_id: trigger.id,
           trigger_occurrence_id: begun.id,
           ...(trigger.graphId ? { graph_id: trigger.graphId } : {}),
+          ...(trigger.todoId ? { todo_id: trigger.todoId } : {}),
         },
       });
       if (handle.runId !== runId) {

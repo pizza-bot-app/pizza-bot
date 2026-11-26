@@ -1,11 +1,14 @@
 import { Hono } from "hono";
 import type { z } from "zod";
-import { todoCreateSchema, todoPatchSchema } from "@pizza-bot/core";
+import { todoAssignmentSchema, todoCreateSchema, todoPatchSchema } from "@pizza-bot/core";
 import type { AgentHost } from "./agent-host.js";
+import { TodoRefusal } from "./todo-service.js";
 
-export function todoRoutes(host: Pick<AgentHost, "todoStore" | "threadStore">): Hono {
+const patchSchema = todoPatchSchema.extend(todoAssignmentSchema.shape);
+
+export function todoRoutes(host: Pick<AgentHost, "todoService" | "todoStore" | "threadStore">): Hono {
   const app = new Hono();
-  const todos = host.todoStore;
+  const todos = host.todoService;
 
   app.get("/todos", (c) => c.json(todos.list()));
 
@@ -25,10 +28,33 @@ export function todoRoutes(host: Pick<AgentHost, "todoStore" | "threadStore">): 
   });
 
   app.patch("/todos/:todo_id", async (c) => {
-    const parsed = todoPatchSchema.safeParse(await c.req.json().catch(() => undefined));
+    const id = c.req.param("todo_id");
+    const parsed = patchSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return c.json({ error: "invalid", detail: describe(parsed.error) }, 400);
-    const todo = todos.update(c.req.param("todo_id"), parsed.data);
+    const { owner, checkIn, ...patch } = parsed.data;
+    if (!todos.get(id)) return c.json({ error: "not_found" }, 404);
+    try {
+      if (owner !== undefined || checkIn !== undefined) {
+        todos.assign(id, {
+          ...(owner !== undefined ? { owner } : {}),
+          ...(checkIn !== undefined ? { checkIn } : {}),
+        });
+      }
+    } catch (error) {
+      if (error instanceof TodoRefusal) return c.json({ error: "invalid", detail: error.message }, 400);
+      throw error;
+    }
+    const todo = Object.keys(patch).length > 0 ? todos.update(id, patch) : todos.get(id);
     return todo ? c.json(todo) : c.json({ error: "not_found" }, 404);
+  });
+
+  app.post("/todos/:todo_id/check-in", (c) => {
+    try {
+      return c.json(todos.checkInNow(c.req.param("todo_id")), 202);
+    } catch (error) {
+      if (error instanceof TodoRefusal) return c.json({ error: "conflict", detail: error.message }, 409);
+      throw error;
+    }
   });
 
   app.delete("/todos/:todo_id", (c) => c.json({ deleted: todos.delete(c.req.param("todo_id")) }));
@@ -41,8 +67,9 @@ export function todoRoutes(host: Pick<AgentHost, "todoStore" | "threadStore">): 
   });
 
   app.delete("/todos/:todo_id/threads/:thread_id", (c) => {
-    const todo = todos.unlinkThread(c.req.param("todo_id"), c.req.param("thread_id"));
-    return todo ? c.json(todo) : c.json({ error: "not_found" }, 404);
+    const id = c.req.param("todo_id");
+    const todo = host.todoStore.unlinkThread(id, c.req.param("thread_id"));
+    return todo ? c.json(todos.get(id)) : c.json({ error: "not_found" }, 404);
   });
 
   return app;

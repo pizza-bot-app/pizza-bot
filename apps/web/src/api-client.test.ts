@@ -523,6 +523,49 @@ describe("ApiClient", () => {
     expect(errorMessage(failure)).toBe("title must not be empty");
   });
 
+  it("assigns a todo, sets its check-in, and asks its owner to check in now", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          method: init?.method,
+          body: typeof init?.body === "string" ? init.body : undefined,
+        });
+        const body = url.endsWith("/check-in") ? { threadId: "bg", runId: "run-1" } : { id: "t/1" };
+        return new Response(JSON.stringify(body), { status: url.endsWith("/check-in") ? 202 : 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    await client.updateTodo("t/1", { owner: "researcher", checkIn: "0 9 * * 1-5" });
+    await client.updateTodo("t/1", { owner: null });
+    expect(await client.checkInTodo("t/1")).toEqual({ threadId: "bg", runId: "run-1" });
+    expect(calls).toEqual([
+      {
+        url: "http://x/todos/t%2F1",
+        method: "PATCH",
+        body: JSON.stringify({ owner: "researcher", checkIn: "0 9 * * 1-5" }),
+      },
+      { url: "http://x/todos/t%2F1", method: "PATCH", body: JSON.stringify({ owner: null }) },
+      { url: "http://x/todos/t%2F1/check-in", method: "POST", body: undefined },
+    ]);
+  });
+
+  it("surfaces a refused check-in with the server's sentence", async () => {
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async () =>
+        new Response(
+          JSON.stringify({ error: "conflict", detail: "Researcher is already checking in on this todo." }),
+          { status: 409 },
+        )) as unknown as typeof fetch,
+    });
+
+    const failure = await client.checkInTodo("t1").catch((error: unknown) => error);
+    expect(errorMessage(failure)).toBe("Researcher is already checking in on this todo.");
+  });
+
   it("watches authenticated thread-change events over SSE", async () => {
     const captured: { url?: string; headers?: RequestInit["headers"] } = {};
     const client = new ApiClient({

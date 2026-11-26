@@ -186,8 +186,8 @@ in `core/src/protocol-types.ts`:
 - **Todo tools** (`list_todos`, `create_todo`, `update_todo`,
   `runtime-langgraph/src/todo-tools.ts`) go to the root agent only, over the
   `TodoAccess` seam in `RuntimeDeps`; subagents never receive them. A Todo created
-  in a run is linked to that run's thread. Todos are plain to-dos: nothing wakes or
-  schedules work from them.
+  in a run is linked to that run's thread. An agent that owns a Todo works on it
+  in background check-ins (§7).
 - **Runaway-call limits** are per agent invocation, with no combined parent/child
   budget. The orchestrator allows 40 model calls and its user-configured per-run
   tool-call limit (100 by default); each `task`-invoked subagent independently
@@ -501,6 +501,26 @@ crash recovery remains the startup-only path. Initial startup similarly waits
 for the bounded MCP connection pass to settle before arming schedules or
 recovering occurrences, so recovered runs receive the settled skill projection.
 
+### Todo check-ins
+
+A Todo owned by an agent has one trigger with a `todoId`, created and edited
+through the Todo (`TodoService` in the api-server), never through `/triggers`,
+which does not list it. Its cron is the most frequent check-in; with no cron the
+agent checks in only when asked (`POST /todos/:id/check-in`) or handed the Todo.
+Each firing resolves, through the `todoCheckIn` hook, to the owner's background
+thread for that Todo and a prompt describing the Todo, its timeline, and the
+agents it can hand off to; a check-in is skipped while the last one runs or waits
+on the user, and once the Todo is complete. The background thread has the owner's
+`agentId` and `background: true`, and runs the agent with the ambient tools
+(`runtime-langgraph/src/ambient-tools.ts`): `update_todo` writes the timeline,
+`notify_user` appends a message to the agent's home thread and marks it unread,
+`ask_user` pauses through `HumanInTheLoopMiddleware` with only `respond` allowed,
+and `reassign_todo` hands the Todo on. A handoff needs a note, refuses an agent
+that already handed this Todo on, is capped at `TODO_MAX_HANDOFFS` since the user
+last assigned it, and wakes the new owner at once with occurrence reason
+`handoff` in a new background thread. Background threads stay out of the Inbox
+list and the activity stream unless they wait on the user.
+
 ### Graph runs
 
 A trigger either starts a conversation with its `prompt` or, when it names a
@@ -653,6 +673,10 @@ A new conversation has a **To:** picker (Pizza Bot or an enabled agent) until
 its first message; choosing an agent creates the thread with `metadata.agent_id`.
 Agent threads show the agent's name in the Inbox and welcome state, and the Agents
 view's Message action opens the agent's home thread.
+
+A Todo's detail assigns it to an agent with a check-in schedule and shows its
+timeline. Background check-in threads appear only in the Action view, and an
+`ask_user` pause renders as a question card that takes a typed answer.
 
 **Todos** sit beside the Inbox with their own smart views (Today, Planned,
 Important, All, Completed). Flagging a thread creates a Todo linked to it, and the

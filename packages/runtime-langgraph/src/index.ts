@@ -12,6 +12,7 @@ import {
   resolveToolReferences,
   type AgentCatalog,
   type AgentCatalogEntry,
+  type AmbientTodoAccess,
   type RuntimeDeps,
   type RunInput,
   type RunOptions,
@@ -38,6 +39,7 @@ import { localFolderContextMiddleware } from "./local-folder-context-middleware.
 import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 import { taskDispatchMiddleware } from "./task-dispatch-middleware.js";
 import { todoTools } from "./todo-tools.js";
+import { AMBIENT_INTERRUPT_ON, AMBIENT_PROMPT, ambientTools } from "./ambient-tools.js";
 import { streamProtocolEvents, toLangGraphInput } from "./stream-protocol.js";
 import { LangGraphThreadGraph, contentText, type CompiledGraph } from "./thread-graph.js";
 
@@ -423,15 +425,21 @@ export async function createPizzaBotAgent(
  * model (`deps.model`, already resolved by the caller), tools, skills, and
  * approvals. It delegates only if it declares `builtin:task`, and then only to
  * the other ready agents; the assistant's Todo tools are not part of its surface.
+ * With `ambient` it runs a background check-in and reaches the user only through
+ * the ambient tools.
  */
 export async function createAgentRootAgent(
   agent: AgentCatalogEntry,
   deps: RuntimeDeps,
+  options: { ambient?: AmbientTodoAccess } = {},
 ): Promise<LangGraphAgent> {
   const who = `agent "${agent.id}"`;
   if (!deps.model) throw new Error(`${who}: no model resolved`);
-  const interruptOn = qualifyInterruptOn(agent.interruptOn, deps.catalog, who, deps.logger);
-  const approvals = interruptOn && Object.keys(interruptOn).length > 0 ? interruptOn : undefined;
+  const interruptOn = {
+    ...qualifyInterruptOn(agent.interruptOn, deps.catalog, who, deps.logger),
+    ...(options.ambient ? AMBIENT_INTERRUPT_ON : {}),
+  };
+  const approvals = Object.keys(interruptOn).length > 0 ? interruptOn : undefined;
   if (approvals && !deps.checkpointer) {
     throw new Error(`${who} declares interruptOn; a checkpointer is required for HITL but none was provided.`);
   }
@@ -470,12 +478,16 @@ export async function createAgentRootAgent(
     ));
   }
 
+  const basePrompt = agent.systemPrompt || agent.description;
   const params: Record<string, unknown> = {
-    systemPrompt: agent.systemPrompt || agent.description,
+    systemPrompt: options.ambient ? `${basePrompt}\n\n${AMBIENT_PROMPT}` : basePrompt,
     model: deps.model,
     backend,
     middleware,
-    tools: resolveToolRefs(mcpToolRefs(agent.declaredTools), deps, who),
+    tools: [
+      ...resolveToolRefs(mcpToolRefs(agent.declaredTools), deps, who),
+      ...(options.ambient ? ambientTools(options.ambient) : []),
+    ],
   };
   if (approvals) params.interruptOn = approvals;
   if (deps.checkpointer) params.checkpointer = deps.checkpointer;

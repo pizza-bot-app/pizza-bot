@@ -53,6 +53,7 @@ import {
 import { approvalEditState } from "./approval-edit.js";
 import { useAttachmentSrc } from "../attachment-src.js";
 import { useAgentName } from "./agent-names.js";
+import { L } from "../lexicon.js";
 
 function subagentTypeOf(input: unknown): string | undefined {
   if (input && typeof input === "object" && "subagent_type" in input) {
@@ -388,6 +389,43 @@ export function InterruptConfirmation({
     onDecision?.(part.toolCallId, "respond", undefined, undefined, responseDraft.trim());
   };
 
+  if (!isBatch && allowed.length === 1 && allowed[0] === "respond") {
+    const question = questionText(part.input);
+    return (
+      <Confirmation
+        approval={{ id: part.toolCallId }}
+        state="approval-requested"
+        className="hitl-confirmation"
+      >
+        <ConfirmationTitle className="hitl-confirmation-title">
+          <span>{L.agentQuestion}</span>
+        </ConfirmationTitle>
+        <ConfirmationRequest>
+          {question !== undefined ? (
+            <p className="hitl-question">{question}</p>
+          ) : (
+            <ApprovalArguments value={part.input} />
+          )}
+          <div className="hitl-response-wrap">
+            <textarea
+              className="hitl-response-editor"
+              rows={3}
+              aria-label={L.agentQuestionPlaceholder}
+              value={responseDraft}
+              onChange={(e) => setResponseDraft(e.target.value)}
+              placeholder={L.agentQuestionPlaceholder}
+            />
+          </div>
+          <ConfirmationActions className="hitl-actions">
+            <ConfirmationAction disabled={!responseDraft.trim()} onClick={submitRespond}>
+              {L.agentQuestionSend}
+            </ConfirmationAction>
+          </ConfirmationActions>
+        </ConfirmationRequest>
+      </Confirmation>
+    );
+  }
+
   return (
     <Confirmation
       approval={{ id: part.toolCallId }}
@@ -499,4 +537,11 @@ export function InterruptConfirmation({
       </ConfirmationRequest>
     </Confirmation>
   );
+}
+
+/** An agent question's text when the tool call carries one as `question`. */
+export function questionText(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const question = (input as { question?: unknown }).question;
+  return typeof question === "string" && question.trim() ? question : undefined;
 }

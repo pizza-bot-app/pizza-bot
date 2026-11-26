@@ -242,3 +242,17 @@ describe("ThreadStore: agent threads", () => {
     expect(s.get("th1")?.agentHome).toBeUndefined();
   });
 });
+
+describe("ThreadStore: background threads", () => {
+  it("keeps a check-in thread out of the Inbox list until it awaits the user", () => {
+    const s = openThreadStore(tmpDb());
+    s.create({ threadId: "bg", agentId: "researcher", background: true, todoId: "todo-1" });
+    s.create({ threadId: "chat" });
+    expect(s.list().map((t) => t.threadId)).toEqual(["chat"]);
+    expect(s.get("bg")).toMatchObject({ background: true, todoId: "todo-1", agentId: "researcher" });
+
+    s.update("bg", { awaitingAction: true });
+    expect(s.list().map((t) => t.threadId).sort()).toEqual(["bg", "chat"]);
+  });
+});
+

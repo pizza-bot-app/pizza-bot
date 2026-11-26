@@ -1,6 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { isTodoDueDate, type Todo, type TodoPatch, type TodoStep } from "@pizza-bot/core";
-import { errorMessage } from "@/api-client";
+import {
+  isTodoDueDate,
+  type Todo,
+  type TodoAssignment as TodoAssignmentPatch,
+  type TodoPatch,
+  type TodoStep,
+} from "@pizza-bot/core";
+import { errorMessage, type AgentCatalogEntryInfo } from "@/api-client";
 import {
   CalendarDays,
   ChevronLeft,
@@ -18,15 +24,26 @@ import { ConfirmationDialog } from "../ConfirmationDialog.js";
 import { relativeTime } from "../../lib/conversation.js";
 import { dueLabel, isOverdue } from "../../lib/todo-views.js";
 import { L } from "../../lexicon.js";
+import { TodoAssignment } from "./TodoAssignment.js";
+import { TodoTimeline } from "./TodoTimeline.js";
+
+/** Identifies an agent's work thread so it opens with its agent even while unlisted. */
+export interface WorkThreadHint {
+  agentId: string;
+  title: string;
+}
 
 export interface TodoDetailProps {
   todo: Todo;
   today: string;
   threadTitles: ReadonlyMap<string, string>;
-  onUpdate: (patch: TodoPatch) => Promise<void>;
+  agents: readonly AgentCatalogEntryInfo[];
+  automationsEnabled: boolean;
+  onUpdate: (patch: TodoPatch & TodoAssignmentPatch) => Promise<void>;
   onDelete: () => Promise<void>;
   onUnlinkThread: (threadId: string) => Promise<void>;
-  onOpenThread: (threadId: string) => void;
+  onCheckIn: () => Promise<void>;
+  onOpenThread: (threadId: string, workThread?: WorkThreadHint) => void;
   onBack?: () => void;
 }
 
@@ -43,12 +60,16 @@ export function TodoDetail({
   todo,
   today,
   threadTitles,
+  agents,
+  automationsEnabled,
   onUpdate,
   onDelete,
   onUnlinkThread,
+  onCheckIn,
   onOpenThread,
   onBack,
 }: TodoDetailProps) {
+  const nameOf = (agentId: string) => agents.find((agent) => agent.id === agentId)?.name ?? agentId;
   const [title, setTitle] = useState(todo.title);
   const [notes, setNotes] = useState(todo.notes);
   const [newStep, setNewStep] = useState("");
@@ -134,6 +155,17 @@ export function TodoDetail({
           <Star size={18} fill={important ? "currentColor" : "none"} />
         </button>
       </header>
+
+      <TodoAssignment
+        todo={todo}
+        agents={agents}
+        automationsEnabled={automationsEnabled}
+        onAssign={onUpdate}
+        onCheckIn={onCheckIn}
+        onOpenWorkThread={(threadId) =>
+          onOpenThread(threadId, { agentId: todo.owner!, title: todo.title })
+        }
+      />
 
       <section className="todo-detail-section">
         <h3 className="todo-detail-section-title">
@@ -247,6 +279,17 @@ export function TodoDetail({
           onBlur={saveNotes}
         />
       </section>
+
+      <TodoTimeline
+        history={todo.history ?? []}
+        nameOf={nameOf}
+        onOpenThread={(entry) =>
+          onOpenThread(
+            entry.threadId,
+            entry.workAgentId ? { agentId: entry.workAgentId, title: todo.title } : undefined,
+          )
+        }
+      />
 
       <footer className="todo-detail-foot">
         <span className="field-hint">

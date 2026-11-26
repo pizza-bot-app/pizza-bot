@@ -27,6 +27,7 @@ import { TriggerModule } from "./components/schedules/TriggerModule.js";
 import { GraphsModule } from "./components/graphs/GraphsModule.js";
 import { GraphRunPane } from "./components/graphs/GraphRunPane.js";
 import { TodosModule } from "./components/todos/TodosModule.js";
+import type { WorkThreadHint } from "./components/todos/TodoDetail.js";
 import { FlagThreadButton } from "./components/todos/FlagThreadButton.js";
 import { flaggedThreadIds, openTodoForThread } from "./lib/todo-views.js";
 import { recipientOptions, threadAgent } from "./lib/thread-agent.js";
@@ -202,10 +203,25 @@ export function App() {
   const threadDraftsRef = useRef(threadDrafts);
   threadDraftsRef.current = threadDrafts;
 
+  // A Todo's work thread is listed only while it awaits the user, so both sets track each listing.
+  const [backgroundThreadIds, setBackgroundThreadIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [awaitingThreadIds, setAwaitingThreadIds] = useState<ReadonlySet<string>>(() => new Set());
+  const noteBackgroundThreads = useCallback((threadIds: readonly string[]) => {
+    setBackgroundThreadIds((prev) => {
+      const added = threadIds.filter((threadId) => !prev.has(threadId));
+      return added.length === 0 ? prev : new Set([...prev, ...added]);
+    });
+  }, []);
+
   const seedThreadMetadata = useCallback((rows: ThreadInfo[]) => {
-    setThreadCount(rows.length);
+    setThreadCount(rows.filter((row) => !row.background).length);
     noteGraphThreads(rows);
     noteAgentThreads(rows);
+    noteBackgroundThreads(rows.filter((row) => row.background).map((row) => row.threadId));
+    setAwaitingThreadIds((prev) => {
+      const next = new Set(rows.filter((row) => row.awaitingAction).map((row) => row.threadId));
+      return next.size === prev.size && [...next].every((threadId) => prev.has(threadId)) ? prev : next;
+    });
     setThreadTitles((prev) => {
       let changed = false;
       const next = new Map(prev);
@@ -232,7 +248,7 @@ export function App() {
     // overriding a thread the user already opened.
     if (!didAutoOpenRef.current && activeThreadIdRef.current === null) {
       didAutoOpenRef.current = true;
-      const threadId = initialThreadId(rows);
+      const threadId = initialThreadId(rows.filter((row) => !row.background));
       if (threadId) {
         setOpenedThreads((prev) =>
           prev.has(threadId) ? prev : new Set(prev).add(threadId),
@@ -240,7 +256,7 @@ export function App() {
         setActiveThreadId(threadId);
       }
     }
-  }, [noteAgentThreads, noteGraphThreads]);
+  }, [noteAgentThreads, noteBackgroundThreads, noteGraphThreads]);
 
   // The thread-change stream also reports Todo edits, including the orchestrator's.
   const onThreadsLoaded = useCallback(
@@ -299,6 +315,19 @@ export function App() {
       openThread(threadId, true);
     },
     [openThread],
+  );
+  const openTodoThread = useCallback(
+    (threadId: string, workThread?: WorkThreadHint) => {
+      if (workThread) {
+        noteAgentThreads([{ threadId, agentId: workThread.agentId }]);
+        noteBackgroundThreads([threadId]);
+        setThreadTitles((prev) =>
+          prev.has(threadId) ? prev : new Map(prev).set(threadId, workThread.title),
+        );
+      }
+      openNotifiedThread(threadId);
+    },
+    [noteAgentThreads, noteBackgroundThreads, openNotifiedThread],
   );
   const desktopNotifications = useDesktopNotifications(
     openNotifiedThread,
@@ -543,11 +572,15 @@ export function App() {
                 {...(todoFocus ? { focusId: todoFocus.id } : {})}
                 todos={todos.todos}
                 threadTitles={threadTitles}
+                agents={catalogAgents}
+                automationsEnabled={features.enableAutomations}
+                awaitingThreadIds={awaitingThreadIds}
                 onCreate={todos.create}
                 onUpdate={todos.update}
                 onDelete={todos.remove}
                 onUnlinkThread={todos.unlinkThread}
-                onOpenThread={openNotifiedThread}
+                onCheckIn={todos.checkIn}
+                onOpenThread={openTodoThread}
               />
             </div>
           ) : view === "automations" ? (
@@ -788,7 +821,8 @@ export function App() {
                             onSearchTargetHandled={onSearchTargetHandled}
                             headerActions={
                               <>
-                                {threadTitles.has(activeThreadId) && (
+                                {threadTitles.has(activeThreadId) &&
+                                  !backgroundThreadIds.has(activeThreadId) && (
                                   <FlagThreadButton
                                     todo={openTodoForThread(todos.todos, activeThreadId)}
                                     compact={isMobile}

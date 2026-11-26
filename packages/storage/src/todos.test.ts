@@ -128,4 +128,61 @@ describe("TodoStore", () => {
   it("returns undefined when updating a missing Todo", () => {
     expect(store().update("missing", { title: "x" })).toBeUndefined();
   });
+
+  describe("ownership and timeline", () => {
+    it("records assignment, handoff, and unassignment, and resets the background thread", () => {
+      const s = store(ticking());
+      const todo = s.create({ title: "Research flights" });
+      expect(todo.history).toEqual([]);
+
+      s.setOwner(todo.id, "researcher", { actor: "user" });
+      s.setBackgroundThread(todo.id, "bg-1");
+      expect(s.forBackgroundThread("bg-1")?.id).toBe(todo.id);
+
+      const handed = s.setOwner(todo.id, "booker", { actor: "researcher", note: "Found options; book one." })!;
+      expect(handed.owner).toBe("booker");
+      expect(handed.backgroundThreadId).toBeUndefined();
+      expect(s.forBackgroundThread("bg-1")).toBeUndefined();
+
+      const cleared = s.setOwner(todo.id, null, { actor: "user" })!;
+      expect(cleared.owner).toBeUndefined();
+      expect(cleared.history.map((event) => [event.kind, event.actor, event.agentId, event.note])).toEqual([
+        ["assigned", "user", "researcher", undefined],
+        ["assigned", "researcher", "booker", "Found options; book one."],
+        ["unassigned", "user", undefined, undefined],
+      ]);
+    });
+
+    it("does not record an assignment to the current owner", () => {
+      const s = store();
+      const todo = s.create({ title: "a" });
+      s.setOwner(todo.id, "researcher", { actor: "user" });
+      expect(s.setOwner(todo.id, "researcher", { actor: "user" })!.history).toHaveLength(1);
+      expect(s.setOwner("missing", "researcher", { actor: "user" })).toBeUndefined();
+    });
+
+    it("records completion and reopening with their actor", () => {
+      const s = store(ticking());
+      const todo = s.create({ title: "a" });
+      s.update(todo.id, { completed: true }, "researcher");
+      s.update(todo.id, { notes: "x" }, "researcher");
+      const reopened = s.update(todo.id, { completed: false })!;
+      expect(reopened.history.map((event) => [event.kind, event.actor])).toEqual([
+        ["completed", "researcher"],
+        ["reopened", "user"],
+      ]);
+    });
+
+    it("appends events and deletes them with the Todo", () => {
+      const s = store(ticking());
+      const todo = s.create({ title: "a" });
+      const event = s.appendEvent(todo.id, { kind: "check-in", actor: "researcher", threadId: "bg", reason: "cron" });
+      expect(event).toMatchObject({ kind: "check-in", threadId: "bg", reason: "cron" });
+      expect(s.get(todo.id)!.history).toEqual([event]);
+      expect(s.appendEvent("missing", { kind: "progress", actor: "user" })).toBeUndefined();
+      s.delete(todo.id);
+      const again = s.create({ title: "b" });
+      expect(again.history).toEqual([]);
+    });
+  });
 });

@@ -17,6 +17,7 @@ import type {
   LocalFolderList,
   GraphSpec,
   Todo,
+  TodoAssignment,
   TodoCreateInput,
   TodoPatch,
 } from "@pizza-bot/core";
@@ -224,7 +225,7 @@ export class ApiClient {
     return this.json("create todo", "/todos", { method: "POST", body: input });
   }
 
-  async updateTodo(todoId: string, patch: TodoPatch): Promise<Todo> {
+  async updateTodo(todoId: string, patch: TodoPatch & TodoAssignment): Promise<Todo> {
     return this.json("update todo", `/todos/${encodeURIComponent(todoId)}`, {
       method: "PATCH",
       body: patch,
@@ -245,6 +246,10 @@ export class ApiClient {
 
   async unlinkTodoThread(todoId: string, threadId: string): Promise<Todo> {
     return this.json("unlink todo thread", todoThreadPath(todoId, threadId), { method: "DELETE" });
+  }
+
+  async checkInTodo(todoId: string): Promise<{ threadId: string; runId: string }> {
+    return this.json("check in", `/todos/${encodeURIComponent(todoId)}/check-in`, { method: "POST" });
   }
 
   async watchThreadChanges(
@@ -854,6 +859,9 @@ export interface ThreadInfo {
   agentId?: string;
   /** The agent's pinned home thread. */
   agentHome?: boolean;
+  /** An agent's work thread for a Todo; listed only while it awaits the user. */
+  background?: true;
+  todoId?: string;
   lastMessage?: string;
   lastMessageRole?: string;
 }

@@ -1,7 +1,17 @@
 import { useMemo, useState, type FormEvent } from "react";
-import type { Todo, TodoCreateInput, TodoPatch } from "@pizza-bot/core";
-import { errorMessage } from "@/api-client";
-import { CalendarDays, Circle, CircleCheck, ListTodo, MessageSquare, Plus, Star } from "lucide-react";
+import type { Todo, TodoAssignment, TodoCreateInput, TodoPatch } from "@pizza-bot/core";
+import { errorMessage, type AgentCatalogEntryInfo } from "@/api-client";
+import {
+  Bot,
+  CalendarDays,
+  Circle,
+  CircleCheck,
+  Hourglass,
+  ListTodo,
+  MessageSquare,
+  Plus,
+  Star,
+} from "lucide-react";
 import { ModuleHeader } from "../ModuleHeader.js";
 import { useAppToast } from "../AppToast.js";
 import { useIsMobile } from "../../use-is-mobile.js";
@@ -20,20 +30,29 @@ import {
   type TodoView,
 } from "../../lib/todo-views.js";
 import { L } from "../../lexicon.js";
-import { TodoDetail } from "./TodoDetail.js";
+import { todosAwaitingUser } from "../../lib/todo-ownership.js";
+import { TodoDetail, type WorkThreadHint } from "./TodoDetail.js";
 
 export interface TodosModuleProps {
   todos: Todo[];
   threadTitles: ReadonlyMap<string, string>;
+  agents?: readonly AgentCatalogEntryInfo[];
+  automationsEnabled?: boolean;
+  /** Threads currently paused on the user; marks the Todos whose work thread is among them. */
+  awaitingThreadIds?: ReadonlySet<string>;
   /** Initially selected Todo; remount the module to focus another. */
   focusId?: string;
   today?: string;
   onCreate: (input: TodoCreateInput) => Promise<Todo>;
-  onUpdate: (id: string, patch: TodoPatch) => Promise<Todo>;
+  onUpdate: (id: string, patch: TodoPatch & TodoAssignment) => Promise<Todo>;
   onDelete: (id: string) => Promise<boolean>;
   onUnlinkThread: (id: string, threadId: string) => Promise<Todo>;
-  onOpenThread: (threadId: string) => void;
+  onCheckIn?: (id: string) => Promise<unknown>;
+  onOpenThread: (threadId: string, workThread?: WorkThreadHint) => void;
 }
+
+const NO_AGENTS: readonly AgentCatalogEntryInfo[] = [];
+const NO_THREADS: ReadonlySet<string> = new Set();
 
 const VIEW_LABELS: Record<TodoView, string> = {
   today: L.todoViewToday,
@@ -61,12 +80,16 @@ function quickAddDefaults(view: TodoView, today: string): Partial<TodoCreateInpu
 export function TodosModule({
   todos,
   threadTitles,
+  agents = NO_AGENTS,
+  automationsEnabled = true,
+  awaitingThreadIds = NO_THREADS,
   focusId,
   today: todayOverride,
   onCreate,
   onUpdate,
   onDelete,
   onUnlinkThread,
+  onCheckIn,
   onOpenThread,
 }: TodosModuleProps) {
   const notify = useAppToast();
@@ -80,6 +103,8 @@ export function TodosModule({
   const rows = useMemo(() => todosInView(todos, view, today), [todos, view, today]);
   const counts = useMemo(() => todoViewCounts(todos, today), [todos, today]);
   const selected = todos.find((todo) => todo.id === selectedId) ?? null;
+  const waiting = useMemo(() => todosAwaitingUser(todos, awaitingThreadIds), [todos, awaitingThreadIds]);
+  const agentName = (agentId: string) => agents.find((agent) => agent.id === agentId)?.name ?? agentId;
 
   const listNavigation = useSelectableListNavigation({
     itemIds: rows.map((todo) => todo.id),
@@ -91,7 +116,7 @@ export function TodosModule({
   const report = (title: string, error: unknown) =>
     notify({ title, description: errorMessage(error), tone: "error" });
 
-  const update = async (id: string, patch: TodoPatch) => {
+  const update = async (id: string, patch: TodoPatch & TodoAssignment) => {
     try {
       await onUpdate(id, patch);
     } catch (error) {
@@ -185,6 +210,8 @@ export function TodosModule({
                       todo={todo}
                       today={today}
                       active={todo.id === selectedId}
+                      {...(todo.owner ? { ownerName: agentName(todo.owner) } : {})}
+                      waiting={waiting.has(todo.id)}
                       onToggleComplete={() => void update(todo.id, { completed: !todo.completed })}
                       onToggleImportant={() =>
                         void update(todo.id, {
@@ -206,7 +233,12 @@ export function TodosModule({
               todo={selected}
               today={today}
               threadTitles={threadTitles}
+              agents={agents}
+              automationsEnabled={automationsEnabled}
               onUpdate={(patch) => update(selected.id, patch)}
+              onCheckIn={async () => {
+                await onCheckIn?.(selected.id);
+              }}
               onDelete={async () => {
                 await onDelete(selected.id);
                 setSelectedId(null);
@@ -237,18 +269,27 @@ function TodoRow({
   todo,
   today,
   active,
+  ownerName,
+  waiting,
   onToggleComplete,
   onToggleImportant,
 }: {
   todo: Todo;
   today: string;
   active: boolean;
+  ownerName?: string;
+  waiting: boolean;
   onToggleComplete: () => void;
   onToggleImportant: () => void;
 }) {
   const progress = stepProgress(todo);
   const important = todo.importance === "high";
-  const hasMeta = todo.dueDate !== undefined || progress !== undefined || todo.threadIds.length > 0;
+  const hasMeta =
+    todo.dueDate !== undefined ||
+    progress !== undefined ||
+    todo.threadIds.length > 0 ||
+    ownerName !== undefined ||
+    waiting;
   return (
     <div className={`resource-row todo-row${active ? " active" : ""}${todo.completed ? " completed" : ""}`}>
       <button
@@ -268,6 +309,18 @@ function TodoRow({
         <span className="resource-row-name todo-row-title">{todo.title}</span>
         {hasMeta && (
           <span className="todo-row-meta">
+            {ownerName && (
+              <span className="todo-owner" title={`${L.todoAssignedTo} ${ownerName}`}>
+                <Bot size={11} aria-hidden="true" />
+                {ownerName}
+              </span>
+            )}
+            {waiting && (
+              <span className="todo-waiting">
+                <Hourglass size={11} aria-hidden="true" />
+                {L.todoWaitingForYou}
+              </span>
+            )}
             {todo.dueDate !== undefined && (
               <span className={`todo-due${isOverdue(todo, today) ? " overdue" : ""}`}>
                 <CalendarDays size={12} aria-hidden="true" />

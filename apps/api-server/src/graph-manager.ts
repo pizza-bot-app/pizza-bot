@@ -11,6 +11,7 @@ import {
   type RuntimeDeps,
   type AgentAvailability,
   type AgentCatalog,
+  type AmbientTodoAccess,
   type SkillCatalog,
 } from "@pizza-bot/core";
 import { createAgentRootAgent, createPizzaBotAgent, type LangGraphAgent } from "@pizza-bot/runtime-langgraph";
@@ -322,24 +323,30 @@ export class GraphManager {
 
   /**
    * An agent definition compiled as a thread's top-level agent. Its pinned model
-   * wins over `modelId`; the returned `modelId` is the one it runs on.
+   * wins over `modelId`; the returned `modelId` is the one it runs on. With
+   * `ambient` it is compiled for a background Todo check-in.
    */
   async rootAgentFor(
     agentId: string,
     modelId?: string,
+    ambient?: AmbientTodoAccess,
   ): Promise<{ agent: LangGraphAgent; modelId: string }> {
     await this.ensureSettings();
     const definition = this.dependencies.agents?.get(agentId);
     if (!definition) throw new Error(this.unavailableAgentMessage(agentId));
     const resolvedModelId = definition.model ?? modelId ?? this.modelId;
-    const key = JSON.stringify([agentId, resolvedModelId]);
+    const key = JSON.stringify([agentId, resolvedModelId, ambient !== undefined]);
     const cached = this.rootAgents.get(key);
     if (cached) return cached;
 
     const built = (async () => {
       const model = await this.models.resolveModel(resolvedModelId);
       const deps = await this.withAgentModels(this.dependencies);
-      const agent = await createAgentRootAgent(definition, this.depsForModel(deps, model));
+      const agent = await createAgentRootAgent(
+        definition,
+        this.depsForModel(deps, model),
+        ambient ? { ambient } : {},
+      );
       return { agent, modelId: resolvedModelId };
     })().catch((err) => {
       this.rootAgents.delete(key);

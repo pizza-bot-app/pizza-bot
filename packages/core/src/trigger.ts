@@ -9,6 +9,8 @@ export interface TriggerDef {
   prompt?: string;
   /** Runs this graph instead of starting a conversation with `prompt`. */
   graphId?: string;
+  /** A Todo's check-in schedule: each firing is a check-in by the Todo's owner, managed from the Todo. */
+  todoId?: string;
   enabled: boolean;
   cron?: string;
   timezone?: string;
@@ -20,7 +22,7 @@ export interface TriggerDef {
   lastThreadId?: string;
 }
 
-export type TriggerOccurrenceReason = "cron" | "cron-recovery" | "manual" | "webhook";
+export type TriggerOccurrenceReason = "cron" | "cron-recovery" | "manual" | "webhook" | "handoff";
 
 export type TriggerOccurrenceStatus =
   | "pending"

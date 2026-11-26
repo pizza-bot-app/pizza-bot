@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openAppDatabase, type AppDatabase } from "@pizza-bot/storage";
 import type { Todo } from "@pizza-bot/core";
 import { todoRoutes } from "./routes-todos.js";
+import { TodoService } from "./todo-service.js";
 
 const open: AppDatabase[] = [];
 
@@ -10,8 +11,20 @@ function testApp() {
   open.push(appDb);
   appDb.threadStore.create({ threadId: "th1", title: "Lunch plans" });
   appDb.threadStore.create({ threadId: "th2", title: "Invoice" });
+  const todoService = new TodoService({
+    todos: appDb.todos,
+    threads: appDb.threadStore,
+    triggers: appDb.triggers,
+    scheduler: () => undefined,
+    isRunning: () => false,
+    automationsEnabled: () => true,
+    agentStatus: (id) => (id === "researcher" ? { name: "Researcher", description: "Finds sources.", ready: true } : undefined),
+    readyAgents: () => [],
+    postToThread: async () => {},
+    timezone: "UTC",
+  });
   return {
-    routes: todoRoutes({ todoStore: appDb.todos, threadStore: appDb.threadStore }),
+    routes: todoRoutes({ todoService, todoStore: appDb.todos, threadStore: appDb.threadStore }),
     appDb,
   };
 }
@@ -95,4 +108,39 @@ describe("todoRoutes", () => {
     expect(((await unlinked.json()) as Todo).threadIds).toEqual(["th2"]);
     expect((await routes.request("/todos/missing/threads/th1", { method: "DELETE" })).status).toBe(404);
   });
+
+  it("assigns, reschedules, and unassigns in the same PATCH as other edits", async () => {
+    const { routes, appDb } = testApp();
+    const todo = appDb.todos.create({ title: "Compare flights" });
+    const assigned = (await (
+      await routes.request(`/todos/${todo.id}`, json("PATCH", { owner: "researcher", importance: "high" }))
+    ).json()) as Todo;
+    expect(assigned).toMatchObject({ owner: "researcher", importance: "high", checkIn: { cron: "0 9 * * *" } });
+    expect(assigned.history.map((event) => event.kind)).toEqual(["assigned"]);
+
+    const manual = (await (await routes.request(`/todos/${todo.id}`, json("PATCH", { checkIn: null }))).json()) as Todo;
+    expect(manual.owner).toBe("researcher");
+    expect(manual.checkIn).toBeUndefined();
+
+    const mine = (await (await routes.request(`/todos/${todo.id}`, json("PATCH", { owner: null }))).json()) as Todo;
+    expect(mine.owner).toBeUndefined();
+  });
+
+  it("refuses an assignment it cannot honour with a sentence", async () => {
+    const { routes, appDb } = testApp();
+    const todo = appDb.todos.create({ title: "a" });
+    const refused = await routes.request(`/todos/${todo.id}`, json("PATCH", { owner: "ghost", title: "renamed" }));
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "invalid", detail: 'There is no enabled agent "ghost".' });
+    expect(appDb.todos.get(todo.id)?.title).toBe("a");
+  });
+
+  it("answers a check-in it cannot start with 409 and the reason", async () => {
+    const { routes, appDb } = testApp();
+    const todo = appDb.todos.create({ title: "a" });
+    const refused = await routes.request(`/todos/${todo.id}/check-in`, { method: "POST" });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ detail: expect.stringContaining("Assign this Todo") });
+  });
 });
+

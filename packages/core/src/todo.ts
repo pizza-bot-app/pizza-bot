@@ -9,6 +9,37 @@ export interface TodoStep {
   completed: boolean;
 }
 
+export type TodoEventKind =
+  | "assigned"
+  | "unassigned"
+  | "check-in"
+  | "progress"
+  | "completed"
+  | "reopened"
+  | "notified"
+  | "asked";
+
+export type TodoCheckInReason = "cron" | "manual" | "handoff";
+
+/** One timeline entry. `actor` is "user" or the acting agent's id; an agent-acted `assigned` is a handoff. */
+export interface TodoEvent {
+  id: string;
+  at: string;
+  kind: TodoEventKind;
+  actor: "user" | string;
+  /** For `assigned`: the new owner. */
+  agentId?: string;
+  note?: string;
+  threadId?: string;
+  reason?: TodoCheckInReason;
+}
+
+export interface TodoCheckIn {
+  cron: string;
+  timezone: string;
+  nextRunAt?: string;
+}
+
 export interface Todo {
   id: string;
   title: string;
@@ -21,6 +52,14 @@ export interface Todo {
   completedAt?: string;
   /** Threads the Todo was flagged from or linked to, oldest link first. */
   threadIds: string[];
+  /** The agent that owns it; absent for the user's own to-do. */
+  owner?: string;
+  /** The owner's check-in schedule; absent means check-ins only when asked or handed off. */
+  checkIn?: TodoCheckIn;
+  /** Where the current owner's check-ins run; hidden from the Inbox unless it awaits the user. */
+  backgroundThreadId?: string;
+  /** Oldest first. */
+  history: TodoEvent[];
   createdAt: string;
   updatedAt: string;
 }
@@ -69,9 +108,34 @@ export const todoPatchSchema = z.object({
   steps: steps.optional(),
 });
 
+export const TODO_DEFAULT_CHECK_IN = "0 9 * * *";
+export const TODO_NOTE_MAX = 2_000;
+/** Agent-to-agent handoffs allowed since the user last assigned the Todo. */
+export const TODO_MAX_HANDOFFS = 5;
+
+/** The user's assignment edits; `checkIn: null` keeps the owner but stops scheduled check-ins. */
+export const todoAssignmentSchema = z.object({
+  owner: z.string().min(1).max(200).nullable().optional(),
+  checkIn: z.string().trim().min(1).max(200).nullable().optional(),
+});
+
+export type TodoAssignment = z.infer<typeof todoAssignmentSchema>;
+
 export type TodoCreateInput = z.infer<typeof todoCreateSchema>;
 export type TodoPatch = z.infer<typeof todoPatchSchema>;
 export type TodoStepInput = z.infer<typeof stepInput>;
+
+/**
+ * What an agent's background check-in may do to the Todo it owns. Every call names
+ * the calling thread; the host refuses a thread that is not the Todo's current
+ * background thread, so an agent that handed a Todo on can no longer change it.
+ */
+export interface AmbientTodoAccess {
+  todoForThread(threadId: string): Todo | undefined;
+  recordProgress(threadId: string, update: { note: string } & Pick<TodoPatch, "completed" | "steps">): Todo;
+  notifyUser(threadId: string, message: string): Promise<void>;
+  reassign(threadId: string, toAgentId: string, note: string): Todo;
+}
 
 /** The runtime's view of the Todo list; the orchestrator's Todo tools call only this. */
 export interface TodoAccess {

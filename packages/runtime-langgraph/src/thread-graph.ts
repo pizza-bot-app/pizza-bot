@@ -1,5 +1,6 @@
 /** State reads and protocol streaming shared by every compiled graph a thread can run. */
 import type { ProtocolEvent, StateSnapshot } from "@langchain/langgraph";
+import { END } from "@langchain/langgraph";
 import type {
   AgentHandle,
   Checkpoint,
@@ -29,6 +30,7 @@ export interface CompiledGraph extends ProtocolCapableGraph {
     values: unknown,
     asNode?: string,
   ): Promise<{ configurable?: { checkpoint_id?: string } }>;
+  getGraphAsync(): Promise<{ edges: Array<{ source: string; target: string; conditional?: boolean }> }>;
 }
 
 type RuntimeTask = StateSnapshot["tasks"][number];
@@ -209,6 +211,17 @@ export class LangGraphThreadGraph implements AgentHandle {
     const config = { configurable: { thread_id: threadId } };
     const next = await this.compiled.updateState(config, values, asNode);
     return { checkpointId: next.configurable?.checkpoint_id ?? "", threadId };
+  }
+
+  /**
+   * Writes state as the node that ends a run, so the thread has nothing pending.
+   * Without `asNode` LangGraph resumes from the entry, and clients read the
+   * pending step as a run in progress.
+   */
+  async updateStateAsFinished(threadId: string, values: unknown): Promise<Checkpoint> {
+    const { edges } = await this.compiled.getGraphAsync();
+    const terminal = edges.filter((edge) => edge.target === END && !edge.conditional).map((edge) => edge.source);
+    return this.updateState(threadId, values, terminal.length === 1 ? terminal[0] : undefined);
   }
 }
 

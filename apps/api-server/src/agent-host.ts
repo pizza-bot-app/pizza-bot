@@ -97,6 +97,7 @@ import {
   resolveMemoriesDir,
   resolveMcpConfig,
 } from "./plugins-dir.js";
+import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { ProtocolRunManager } from "./protocol-run-manager.js";
@@ -104,6 +105,7 @@ import { GraphRegistry } from "./graph-registry.js";
 import type { ImportedPlugin } from "./plugin-import.js";
 import { protocolRunLauncher } from "./protocol-run-launcher.js";
 import { TriggerService } from "./trigger-service.js";
+import { TodoService, type AgentStatus } from "./todo-service.js";
 import { SystemMessage, HumanMessage, type AIMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { GraphManager } from "./graph-manager.js";
@@ -377,6 +379,7 @@ export class AgentHost {
   readonly threadStore: ThreadStore;
   readonly folderStore: FolderStore;
   readonly todoStore: TodoStore;
+  readonly todoService: TodoService;
   readonly search: SearchStore;
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
@@ -454,6 +457,30 @@ export class AgentHost {
     this.triggerService = new TriggerService(protocolRunLauncher(this.protocolRuns), this.triggers, {
       isEnabled: () => this.settings.get().enableAutomations,
       awaitsInput: async (threadId) => stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId)),
+      todoCheckIn: (trigger, occurrence) => this.todoService.resolveCheckIn(trigger, occurrence),
+    });
+    this.todoService = new TodoService({
+      todos: this.todoStore,
+      threads: this.threadStore,
+      triggers: this.triggers,
+      scheduler: () => this.triggerService,
+      isRunning: (threadId) => this.protocolRuns.isRunning(threadId),
+      automationsEnabled: () => this.settings.get().enableAutomations,
+      agentStatus: (agentId) => this.agentStatus(agentId),
+      readyAgents: () =>
+        (this.graphs?.agentAvailability() ?? [])
+          .filter((state) => state.status === "ready")
+          .flatMap((state) => {
+            const status = this.agentStatus(state.id);
+            return status ? [{ id: state.id, ...status }] : [];
+          }),
+      postToThread: async (threadId, text) => {
+        const graph = await this.threadGraph(threadId);
+        await graph.updateStateAsFinished(threadId, {
+          messages: [{ role: "assistant", content: text, id: `msg_notify_${randomUUID()}` }],
+        });
+      },
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
     this.runMaintenance = new RunMaintenance({
       threadStore: this.threadStore,
@@ -487,6 +514,7 @@ export class AgentHost {
             interruptIds = await this.readThreadInterruptIds(threadId);
             this.threadStore.ensure({ threadId });
             this.threadStore.update(threadId, { unread: true, awaitingAction: true });
+            if (this.threadStore.get(threadId)?.background) this.todoService.recordPause(threadId);
             await this.runMaintenance.reindexThread(threadId);
             return;
           }
@@ -503,17 +531,18 @@ export class AgentHost {
             this.threadStore.update(threadId, { awaitingAction });
           }
         } finally {
-          const threadTitle = threadActivityTitle(
-            this.threadStore.get(threadId),
-          );
-          this.threadActivity.append({
-            eventId: `${threadId}:${runId}`,
-            threadId,
-            runId,
-            outcome,
-            interruptIds,
-            threadTitle,
-          });
+          const thread = this.threadStore.get(threadId);
+          // A check-in that finished on its own is not news; one waiting on the user is.
+          if (!thread?.background || outcome === "interrupted") {
+            this.threadActivity.append({
+              eventId: `${threadId}:${runId}`,
+              threadId,
+              runId,
+              outcome,
+              interruptIds,
+              threadTitle: threadActivityTitle(thread),
+            });
+          }
         }
       });
     });
@@ -849,12 +878,25 @@ export class AgentHost {
   }
 
   /** An agent thread's graph; an unavailable agent's history still reads through the assistant. */
-  private async agentThreadGraph(agentId: string): Promise<LangGraphThreadGraph> {
+  private async agentThreadGraph(agentId: string, background: boolean): Promise<LangGraphThreadGraph> {
     try {
-      return (await this.graphs!.rootAgentFor(agentId)).agent;
+      return (await this.graphs!.rootAgentFor(agentId, undefined, background ? this.todoService : undefined)).agent;
     } catch {
       return this.agent;
     }
+  }
+
+  /** Enabled agents only, with whether they can run now. */
+  private agentStatus(agentId: string): AgentStatus | undefined {
+    const state = this.graphs?.agentAvailability().find((candidate) => candidate.id === agentId);
+    const definition = this.agentInventory.get(agentId);
+    if (!state || !definition) return undefined;
+    return {
+      name: state.name,
+      description: definition.description,
+      ready: state.status === "ready",
+      ...(state.detail ? { detail: state.detail } : {}),
+    };
   }
 
   private async *streamGraphRun(
@@ -893,7 +935,7 @@ export class AgentHost {
     await this.warmup;
     const thread = this.threadStore.get(threadId);
     if (thread?.graphId) return (await this.compiledGraph(thread.graphId)).graph;
-    if (thread?.agentId) return this.agentThreadGraph(thread.agentId);
+    if (thread?.agentId) return this.agentThreadGraph(thread.agentId, thread.background === true);
     return this.agent;
   }
 
@@ -925,7 +967,11 @@ export class AgentHost {
     const existing = this.threadStore.get(opts.threadId);
     const requestedModelId = explicitModel ?? existing?.modelId ?? this.modelId;
     const { agent, modelId } = existing?.agentId
-      ? await this.graphs!.rootAgentFor(existing.agentId, requestedModelId)
+      ? await this.graphs!.rootAgentFor(
+          existing.agentId,
+          requestedModelId,
+          existing.background ? this.todoService : undefined,
+        )
       : { agent: await this.agentFor(requestedModelId), modelId: requestedModelId };
     const thread = this.threadStore.ensure({ threadId: opts.threadId, modelId });
     if (thread.modelId !== modelId) {
@@ -2090,7 +2136,7 @@ export class AgentHost {
             }
           : {}),
         localFolders: () => host.localFolders.list(),
-        todos: host.todoStore,
+        todos: host.todoService,
         ...(host.attachments ? { attachmentResolver: host.attachments.resolver } : {}),
         ...(Object.keys(tools).length > 0 ? { tools } : {}),
         ...(Object.keys(catalog).length > 0 ? { catalog } : {}),

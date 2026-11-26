@@ -581,6 +581,15 @@ describe("AgentHost agent threads", () => {
     expect(await host.threadGraph("with-ghost")).toBe(host.agent);
     expect(await host.threadGraph("plain")).toBe(host.agent);
   });
+
+  it("reads a Todo check-in thread through the agent's background graph", async () => {
+    host.threadStore.create({ threadId: "chat", agentId: "researcher" });
+    host.threadStore.create({ threadId: "bg", agentId: "researcher", background: true, todoId: "t1" });
+    const chat = await host.threadGraph("chat");
+    const background = await host.threadGraph("bg");
+    expect(background).not.toBe(chat);
+    expect(background).not.toBe(host.agent);
+  });
 });
 
 describe("AgentHost.deleteThread", () => {

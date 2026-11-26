@@ -75,7 +75,13 @@ export function triggerRoutes(
   const app = new Hono();
   const defaultTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  app.get("/triggers", (c) => c.json(store.list()));
+  // A Todo's check-in schedule is managed from the Todo, so this surface does not show it.
+  const scheduleOf = (id: string) => {
+    const trigger = store.get(id);
+    return trigger && !trigger.todoId ? trigger : undefined;
+  };
+
+  app.get("/triggers", (c) => c.json(store.list().filter((trigger) => !trigger.todoId)));
 
   app.post("/triggers", async (c) => {
     const body = await c.req.json().catch(() => ({}));
@@ -108,13 +114,13 @@ export function triggerRoutes(
   });
 
   app.get("/triggers/:id", (c) => {
-    const t = store.get(c.req.param("id"));
+    const t = scheduleOf(c.req.param("id"));
     return t ? c.json(t) : c.json({ error: "not_found" }, 404);
   });
 
   app.patch("/triggers/:id", async (c) => {
     const id = c.req.param("id");
-    const existing = store.get(id);
+    const existing = scheduleOf(id);
     if (!existing) return c.json({ error: "not_found" }, 404);
     const parsed = triggerPatchSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) {
@@ -144,7 +150,7 @@ export function triggerRoutes(
   });
 
   app.delete("/triggers/:id", (c) => {
-    const ok = store.delete(c.req.param("id"));
+    const ok = scheduleOf(c.req.param("id")) !== undefined && store.delete(c.req.param("id"));
     if (!ok) return c.json({ error: "not_found" }, 404);
     service?.reload?.();
     return c.json({ deleted: true });
@@ -173,7 +179,7 @@ export function triggerRoutes(
     // Manual execution belongs to the deployment-trusted CRUD surface and does
     // not accept the public webhook credential.
     const id = c.req.param("id");
-    const t = store.get(id);
+    const t = scheduleOf(id);
     if (!t) return c.json({ error: "not_found" }, 404);
     if (!t.enabled) return c.json({ error: "disabled" }, 409);
     if (!service) return c.json({ error: "no_service" }, 503);

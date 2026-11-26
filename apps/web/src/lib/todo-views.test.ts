@@ -22,6 +22,7 @@ function todo(id: string, fields: Partial<Todo> = {}): Todo {
     steps: [],
     completed: false,
     threadIds: [],
+    history: [],
     createdAt: `2026-11-0${id.length}T00:00:00.000Z`,
     updatedAt: "2026-11-01T00:00:00.000Z",
     ...fields,
