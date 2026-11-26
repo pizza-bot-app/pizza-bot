@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp } from "./index.js";
@@ -34,6 +34,9 @@ describe("provider routes", () => {
     vi.stubEnv("BEDROCK_AWS_SECRET_ACCESS_KEY", "");
     vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "");
     dataRoot = mkdtempSync(join(tmpdir(), "route-providers-data-"));
+    const awsConfig = join(dataRoot, "aws-config");
+    writeFileSync(awsConfig, "[default]\nregion = us-east-1\n\n[profile staging]\nregion = us-west-2\n");
+    vi.stubEnv("AWS_CONFIG_FILE", awsConfig);
     pluginsDir = mkdtempSync(join(tmpdir(), "route-providers-plugins-"));
     host = await AgentHost.create({ dataRoot, pluginsDir });
     app = buildApp(host);
@@ -94,6 +97,29 @@ describe("provider routes", () => {
     expect(anthropic.modelPreferences).toEqual({ mode: "all", selected: [] });
   });
 
+  it("keeps host AWS profile names out of the provider list", async () => {
+    expect(JSON.stringify(await list())).not.toMatch(/staging/);
+
+    const res = await app.request("/providers/bedrock/fields/profile/options");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      options: [
+        { value: "default", label: "default" },
+        { value: "staging", label: "staging" },
+      ],
+    });
+  });
+
+  it("serves dynamic options only for fields that declare them", async () => {
+    for (const path of [
+      "/providers/bedrock/fields/region/options",
+      "/providers/anthropic/fields/apiKey/options",
+      "/providers/missing/fields/profile/options",
+    ]) {
+      expect((await app.request(path)).status).toBe(404);
+    }
+  });
+
   it("allows configured cross-origin provider PUT requests", async () => {
     const res = await app.request("/providers/bedrock", {
       method: "OPTIONS",
@@ -115,11 +141,21 @@ describe("provider routes", () => {
       values: { profile: "production" },
     });
     expect(res.status).toBe(200);
+    expect(JSON.stringify(await res.json())).not.toMatch(/production/);
 
     const bedrock = (await list()).find((p) => p.id === "bedrock")!;
     expect(bedrock.config).toEqual({
       method: "aws-profile",
-      values: { profile: "production" },
+      values: { profile: { hasValue: true } },
+    });
+    const options = await app.request("/providers/bedrock/fields/profile/options");
+    expect(await options.json()).toEqual({
+      options: [
+        { value: "default", label: "default" },
+        { value: "staging", label: "staging" },
+        { value: "production", label: "production" },
+      ],
+      selected: "production",
     });
     expect(host.providerConfigs.getConfig("bedrock")).toEqual({
       method: "aws-profile",

@@ -31,6 +31,15 @@ function secretKeys(authSchema?: readonly ProviderAuthMethod[]): Set<string> {
   return keys;
 }
 
+/** Their saved values name host resources, so they are served only by the options route. */
+function dynamicOptionKeys(authSchema?: readonly ProviderAuthMethod[]): Set<string> {
+  const keys = new Set<string>();
+  for (const method of authSchema ?? []) {
+    for (const field of method.fields) if (field.optionsSource === "dynamic") keys.add(field.key);
+  }
+  return keys;
+}
+
 export function providerRoutes(host: AgentHost): Hono {
   const app = new Hono();
 
@@ -40,6 +49,7 @@ export function providerRoutes(host: AgentHost): Hono {
     const views: ProviderView[] = providers.map((p) => {
       const config = saved[p.id];
       const secrets = secretKeys(p.authSchema);
+      const dynamic = dynamicOptionKeys(p.authSchema);
       return {
         id: p.id,
         configurable: p.configurable,
@@ -49,7 +59,7 @@ export function providerRoutes(host: AgentHost): Hono {
           ? {
               config: {
                 method: config.method,
-                values: redactValues(config.values, secrets),
+                values: redactValues(config.values, secrets, dynamic),
               },
             }
           : {}),
@@ -78,6 +88,15 @@ export function providerRoutes(host: AgentHost): Hono {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
     return c.json({ default: host.providerConfigs.getDefaultModel() ?? null });
+  });
+
+  app.get("/providers/:id/fields/:key/options", async (c) => {
+    const id = c.req.param("id");
+    const key = c.req.param("key");
+    const options = await host.providerFieldOptions(id, key);
+    if (!options) return c.json({ error: `No dynamic options for "${id}" field "${key}".` }, 404);
+    const saved = host.providerConfigs.getConfig(id)?.values[key];
+    return c.json({ options, ...(saved ? { selected: saved } : {}) });
   });
 
   app.put("/providers/:id/models", async (c) => {
@@ -170,7 +189,10 @@ export function providerRoutes(host: AgentHost): Hono {
     host.providerConfigs.setConfig(id, config);
     return c.json({
       id,
-      config: { method: config.method, values: redactValues(config.values, secrets) },
+      config: {
+        method: config.method,
+        values: redactValues(config.values, secrets, dynamicOptionKeys(provider.authSchema)),
+      },
     });
   });
 
@@ -187,9 +209,14 @@ export function providerRoutes(host: AgentHost): Hono {
 function redactValues(
   values: Record<string, string>,
   secrets: Set<string>,
+  dynamic: Set<string>,
 ): Record<string, RedactedValue> {
   const out: Record<string, RedactedValue> = {};
   for (const [key, value] of Object.entries(values)) {
+    if (dynamic.has(key)) {
+      out[key] = { hasValue: value.length > 0 };
+      continue;
+    }
     if (!secrets.has(key)) {
       out[key] = value;
       continue;

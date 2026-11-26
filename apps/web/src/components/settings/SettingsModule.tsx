@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import type { ProviderView, ModelsInfo, StatusInfo } from "@/api-client";
 import { ModuleHeader } from "../ModuleHeader.js";
-import { getProviderStatus, ProvidersSettings } from "./ProvidersSettings.js";
+import { getProviderStatus, ProvidersSettings, type LoadFieldOptions } from "./ProvidersSettings.js";
 import { L } from "../../lexicon.js";
 import { providerLabel } from "../../model-options.js";
 import type { ThemePreference } from "../../theme-storage.js";
@@ -42,6 +42,7 @@ export interface SettingsModuleProps {
     preferences: import("@/api-client").ProviderModelPreferences,
   ) => Promise<unknown>;
   onProviderRemove: (id: string) => Promise<unknown>;
+  onLoadProviderFieldOptions: LoadFieldOptions;
   onRetryModels: () => Promise<unknown>;
   onSetDefaultModel: (model: string | null) => Promise<unknown>;
   enableMemories: boolean;
@@ -158,6 +159,7 @@ export function SettingsModule({
   defaultModel,
   onProviderSave,
   onProviderRemove,
+  onLoadProviderFieldOptions,
   onRetryModels,
   onSetDefaultModel,
   enableMemories,
@@ -393,6 +395,7 @@ export function SettingsModule({
               defaultModel={defaultModel}
               onSave={onProviderSave}
               onRemove={onProviderRemove}
+              onLoadFieldOptions={onLoadProviderFieldOptions}
               onRetryModels={onRetryModels}
               onSetDefault={onSetDefaultModel}
               selectedProviderId={selectedProviderId}

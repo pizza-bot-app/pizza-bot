@@ -488,6 +488,7 @@ export function App() {
                 defaultModel={providersAdmin.defaultModel}
                 onProviderSave={providersAdmin.save}
                 onProviderRemove={providersAdmin.remove}
+                onLoadProviderFieldOptions={providersAdmin.fieldOptions}
                 onRetryModels={retryModelCatalogs}
                 onSetDefaultModel={providersAdmin.setDefault}
                 providerStatuses={serverStatus?.inference.providers}

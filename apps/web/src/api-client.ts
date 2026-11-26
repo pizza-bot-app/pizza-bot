@@ -9,6 +9,7 @@ import type {
   AttachmentMeta,
   ModelCatalogStatus,
   ProviderAuthMethod,
+  ProviderFieldOption,
   SkillInterruptOn,
   CreateLocalFolderInput,
   LocalFolder,
@@ -567,6 +568,14 @@ export class ApiClient {
     return this.json("update provider", `/providers/${encodeURIComponent(id)}`, { method: "PUT", body: config });
   }
 
+  /** Choices for a field the schema marks `optionsSource: "dynamic"`. */
+  async providerFieldOptions(id: string, fieldKey: string): Promise<ProviderFieldOptionsView> {
+    return this.json(
+      "load provider field options",
+      `/providers/${encodeURIComponent(id)}/fields/${encodeURIComponent(fieldKey)}/options`,
+    );
+  }
+
   async deleteProvider(id: string): Promise<boolean> {
     return (
       (await this.json("delete provider", `/providers/${encodeURIComponent(id)}`, { method: "DELETE" })) as {
@@ -1021,6 +1030,12 @@ export interface ProviderView {
   authSchema?: readonly ProviderAuthMethod[];
   config?: ProviderConfigView;
   modelPreferences: ProviderModelPreferences;
+}
+
+export interface ProviderFieldOptionsView {
+  options: ProviderFieldOption[];
+  /** The saved value, which `/providers` redacts for dynamic-option fields. */
+  selected?: string;
 }
 
 export interface ProviderModelPreferences {

@@ -8,8 +8,10 @@ import {
   type ModelCatalogDegradation,
   type ModelDescriptor,
   type ProviderAuthMethod,
+  type ProviderFieldOption,
   type ResolvedProviderConfig,
 } from "@pizza-bot/core";
+import { discoverAwsProfiles } from "./aws-profiles.js";
 import {
   REASONING_REQUEST_FIELDS,
   resolveRegion,
@@ -81,6 +83,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
   private readonly client: { send(command: unknown): Promise<unknown> } | undefined;
   private readonly fetchFn: typeof fetch;
   private readonly modelsDev: ModelsDevCatalogLoader;
+  private readonly discoverProfiles: () => Promise<string[]>;
   private readonly descriptors = new Map<string, ModelDescriptor>();
   private readonly protocols = new Map<string, BedrockProtocol>();
   private readonly learnedMaxTokens = new Map<string, number>();
@@ -118,8 +121,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
     }
     this.profile = opts.profile?.trim() || undefined;
     this.authMethod = this.profile ? "aws-profile" : undefined;
-    const profiles = [...new Set(opts.profiles ?? [])];
-    if (this.profile && !profiles.includes(this.profile)) profiles.push(this.profile);
+    this.discoverProfiles = opts.discoverProfiles ?? (() => discoverAwsProfiles());
     const regionField = {
       key: "region",
       label: "Region override",
@@ -137,8 +139,7 @@ export class BedrockLangChainModelProvider implements ModelProvider {
             label: "Profile",
             type: "select",
             required: true,
-            options: profiles.map((profile) => ({ value: profile, label: profile })),
-            ...(profiles[0] ? { default: profiles[0] } : {}),
+            optionsSource: "dynamic",
           },
           regionField,
         ],
@@ -182,6 +183,16 @@ export class BedrockLangChainModelProvider implements ModelProvider {
         ],
       },
     ];
+  }
+
+  /** Re-reads the shared config file so profiles added after startup appear. */
+  async fieldOptions(fieldKey: string): Promise<readonly ProviderFieldOption[]> {
+    if (fieldKey !== "profile") return [];
+    const profiles = [...new Set(await this.discoverProfiles())];
+    // A saved profile deleted from the config file stays selectable rather than
+    // silently switching the form to another one.
+    if (this.profile && !profiles.includes(this.profile)) profiles.push(this.profile);
+    return profiles.map((profile) => ({ value: profile, label: profile }));
   }
 
   configure(cfg: ResolvedProviderConfig): void {

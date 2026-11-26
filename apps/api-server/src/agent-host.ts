@@ -785,6 +785,11 @@ export class AgentHost {
     return this.graphs!.listProviders();
   }
 
+  async providerFieldOptions(providerId: string, fieldKey: string) {
+    await this.warmup;
+    return this.graphs!.providerFieldOptions(providerId, fieldKey);
+  }
+
   private selectDefaultModel(
     globalDefault = this.providerConfigs.getDefaultModel() ?? null,
     bestAvailable: string | null = null,
