@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { SystemMessage } from "@langchain/core/messages";
@@ -44,14 +45,17 @@ const config = toolCall("tools:root");
 // Spawning a worker under the tsx loader takes seconds on Windows CI.
 const WORKER_TEST_TIMEOUT_MS = 30_000;
 
-async function sandbox(ptc: string[] = []): Promise<WorkerMiddleware> {
+async function sandbox(
+  ptc: string[] = [],
+  worker: { workerStartupTimeoutMs?: number; workerExecArgv?: string[] } = {},
+): Promise<WorkerMiddleware> {
   middleware = (await createWorkerCodeInterpreterMiddleware({
     ptc,
     maxResultChars: 2_000,
     executionTimeoutMs: GUEST_DEADLINE_MS,
     subagents: false,
     maxSubagentConcurrency: 32,
-  }, { workerGraceMs: WORKER_GRACE_MS })) as WorkerMiddleware;
+  }, { workerGraceMs: WORKER_GRACE_MS, ...worker })) as WorkerMiddleware;
   return middleware;
 }
 
@@ -145,9 +149,6 @@ describe("worker-hosted code interpreter", () => {
       { tools: [slow], systemMessage: new SystemMessage("") },
       () => undefined,
     );
-    // Worker startup is charged to the watchdog, so spawn it before the timed eval.
-    await sandboxMiddleware.tools[0]!.invoke({ code: "0" }, config);
-
     expect(await sandboxMiddleware.tools[0]!.invoke({ code: "await tools.slow({})" }, config))
       .toContain("done");
   }, SLOW_HOST_WORK_MS + WORKER_TEST_TIMEOUT_MS);
@@ -164,6 +165,49 @@ describe("worker-hosted code interpreter", () => {
 
     expect(await tools[0]!.invoke({ code: "40 + 2" }, config)).toContain("42");
   }, WORKER_TEST_TIMEOUT_MS);
+
+  describe("worker startup", () => {
+    let preloads: string;
+
+    /** A module the worker imports before its entry, standing in for a slow or stuck spawn. */
+    function preload(name: string, source: string): string[] {
+      const path = join(preloads, name);
+      writeFileSync(path, source);
+      return ["--import", pathToFileURL(path).href];
+    }
+
+    beforeAll(() => {
+      preloads = mkdtempSync(join(tmpdir(), "eval-worker-start-"));
+    });
+    afterAll(() => rmSync(preloads, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+
+    it("does not charge a slow worker start to the eval watchdog", async () => {
+      const startMs = GUEST_DEADLINE_MS + WORKER_GRACE_MS + 1_000;
+      const { tools } = await sandbox([], {
+        workerExecArgv: preload(
+          "slow-start.mjs",
+          `await new Promise((resolve) => setTimeout(resolve, ${startMs}));\n`,
+        ),
+      });
+
+      expect(await tools[0]!.invoke({ code: "40 + 2" }, config)).toContain("42");
+    }, WORKER_TEST_TIMEOUT_MS);
+
+    it("fails an eval whose worker never starts", async () => {
+      const { tools } = await sandbox([], {
+        workerStartupTimeoutMs: 1_000,
+        // The interval keeps the worker alive, so only the startup timeout can end it.
+        workerExecArgv: preload(
+          "stuck-start.mjs",
+          "setInterval(() => {}, 60_000);\nawait new Promise(() => {});\n",
+        ),
+      });
+
+      await expect(tools[0]!.invoke({ code: "1" }, config)).rejects.toThrow(
+        "the sandbox worker did not start within 1s",
+      );
+    }, WORKER_TEST_TIMEOUT_MS);
+  });
 
   describe("bridged read_file past the size cap", () => {
     const LINES = 400;

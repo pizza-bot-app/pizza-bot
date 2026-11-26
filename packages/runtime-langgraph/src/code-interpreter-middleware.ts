@@ -34,6 +34,13 @@ export interface SandboxOptions {
 const WORKER_RESPONSE_GRACE_MS = 10_000;
 
 /**
+ * Spawning the worker and loading QuickJS sit outside the eval deadline, so a
+ * busy host can't make them look like a hung guest; this bounds a worker that
+ * never comes up at all.
+ */
+const WORKER_STARTUP_TIMEOUT_MS = 60_000;
+
+/**
  * An invocation that never reaches `afterAgent` (failed, or paused on approval)
  * must not pin its worker. Measured from the last eval, so a longer gap between
  * evals in one invocation also resets the guest's globals.
@@ -109,6 +116,9 @@ interface SandboxSession {
   idleTimer?: ReturnType<typeof setTimeout>;
   hostCallsInFlight: number;
   watchdog?: Watchdog | undefined;
+  /** Set on the worker's `ready`; the eval watchdog runs only after it. */
+  ready: boolean;
+  startupTimer?: ReturnType<typeof setTimeout>;
 }
 
 interface SessionConfigurable {
@@ -118,7 +128,11 @@ interface SessionConfigurable {
 
 export async function createWorkerCodeInterpreterMiddleware(
   options: SandboxOptions,
-  { workerGraceMs = WORKER_RESPONSE_GRACE_MS }: { workerGraceMs?: number } = {},
+  {
+    workerGraceMs = WORKER_RESPONSE_GRACE_MS,
+    workerStartupTimeoutMs = WORKER_STARTUP_TIMEOUT_MS,
+    workerExecArgv = [],
+  }: { workerGraceMs?: number; workerStartupTimeoutMs?: number; workerExecArgv?: string[] } = {},
 ): Promise<unknown> {
   const {
     createCodeInterpreterMiddleware,
@@ -168,6 +182,7 @@ export async function createWorkerCodeInterpreterMiddleware(
     if (!session) return;
     sessions.delete(key);
     clearTimeout(session.idleTimer);
+    clearTimeout(session.startupTimer);
     for (const waiter of session.pendingEvals.values()) {
       waiter.reject(reason ?? new Error("the sandbox worker was shut down"));
     }
@@ -263,7 +278,10 @@ export async function createWorkerCodeInterpreterMiddleware(
       sessionId: key,
       subagentConcurrency: options.subagents && taskTool ? options.maxSubagentConcurrency : 0,
     };
-    const worker = new Worker(WORKER_ENTRY, { workerData, execArgv: WORKER_EXEC_ARGV });
+    const worker = new Worker(WORKER_ENTRY, {
+      workerData,
+      execArgv: [...WORKER_EXEC_ARGV, ...workerExecArgv],
+    });
     // A wedged sandbox must never be the reason the process cannot exit.
     worker.unref();
     const session: SandboxSession = {
@@ -273,12 +291,27 @@ export async function createWorkerCodeInterpreterMiddleware(
       config,
       pendingEvals: new Map(),
       hostCallsInFlight: 0,
+      ready: false,
     };
     // A terminated worker exits after its key may already hold a replacement.
     const retire = (reason: Error) => {
       if (sessions.get(key) === session) disposeSession(key, reason);
     };
+    session.startupTimer = setTimeout(
+      () =>
+        retire(
+          new Error(`the sandbox worker did not start within ${workerStartupTimeoutMs / 1000}s`),
+        ),
+      workerStartupTimeoutMs,
+    );
+    session.startupTimer.unref();
     worker.on("message", (message: WorkerToHost) => {
+      if (message.kind === "ready") {
+        clearTimeout(session.startupTimer);
+        session.ready = true;
+        if (session.hostCallsInFlight === 0) session.watchdog?.resume();
+        return;
+      }
       if (message.kind === "eval-result" || message.kind === "eval-error") {
         const waiter = session.pendingEvals.get(message.id);
         session.pendingEvals.delete(message.id);
@@ -337,7 +370,7 @@ export async function createWorkerCodeInterpreterMiddleware(
       // detached by an earlier eval that ended (timed out or failed) before it
       // settled. Until it does this eval runs unwatched: calls carry no eval id.
       session.watchdog = watchdog;
-      if (session.hostCallsInFlight === 0) watchdog.resume();
+      if (session.ready && session.hostCallsInFlight === 0) watchdog.resume();
       session.pendingEvals.set(id, {
         resolve: (text) => {
           settle();
