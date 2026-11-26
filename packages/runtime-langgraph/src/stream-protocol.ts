@@ -11,15 +11,17 @@ import type {
 /** Map a message turn, graph input, or resume to LangGraph input. */
 export function toLangGraphInput(
   input: RunInput,
+  opts: { keyDecisions?: boolean } = {},
 ): { messages: unknown[] } | { input: Record<string, unknown> } | Command {
   if ("graphInput" in input) return { input: input.graphInput };
   if ("command" in input) {
     const command = input.command;
+    // Keyed by interrupt id so one resume cannot also satisfy a different parallel pause.
     if (isInputResponse(command)) {
-      // Keyed by interrupt id so one answer cannot resume a different parallel pause.
       return new Command({ resume: { [command.interruptId]: command.response } });
     }
-    return new Command({ resume: toResumePayload(command) });
+    const decisions = toResumePayload(command);
+    return new Command({ resume: opts.keyDecisions ? { [command.interruptId]: decisions } : decisions });
   }
   return {
     messages: input.messages.map((m) => ({ role: m.role, content: toContent(m.parts) })),
