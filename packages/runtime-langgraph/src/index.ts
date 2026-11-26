@@ -43,7 +43,12 @@ import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
 import { localFolderContextMiddleware } from "./local-folder-context-middleware.js";
 import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 import { taskDispatchMiddleware } from "./task-dispatch-middleware.js";
-import { streamProtocolEvents, toLangGraphInput, type ProtocolCapableGraph } from "./stream-protocol.js";
+import {
+  streamProtocolEvents,
+  toLangGraphInput,
+  withoutResentTurn,
+  type ProtocolCapableGraph,
+} from "./stream-protocol.js";
 
 // The built-in Codex profile otherwise restores the opt-in planning middleware.
 registerHarnessProfile("openai", { excludedMiddleware: ["todoListMiddleware"] });
@@ -522,9 +527,17 @@ class LangGraphAgent implements AgentHandle {
   ) {}
 
   /** Stream native protocol frames, seeding skills only on message turns. */
-  streamProtocol(input: RunInput, opts: RunOptions): AsyncIterable<ProtocolEvent> {
-    const lgInput = withSkillSeed(toLangGraphInput(input), this.skillSeed);
-    return streamProtocolEvents(this.compiled, lgInput, opts);
+  async *streamProtocol(input: RunInput, opts: RunOptions): AsyncIterable<ProtocolEvent> {
+    let lgInput = toLangGraphInput(input);
+    if ("messages" in lgInput) {
+      // Without readable state there is no earlier turn to recognize; the run proceeds as sent.
+      const snap = await this.compiled
+        .getState({ configurable: { thread_id: opts.threadId } })
+        .catch(() => undefined);
+      const messages = (snap?.values as ThreadStateValues | undefined)?.messages;
+      lgInput = withoutResentTurn(lgInput, messages?.at(-1));
+    }
+    yield* streamProtocolEvents(this.compiled, withSkillSeed(lgInput, this.skillSeed), opts);
   }
 
   async getState(threadId: string, checkpointId?: string): Promise<ThreadState> {

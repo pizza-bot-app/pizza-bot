@@ -674,6 +674,31 @@ export class ProtocolStreamStore {
     this.pumpRunQueue();
   }
 
+  /** Re-runs the thread's unanswered turn from its checkpoint without adding a message. */
+  async retry(threadId: string, model?: string): Promise<void> {
+    const status = this.getSlice(threadId).status;
+    if (
+      status === "streaming" ||
+      status === "interrupted" ||
+      this.activeRunThreads.has(threadId) ||
+      this.pendingRunThreadSet.has(threadId)
+    ) {
+      return;
+    }
+    const e = this.entry(threadId);
+    this.activeRunThreads.add(threadId);
+    try {
+      await e.controller.submit(
+        { messages: [] },
+        model ? { config: { configurable: { model } } } : undefined,
+      );
+    } finally {
+      if (!e.runId && this.activeRunThreads.delete(threadId)) {
+        this.pumpRunQueue();
+      }
+    }
+  }
+
   async stop(threadId: string): Promise<void> {
     const e = this.entries.get(threadId);
     if (!e) return;

@@ -332,6 +332,16 @@ export function App() {
     });
   }, []);
 
+  // Another client can change provider settings, and Save writes back every field.
+  const refreshProviders = providersAdmin.refresh;
+  useEffect(() => {
+    if (view !== "settings") return;
+    const refresh = () => void refreshProviders().catch(() => undefined);
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [view, refreshProviders]);
+
   const [helpOpen, setHelpOpen] = useState(false);
   const openSettings = useCallback(() => setView("settings"), []);
   const openConnectionSettings = useCallback(() => {

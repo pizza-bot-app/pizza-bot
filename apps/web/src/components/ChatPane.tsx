@@ -53,8 +53,16 @@ export function ChatPane({
   searchTarget,
   onSearchTargetHandled,
 }: ChatPaneProps) {
-  const { messages, status, errorText, errorCode, blankTurn, retryingCutOff, queued, send, steerNow, cancelQueued, stop, decide } =
+  const { messages, status, errorText, errorCode, blankTurn, retryingCutOff, queued, send, steerNow, cancelQueued, retry, stop, decide } =
     useThreadSlice(threadId, hydrateOnMount);
+  const [selectedModel, setSelectedModel] = useState(initialModel);
+  const trackModel = useCallback(
+    (modelId: string) => {
+      setSelectedModel(modelId);
+      onModelChange?.(modelId);
+    },
+    [onModelChange],
+  );
   const [prefill, setPrefill] = useState<string | undefined>();
   const [prefillToken, setPrefillToken] = useState(0);
   useHotkey("chat.escapeToList", () => onComposerEscape?.(), {
@@ -103,7 +111,11 @@ export function ChatPane({
         />
       )}
       {status === "error" && errorText && (
-        <RunErrorBanner text={errorText} code={errorCode} />
+        <RunErrorBanner
+          text={errorText}
+          code={errorCode}
+          onRetry={messages.at(-1)?.role === "user" ? () => retry(selectedModel) : undefined}
+        />
       )}
       {status === "idle" && blankTurn && <BlankTurnNotice reason={blankTurn} />}
       {status === "streaming" && retryingCutOff && <CutOffRetryNotice />}
@@ -118,7 +130,7 @@ export function ChatPane({
         onCancelQueued={cancelQueued}
         models={models}
         initialModel={initialModel}
-        onModelChange={onModelChange}
+        onModelChange={trackModel}
         client={client}
         prefill={prefill}
         prefillToken={prefillToken}

@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, RotateCw } from "lucide-react";
 
 // Actionable follow-up per coarse error code; codes without an entry show the
 // raw provider message alone.
@@ -13,7 +13,16 @@ const HINT_BY_CODE: Record<string, string> = {
   TIMEOUT: "The request timed out before the model responded. Try again.",
 };
 
-export function RunErrorBanner({ text, code }: { text: string; code?: string }) {
+export function RunErrorBanner({
+  text,
+  code,
+  onRetry,
+}: {
+  text: string;
+  code?: string;
+  /** Offered only while the failed turn's message is still unanswered. */
+  onRetry?: () => Promise<void>;
+}) {
   const hint = code ? HINT_BY_CODE[code] : undefined;
   return (
     <div className="run-error" role="alert">
@@ -22,6 +31,12 @@ export function RunErrorBanner({ text, code }: { text: string; code?: string }) 
         <p className="run-error-text">{text}</p>
         {hint && <p className="run-error-hint">{hint}</p>}
       </div>
+      {onRetry && (
+        <button type="button" className="btn-secondary run-error-retry" onClick={() => void onRetry()}>
+          <RotateCw size={14} />
+          Retry
+        </button>
+      )}
     </div>
   );
 }

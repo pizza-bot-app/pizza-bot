@@ -529,6 +529,34 @@ describe("ProtocolStreamStore steering-enqueue", () => {
     });
   });
 
+  it("retries a failed turn from its checkpoint without resending the message", async () => {
+    await store.attach(TID, false);
+    await store.send(TID, "what can you do?");
+    await flush();
+    last.rootError = new Error("Publisher model was not found");
+    last.isLoading = false;
+    last.fireCompleted();
+    last.notify();
+
+    await store.retry(TID, "google:gemini-4-hydrogen");
+
+    expect(last.submits.at(-1)).toEqual({
+      input: { messages: [] },
+      opts: { config: { configurable: { model: "google:gemini-4-hydrogen" } } },
+    });
+  });
+
+  it("does not retry while a run is streaming", async () => {
+    await store.send(TID, "first");
+    await flush();
+    last.isLoading = true;
+    last.notify();
+
+    await store.retry(TID);
+
+    expect(last.submits).toHaveLength(1);
+  });
+
   it("surfaces the blank-turn reason from values, without marking the run an error", async () => {
     await store.attach(TID, false);
     await store.send(TID, "summarize the thread");

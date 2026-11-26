@@ -705,7 +705,20 @@ families, xAI, and Gemma 4 use Responses, raw Anthropic model families use
 Messages, and other Mantle model families use Chat Completions. Mantle catalog
 entries retain the protocol family exposed by that catalog. The regional Mantle
 host and protocol paths are Bedrock concerns, and its HTTP transport supports
-both Bedrock API keys and SigV4 credentials. The OpenAI adapter
+both Bedrock API keys and SigV4 credentials. The Google adapter auto-detects
+Google AI Studio versus Vertex AI Express by verifying generation against AI
+Studio before falling back to Vertex; a saved Vertex AI project ID skips that
+check and selects Vertex. A project, from settings or `GOOGLE_CLOUD_PROJECT`,
+routes Vertex through a project-qualified endpoint (location from settings,
+`GOOGLE_CLOUD_LOCATION`, or `global`) so global and multi-region models work
+with the same API key. The environment only applies once the platform is
+Vertex, so an ambient project never moves an AI Studio key. Without one,
+Express's us-central1 model-not-found error names the key's project number,
+and the adapter retries once there and keeps the provider on it until its
+settings change. A run that fails before the model answers leaves its user
+message unanswered in the checkpoint; the runtime treats resending that same
+message as a re-run of the turn rather than a new message.
+The OpenAI adapter
 independently selects Automatic, Responses, or Chat Completions for custom
 compatible endpoints. The Anthropic adapter likewise owns custom Messages API
 endpoints and `x-api-key` versus bearer authentication. OpenAI-compatible
