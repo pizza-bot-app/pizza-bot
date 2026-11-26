@@ -49,6 +49,11 @@ describe("parseGraphSpec", () => {
     })).toEqual([expect.stringContaining("is reserved")]);
     expect(errorsOf({
       ...valid,
+      nodes: [{ id: "a", type: "transform", set: { constructor: 1, toString: 2 } }],
+      edges: [{ from: "start", to: "a" }, { from: "a", to: "end" }],
+    })).toEqual([expect.stringContaining("is reserved"), expect.stringContaining("is reserved")]);
+    expect(errorsOf({
+      ...valid,
       nodes: [{ id: "a", type: "transform", set: { a: 1 } }],
       edges: [{ from: "start", to: "a" }, { from: "a", to: "end" }],
     })).toEqual(['node id "a" is also a state key']);
