@@ -33,23 +33,31 @@ export interface CompiledGraph extends ProtocolCapableGraph {
 
 type RuntimeTask = StateSnapshot["tasks"][number];
 
+type InterruptedTask<I> = { result?: unknown; interrupts?: ReadonlyArray<I> };
+
+// A task that finished after being resumed keeps its old interrupt in the snapshot
+// while a parallel task in the same step is still paused; only unfinished tasks wait.
+function pendingInterrupts<I>(task: InterruptedTask<I>): ReadonlyArray<I> {
+  return task.result === undefined ? (task.interrupts ?? []) : [];
+}
+
 /**
  * Detect HITL from checkpoint task interrupts. `next` also covers non-HITL
  * pauses, while task interrupts remain authoritative across reloads.
  */
 function snapshotAwaitingInput(snap: {
-  tasks?: ReadonlyArray<{ interrupts?: ReadonlyArray<unknown> }>;
+  tasks?: ReadonlyArray<InterruptedTask<unknown>>;
 }): boolean {
-  return (snap.tasks ?? []).some((t) => (t.interrupts?.length ?? 0) > 0);
+  return (snap.tasks ?? []).some((t) => pendingInterrupts(t).length > 0);
 }
 
 /** Preserve durable HITL payloads so the SDK can rebuild approval state. */
 function snapshotInterrupts(snap: {
-  tasks?: ReadonlyArray<{ interrupts?: ReadonlyArray<{ id?: unknown; value?: unknown }> }>;
+  tasks?: ReadonlyArray<InterruptedTask<{ id?: unknown; value?: unknown }>>;
 }): Array<{ id: string; value: unknown }> {
   const out: Array<{ id: string; value: unknown }> = [];
   for (const task of snap.tasks ?? []) {
-    for (const it of task.interrupts ?? []) {
+    for (const it of pendingInterrupts(task)) {
       if (typeof it?.id === "string") out.push({ id: it.id, value: it.value });
     }
   }
@@ -97,7 +105,7 @@ function snapshotTasks(snap: { tasks?: ReadonlyArray<RuntimeTask> }): ThreadTask
       ...(task.path ? { path: [...task.path] } : {}),
       ...(task.result !== undefined ? { result: task.result } : {}),
       ...(task.error !== undefined ? { error: task.error } : {}),
-      interrupts: (task.interrupts ?? []).flatMap((interrupt) =>
+      interrupts: pendingInterrupts(task).flatMap((interrupt) =>
         typeof interrupt.id === "string"
           ? [{ id: interrupt.id, value: interrupt.value }]
           : [],
@@ -114,7 +122,7 @@ export class LangGraphThreadGraph implements AgentHandle {
     const config = { configurable: { thread_id: opts.threadId } };
     if ("command" in input) {
       const snap = await this.compiled.getState(config);
-      const pending = (snap.tasks ?? []).flatMap((task) => task.interrupts ?? []);
+      const pending = (snap.tasks ?? []).flatMap((task) => pendingInterrupts(task));
       const target = pending.find((it) => it.id === input.command.interruptId);
       // LangGraph reads a resume map keyed by anything but real interrupt ids as one
       // value for every pending interrupt, so each resume must name a pending one.
