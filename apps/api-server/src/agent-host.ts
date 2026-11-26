@@ -44,6 +44,7 @@ import {
   TriggerStore,
   ThreadStore,
   FolderStore,
+  TodoStore,
   SearchStore,
   SettingsStore,
   ProviderConfigStore,
@@ -374,6 +375,7 @@ export class AgentHost {
 
   readonly threadStore: ThreadStore;
   readonly folderStore: FolderStore;
+  readonly todoStore: TodoStore;
   readonly search: SearchStore;
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
@@ -437,6 +439,7 @@ export class AgentHost {
     this.triggers = this.appDb.triggers;
     this.threadStore = this.appDb.threadStore;
     this.folderStore = this.appDb.folders;
+    this.todoStore = this.appDb.todos;
     this.search = this.appDb.search;
     this.settings = this.appDb.settings;
     this.providerConfigs = this.appDb.providerConfigs;
@@ -564,6 +567,7 @@ export class AgentHost {
       // Startup recovery would otherwise relaunch a paused trigger run on the deleted thread.
       this.triggers.killWaitingOccurrencesForThread(threadId, "thread deleted", new Date().toISOString());
       this.search.deleteThread(threadId);
+      this.todoStore.forgetThread(threadId);
       // SqliteSaver.deleteThread skips its lazy schema setup on an unopened database.
       await this.persistence.checkpointer.getTuple({
         configurable: { thread_id: threadId, checkpoint_ns: "" },
@@ -2072,6 +2076,7 @@ export class AgentHost {
             }
           : {}),
         localFolders: () => host.localFolders.list(),
+        todos: host.todoStore,
         ...(host.attachments ? { attachmentResolver: host.attachments.resolver } : {}),
         ...(Object.keys(tools).length > 0 ? { tools } : {}),
         ...(Object.keys(catalog).length > 0 ? { catalog } : {}),

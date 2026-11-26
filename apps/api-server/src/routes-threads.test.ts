@@ -111,12 +111,13 @@ afterEach(() => {
 function fakeHost(history: ForkMessage[], runningThreads: Set<string> = new Set()) {
   const app = openAppDatabase(tmpDb());
   openApps.push(app);
-  const { threadStore, search, threadActivity, folders: folderStore } = app;
+  const { threadStore, search, threadActivity, folders: folderStore, todos: todoStore } = app;
   let updated: { threadId: string; values: unknown } | undefined;
   const purgedCheckpoints: string[] = [];
   const host = {
     threadStore,
     folderStore,
+    todoStore,
     search,
     threadActivity,
     persistence: {
@@ -366,6 +367,10 @@ describe("threadRoutes: events", () => {
     threadStore.create({ threadId: "t1" });
     const changed = await reader.read();
     expect(decoder.decode(changed.value)).toContain("event: changed");
+
+    host.todoStore.create({ title: "Follow up", threadIds: ["t1"] });
+    const todoChanged = await reader.read();
+    expect(decoder.decode(todoChanged.value)).toContain("event: changed");
 
     abort.abort();
     await reader.cancel();

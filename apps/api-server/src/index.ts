@@ -28,6 +28,7 @@ import { toolsRoutes } from "./routes-tools.js";
 import { protocolRoutes } from "./routes-protocol.js";
 import { attachmentRoutes } from "./routes-attachments.js";
 import { folderRoutes } from "./routes-folders.js";
+import { todoRoutes } from "./routes-todos.js";
 import { logRoutes } from "./routes-logs.js";
 import { localFolderRoutes } from "./routes-local-folders.js";
 import { mountWebApp } from "./routes-web.js";
@@ -226,6 +227,7 @@ export function buildApp(
   // LangGraph routes that could otherwise capture the same paths.
   app.route("/", threadRoutes(host));
   app.route("/", folderRoutes(host));
+  app.route("/", todoRoutes(host));
   app.route("/", protocolRoutes(host));
   app.route("/", langGraphRoutes(host));
   app.route("/", graphRoutes(host));

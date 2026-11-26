@@ -34,6 +34,7 @@ import { currentDateTimeMiddleware } from "./current-date-time-middleware.js";
 import { localFolderContextMiddleware } from "./local-folder-context-middleware.js";
 import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middleware.js";
 import { taskDispatchMiddleware } from "./task-dispatch-middleware.js";
+import { todoTools } from "./todo-tools.js";
 import { streamProtocolEvents, toLangGraphInput } from "./stream-protocol.js";
 import { LangGraphThreadGraph, contentText, type CompiledGraph } from "./thread-graph.js";
 
@@ -363,6 +364,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   if (model) params.model = model;
   if (deps.checkpointer) params.checkpointer = deps.checkpointer;
   if (deps.store) params.store = deps.store;
+  if (deps.todos) params.tools = [...todoTools(deps.todos)];
   const rootSkills = collectSkillPaths(deps.rootSkills, deps.skills);
   if (rootSkills.length > 0) params.skills = rootSkills;
 

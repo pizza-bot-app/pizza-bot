@@ -203,6 +203,7 @@ export function threadRoutes(host: AgentHost): Hono {
       };
       const unsubscribeThreads = host.threadStore.subscribe(onChange);
       const unsubscribeFolders = host.folderStore.subscribe(onChange);
+      const unsubscribeTodos = host.todoStore.subscribe(onChange);
       const onAbort = () => wake?.();
       signal.addEventListener("abort", onAbort, { once: true });
 
@@ -226,6 +227,7 @@ export function threadRoutes(host: AgentHost): Hono {
         signal.removeEventListener("abort", onAbort);
         unsubscribeThreads();
         unsubscribeFolders();
+        unsubscribeTodos();
       }
     });
   });

@@ -371,6 +371,7 @@ export class GraphManager {
         pizzaBotSystemPrompt({
           memories: settings.memoriesEnabled,
           subagents: (dependencies.agents?.size ?? 0) > 0,
+          todos: dependencies.todos !== undefined,
         }),
         dependencies.agentAvailability,
       ),

@@ -601,6 +601,15 @@ describe("AgentHost.deleteThread", () => {
     expect(host.triggers.listWaitingOccurrences()).toEqual([]);
   });
 
+  it("unlinks the deleted thread from its Todos but keeps the Todos", async () => {
+    host.threadStore.create({ threadId: "t1", title: "Order" });
+    host.threadStore.create({ threadId: "t2", title: "Receipt" });
+    const todo = host.todoStore.create({ title: "Expense the order", threadIds: ["t1", "t2"] });
+
+    await host.deleteThread("t1");
+    expect(host.todoStore.get(todo.id)?.threadIds).toEqual(["t2"]);
+  });
+
   it("reports deleted:false before the checkpoint schema has been initialized", async () => {
     await expect(host.deleteThread("missing")).resolves.toBe(false);
   });
