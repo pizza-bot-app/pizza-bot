@@ -513,8 +513,9 @@ agents it can hand off to; a check-in is skipped while the last one runs or wait
 on the user, and once the Todo is complete. The background thread has the owner's
 `agentId` and `background: true`, and runs the agent with the ambient tools
 (`runtime-langgraph/src/ambient-tools.ts`): `update_todo` writes the timeline,
-`notify_user` appends a message to the agent's home thread and marks it unread,
-`ask_user` pauses through `HumanInTheLoopMiddleware` with only `respond` allowed,
+`notify_user` appends a message to the agent's home thread, marks it unread,
+indexes it for search, and appends a `message` thread activity (a desktop
+notification), `ask_user` pauses through `HumanInTheLoopMiddleware` with only `respond` allowed,
 and `reassign_todo` hands the Todo on. A handoff needs a note, refuses an agent
 that already handed this Todo on, is capped at `TODO_MAX_HANDOFFS` since the user
 last assigned it, and wakes the new owner at once with occurrence reason
@@ -537,7 +538,8 @@ Refinements on top of check-ins:
   on) posts one message per agent to its home thread; a busy home thread keeps the
   queue for the next run.
 - **Questions surface.** An `ask_user` pause also posts the question to the agent's
-  home thread, so it reads like a message from a colleague.
+  home thread, so it reads like a message from a colleague. That post raises no
+  notification of its own; the paused work thread already does.
 - **Home-thread writes** (`notify_user`, surfaced questions, digests) run one at a
   time per agent and are refused while the home thread runs or waits on a decision,
   because writing past a pending interrupt would discard it. Notifications still
@@ -545,7 +547,15 @@ Refinements on top of check-ins:
 - **Work threads stay work logs.** `run.start` on a background thread is refused
   (`409 work_thread`) and search leaves them out; the check-in prompt carries the
   Todo and its timeline inside a `<todo-record>` block that the ambient prompt
-  marks as data, never instructions.
+  marks as data, never instructions. The web renders user-authored messages
+  without raw HTML, so the delimiters show as text.
+- **Changing hands stops the check-in.** Taking a Todo back, reassigning it, or
+  deleting it cancels its running check-in, closes a paused one, and drops a wake
+  queued for it; a handoff through the run's own `reassign_todo` does not.
+- **Work-thread retention.** Deleting a Todo removes its work threads through the
+  host's thread delete path (checkpoints, search, activity). Each new work thread
+  prunes the Todo's older ones beyond the newest five, sparing any that run or wait
+  on the user, so a workflow-owned Todo cannot accumulate a thread per check-in.
 - **Subtasks.** `request_todo` creates a child Todo (`parentTodoId`) owned by
   another agent, on its parent's schedule, and wakes it; the parent keeps its Todo,
   sees its children in each check-in prompt, and is woken with reason `subtask`
