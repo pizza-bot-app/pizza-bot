@@ -19,25 +19,25 @@ const TAR =
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export const SMOLVM_VERSION = "1.22.2";
+export const SMOLVM_VERSION = "1.37.7";
 
 /** Digests from the release's `checksums.sha256`; smolvm has no Intel macOS build. */
 export const SMOLVM_RELEASES = {
   "darwin-arm64": {
     asset: `smolvm-${SMOLVM_VERSION}-darwin-arm64.tar.gz`,
-    sha256: "a355139fc8e0d67bdf5d8d915062b98401f4c6a02871cf74306a304fb92183ca",
+    sha256: "441c466b07543f605ea4aa70e2090d8a5a0de56e89a37ad9714952d1e25fe50c",
   },
   "linux-x64": {
     asset: `smolvm-${SMOLVM_VERSION}-linux-x86_64.tar.gz`,
-    sha256: "95d626218b88ad42f791c7a46a928591e78cf5a4a4b5777318c77202fb0eb582",
+    sha256: "be1fc77abb10e8af9b54b72baf643aa26f2029d55581cd69e6f625c9562b6248",
   },
   "linux-arm64": {
     asset: `smolvm-${SMOLVM_VERSION}-linux-arm64.tar.gz`,
-    sha256: "74b9a7f2a04c90511a3a644d1dd3e42b92b0beb8143923306438e5986813de61",
+    sha256: "212ca904eebd955a48702661746a4c1099578034ee66fa622d6fb12e353f2c22",
   },
   "win32-x64": {
     asset: `smolvm-${SMOLVM_VERSION}-windows-x86_64.zip`,
-    sha256: "a91e82347faf4c343f8f7eded2c8f86e621ca5b37214874c47b18be4a1c8d81c",
+    sha256: "fb696d43e92e60be7199a84b8afab669ab89c53be5908fd34f74f079b4b4a897",
   },
 };
 

@@ -131,16 +131,14 @@ describe("SmolvmSandbox", () => {
     expect((await sandbox.execute("x")).output).toBe("ran");
   });
 
-  it("reports smolvm's own timeout, which exits 124 silently", async () => {
+  it("replaces smolvm's own timeout notice with ours", async () => {
     const { run } = fakeRunner((args) =>
       args.includes("/bin/sh")
-        ? new Promise<CliResult>((resolve) =>
-            setTimeout(() => resolve({ ...ok(), exitCode: 124 }), 1100),
-          )
+        ? { ...ok("partial"), stderr: "warn\ncommand timed out after 1000ms\n", exitCode: 124 }
         : ok(),
     );
     const result = await new SmolvmSandbox(run, "vm", { timeoutSeconds: 1 }).execute("sleep 9");
-    expect(result.output).toBe("\nCommand timed out after 1s.");
+    expect(result.output).toBe("partial\nwarn\nCommand timed out after 1s.");
     expect(result.exitCode).toBe(124);
   });
 
