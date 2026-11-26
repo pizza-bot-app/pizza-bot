@@ -175,3 +175,93 @@ describe("sandbox", () => {
     ).rejects.toThrow("sandbox protocol");
   });
 });
+
+class ExecuteGrantModel extends BaseChatModel<Record<string, never>> {
+  private call = 0;
+  private boundTools: string[] = [];
+  readonly toolsByCall: string[][] = [];
+  readonly systemPrompts: string[] = [];
+
+  _llmType(): string {
+    return "execute-grant-script";
+  }
+
+  override bindTools(tools: Array<{ name?: string }>): this {
+    this.boundTools = tools.map((tool) => tool.name ?? "");
+    return this;
+  }
+
+  async _generate(
+    messages: BaseMessage[],
+  ): Promise<{ generations: Array<{ message: AIMessage; text: string }> }> {
+    const call = this.call++;
+    this.toolsByCall.push(this.boundTools);
+    this.systemPrompts.push(
+      messages.filter(SystemMessage.isInstance).map((message) => message.text).join("\n"),
+    );
+    const message =
+      call === 0
+        ? toolCall("delegate", "task", { description: "Build it.", subagent_type: "builder" })
+        : call === 1
+          ? toolCall("build", "execute", { command: "make" })
+          : new AIMessage({ content: "done" });
+    return { generations: [{ message, text: String(message.content) }] };
+  }
+}
+
+describe("builtin:execute", () => {
+  it("lets an agent definition that grants it run commands in the thread's VM", async () => {
+    const model = new ExecuteGrantModel({});
+    const sandbox = new FakeSandbox();
+    const builder: AgentCatalog = new Map([
+      [
+        "builder",
+        {
+          id: "builder",
+          name: "Builder",
+          description: "Builds the project.",
+          systemPrompt: "Build the project.",
+          declaredTools: ["builtin:execute"],
+          skills: [],
+          interruptOn: {},
+          source: "user",
+        },
+      ],
+    ]);
+    const agent = await createPizzaBotAgent("Delegate builds.", { model, agents: builder, sandbox });
+
+    for await (const _ of agent.streamProtocol(
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Build." }] }] },
+      { threadId: `execute_${Math.random().toString(36).slice(2)}` },
+    )) {
+      // Drain the stream so delegated work completes.
+    }
+
+    expect(sandbox.commands).toEqual(["make"]);
+    expect(model.toolsByCall[1]).toContain("execute");
+    expect(model.systemPrompts[1]).toContain("isolated Linux virtual machine");
+  });
+
+  it("leaves an agent that grants it unavailable without a sandbox", async () => {
+    const model = new ExecuteGrantModel({});
+    const builder: AgentCatalog = new Map([
+      [
+        "builder",
+        {
+          id: "builder",
+          name: "Builder",
+          description: "Builds the project.",
+          systemPrompt: "Build the project.",
+          declaredTools: ["builtin:execute"],
+          skills: [],
+          interruptOn: {},
+          source: "user",
+        },
+      ],
+    ]);
+    const warnings: string[] = [];
+    const logger = { warn: (message: string) => warnings.push(message), info() {}, error() {}, debug() {} };
+    await createPizzaBotAgent("Delegate builds.", { model, agents: builder, logger } as never);
+    expect(warnings.join("\n")).toMatch(/"builder" disabled: no shell sandbox is configured/);
+  });
+});

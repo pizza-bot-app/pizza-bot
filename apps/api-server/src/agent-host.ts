@@ -1,6 +1,8 @@
 import {
   BUILTIN_EVAL_TOOL_DESCRIPTION,
   BUILTIN_EVAL_TOOL_REF,
+  BUILTIN_EXECUTE_TOOL_DESCRIPTION,
+  BUILTIN_EXECUTE_TOOL_REF,
   ModelRegistry,
   ModelUnavailableError,
   projectAgentReadiness,
@@ -662,6 +664,16 @@ export class AgentHost {
     return this.readinessState;
   }
 
+  /** Built-in tools an agent definition can grant on this host. */
+  builtinTools(): Array<{ ref: string; name: string; description: string }> {
+    return [
+      { ref: BUILTIN_EVAL_TOOL_REF, name: "eval", description: BUILTIN_EVAL_TOOL_DESCRIPTION },
+      ...(this.sandbox
+        ? [{ ref: BUILTIN_EXECUTE_TOOL_REF, name: "execute", description: BUILTIN_EXECUTE_TOOL_DESCRIPTION }]
+        : []),
+    ];
+  }
+
   async toolCatalog(): Promise<ToolCatalog> {
     await this.warmup;
     return this.mcpCatalog;
@@ -792,10 +804,7 @@ export class AgentHost {
 
     const catalog = await this.toolCatalog();
     const tools: GeneratorTool[] = [
-      {
-        ref: BUILTIN_EVAL_TOOL_REF,
-        description: BUILTIN_EVAL_TOOL_DESCRIPTION,
-      },
+      ...this.builtinTools().map(({ ref, description }) => ({ ref, description })),
       ...Object.entries(catalog).flatMap(([server, names]) => [
         {
           ref: `mcp:${server}:*`,
@@ -1135,7 +1144,7 @@ export class AgentHost {
         catalog,
         tools: new Set(Object.keys(tools)),
         mcpServers,
-        builtins: new Set([BUILTIN_EVAL_TOOL_REF]),
+        builtins: new Set(this.builtinTools().map((tool) => tool.ref)),
         skills: new Set(skills.keys()),
       }),
       skills,

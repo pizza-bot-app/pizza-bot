@@ -22,6 +22,7 @@ import {
   type InterruptConfig,
   type InterruptOnPolicy,
   BUILTIN_EVAL_TOOL_REF,
+  BUILTIN_EXECUTE_TOOL_REF,
   DEFAULT_SETTINGS,
 } from "@pizza-bot/core";
 import type { ProtocolEvent } from "@langchain/langgraph";
@@ -156,7 +157,7 @@ function hasEvalTool(refs: readonly string[]): boolean {
 }
 
 function mcpToolRefs(refs: readonly string[]): string[] {
-  return refs.filter((ref) => ref !== BUILTIN_EVAL_TOOL_REF);
+  return refs.filter((ref) => !ref.startsWith("builtin:"));
 }
 
 /**
@@ -240,6 +241,7 @@ export async function resolveAgentSubagents(
   agents: AgentCatalog | undefined,
   deps: RuntimeDeps,
   backend: AnyBackendProtocol,
+  executingBackend?: AnyBackendProtocol,
 ): Promise<readonly SubAgent[] | undefined> {
   if (!agents?.size) return undefined;
   const logger = deps.logger;
@@ -251,9 +253,15 @@ export async function resolveAgentSubagents(
     try {
       const model = deps.agentModels?.get(agent.id) ?? deps.model;
       if (!model) throw new Error("no model resolved");
+      const executes = agent.declaredTools.includes(BUILTIN_EXECUTE_TOOL_REF);
+      const filesystemBackend = executes ? executingBackend : backend;
+      if (!filesystemBackend) throw new Error("no shell sandbox is configured");
       // Declarative subagents bypass createDeepAgent's per-subagent defaults, so
-      // filesystem and skills middleware are mounted here, on the shared backend.
-      const middleware: unknown[] = [createFilesystemMiddleware({ backend })];
+      // filesystem and skills middleware are mounted here. The filesystem
+      // middleware offers `execute` exactly when its backend can run commands.
+      const middleware: unknown[] = [
+        createFilesystemMiddleware({ backend: filesystemBackend }),
+      ];
       const skillSources = collectSkillPaths(agent.skills, deps.skills);
       if (skillSources.length > 0) {
         middleware.push(createSkillsMiddleware({ backend, sources: skillSources }));
@@ -275,10 +283,11 @@ export async function resolveAgentSubagents(
       const who = `agent "${agent.id}"`;
       const tools = resolveToolRefs(mcpToolRefs(agent.declaredTools), deps, who);
       const interruptOn = qualifyInterruptOn(agent.interruptOn, deps.catalog, who, logger);
+      const systemPrompt = agent.systemPrompt || agent.description;
       return {
         name: agent.id,
         description: agent.description,
-        systemPrompt: agent.systemPrompt || agent.description,
+        systemPrompt: executes ? `${systemPrompt}\n\n${SANDBOX_PROMPT}` : systemPrompt,
         model,
         tools,
         middleware,
@@ -334,7 +343,7 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
     ...(sandbox ? { sandbox } : {}),
   };
   const backend = buildBackend({ ...backendOptions, sandboxExecute: true });
-  // Subagents share /workspace/ but not `execute`, which no agent definition can grant.
+  // Subagents share /workspace/; only those granted `builtin:execute` can run commands in it.
   const subagentBackend = sandbox ? buildBackend(backendOptions) : backend;
 
   const middleware: unknown[] = [
@@ -361,7 +370,12 @@ async function assemblePizzaBot(systemPrompt: string, deps: RuntimeDeps): Promis
   const model = deps.model;
   // Declarative, not compiled: DeepAgents rebuilds a declarative spec per call to
   // apply an eval task()'s responseSchema, and rejects one for a compiled subagent.
-  const subagents = await resolveAgentSubagents(deps.agents, deps, subagentBackend);
+  const subagents = await resolveAgentSubagents(
+    deps.agents,
+    deps,
+    subagentBackend,
+    sandbox ? backend : undefined,
+  );
 
   // The roster goes to this middleware alone, never to createDeepAgent: it replaces
   // DeepAgents' own by name, so a roster given there would only gain upstream's

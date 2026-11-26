@@ -215,8 +215,8 @@ in `core/src/protocol-types.ts`:
   inherit the thread's `/` state files and their writes merge back, and the
   memory setting and folder grants apply to the whole thread rather than to one
   agent. Enabled skills are served read-only from the catalog under `/skills/`,
-  so their files never enter a checkpoint. Only the orchestrator's backend can
-  `execute`; no agent definition can grant it:
+  so their files never enter a checkpoint. Only the orchestrator and agents that
+  grant `builtin:execute` can run commands in `/workspace/`:
 
   ```mermaid
   flowchart LR
@@ -232,8 +232,8 @@ in `core/src/protocol-types.ts`:
     CB -->|"/local/&lt;id&gt;/"| LF["Granted folders on disk<br/>read-only unless the grant allows writes"]
     CB -->|"/workspace/"| VM["Thread's smolvm VM<br/>only when PIZZA_SANDBOX=smolvm"]
   ```
-- **Shell sandbox** (opt-in, `PIZZA_SANDBOX=smolvm`) gives the orchestrator
-  DeepAgents' `execute` tool, backed by one persistent [smolvm](https://github.com/smol-machines/smolvm)
+- **Shell sandbox** (opt-in, `PIZZA_SANDBOX=smolvm`) gives the orchestrator, and
+  any agent definition that grants `builtin:execute`, DeepAgents' `execute` tool, backed by one persistent [smolvm](https://github.com/smol-machines/smolvm)
   microVM per thread (`runtime-langgraph/src/smolvm-sandbox.ts`). DeepAgents
   executes only through a composite's default backend, and ours is checkpoint
   state, so `buildBackend` forwards `execute` to the sandbox and mounts the

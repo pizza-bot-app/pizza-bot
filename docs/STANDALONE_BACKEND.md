@@ -234,9 +234,9 @@ configured there.
 
 ### Shell sandbox
 
-`PIZZA_SANDBOX=smolvm` gives the agent an `execute` tool that runs commands in
-a [smolvm](https://github.com/smol-machines/smolvm) microVM, one per
-conversation, with files shared at `/workspace/`. The backend artifact does not
+`PIZZA_SANDBOX=smolvm` gives Pizza Bot, and any agent that grants
+`builtin:execute`, an `execute` tool that runs commands in a
+[smolvm](https://github.com/smol-machines/smolvm) microVM, one per conversation, with files shared at `/workspace/`. The backend artifact does not
 bundle smolvm: install a release on the host and point `PIZZA_SMOLVM_DIR` at
 the unpacked directory, or `PIZZA_SMOLVM_BIN` at a `smolvm` on another path.
 Linux hosts need read/write access to `/dev/kvm`. smolvm keeps VM disks under
