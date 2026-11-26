@@ -1,9 +1,38 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { AuditedSpan, Citation, SupportLine } from "@pizza-bot/core";
+import {
+  groundingSpans,
+  segmentAuditedText,
+  withoutGroundingArgument,
+  type GroundingGap,
+  type GroundingSegment,
+  type GroundingTier,
+} from "@/projection";
 
 type JsonPath = Array<string | number>;
 
+/**
+ * What a rendered citation needs beyond its tier: whether the server has graded it yet, and
+ * the link back to its evidence card. The stored record renders through this too, always
+ * `ready` — a verdict already reached must not be redrawn by what this browser can load now.
+ */
+export interface GroundingLinks {
+  /** `checking` until the server's grading arrives; `unavailable` if it never will. */
+  status: "checking" | "ready" | "unavailable";
+  hoveredId: string | null;
+  onHover: (id: string | null) => void;
+  /** Opens the cited evidence cards, with the span's cited lines picked out. */
+  onSelect: (cites: readonly Citation[]) => void;
+}
+
+/** A live citation: the links, plus the tiers the server graded for this call's spans. */
+export interface GroundingView extends GroundingLinks {
+  spans: readonly AuditedSpan[];
+}
+
 interface ApprovalArgumentsProps {
   value: unknown;
+  grounding?: GroundingView | undefined;
 }
 
 interface ApprovalArgumentEditorProps {
@@ -179,29 +208,184 @@ function ArgumentValue({ value }: { value: unknown }) {
   return <PrimitiveValue value={value} />;
 }
 
-export function ApprovalArguments({ value }: ApprovalArgumentsProps) {
-  if (isRecord(value)) {
-    const entries = Object.entries(value);
+/**
+ * Two display states sit beside the audited tiers, because neither is a verdict on the
+ * draft: a body still in flight, and one the reviewer's browser could not read at all.
+ */
+export type SpanTier = GroundingTier | "pending" | "unchecked";
+
+/** A figure no citation covers; stated as coverage, since absence is not a falsehood. */
+export const UNBACKED_TITLE = "No citation covers this figure, so no source was checked for it.";
+
+/** One wording per tier, so the reviewer's card and the durable record read alike. */
+export function groundingTitle(
+  tier: SpanTier,
+  gap?: GroundingGap,
+  support?: readonly SupportLine[],
+): string {
+  if (tier === "verifiable" && support && support.length > 0) {
+    const lines = support.map((line) => `[${line.line}] ${line.text}`).join("\n");
+    return `${groundingTitle(tier, gap)}\n\nThe source says:\n${lines}`;
+  }
+  if (tier === "pending") return "Checking the cited source…";
+  if (tier === "unchecked") {
+    return "The check could not be loaded, so nothing here was checked.";
+  }
+  if (tier === "unresolved") {
+    return "This quote is not in the text that was sent, so it was never checked against the source.";
+  }
+  if (tier === "verifiable") {
+    return "The claim checker found this in the cited lines of the source. Click to read them.";
+  }
+  switch (gap?.reason) {
+    case "refuted":
+      return "The claim checker found that the cited lines do not support this. Click to read them.";
+    case "figures":
+      return `Not in the cited lines: ${gap.tokens.join(", ")}. Click to read them.`;
+    case "bad-lines":
+      return "This citation names lines the cited source does not have, so it points at nothing.";
+    case "broad-citation":
+      return "This cites too much of the source to check, so it was not checked. Click to read it.";
+    case "no-entry":
+      return "The cited source is not in this thread's ledger.";
+    case "unjudged":
+      return "Claim checking is off, so this citation was not checked. Turn it on in Settings.";
+    case "judge-error":
+      return "The claim checker could not be reached, so this was not checked. Click to read the source.";
+    case "unclear":
+      return "The claim checker could not tell whether the cited source supports this. Click to read it.";
+    case "unverified-support":
+      return "The claim checker called this supported, but the lines it relied on do not state what the claim does, so the verdict was not trusted. Click to read them.";
+    default:
+      return "Nothing in this phrase could be checked against the cited source.";
+  }
+}
+
+function GroundedSpan({
+  segment,
+  links,
+}: {
+  segment: GroundingSegment;
+  links: GroundingLinks;
+}) {
+  const cites = segment.cites ?? [];
+  // Hovering lights the first source's card; a click opens every cited one.
+  const id = cites[0]?.evidenceId ?? null;
+  const hovered = links.hoveredId !== null && cites.some((cite) => cite.evidenceId === links.hoveredId);
+  const tier: SpanTier =
+    links.status === "unavailable" ? "unchecked" : links.status === "checking" ? "pending" : segment.tier;
+  // A button is an atomic inline box in Chromium, so a multi-word citation would
+  // refuse to wrap mid-span; only a real inline element flows with the sentence.
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className={`grounding-span grounding-${tier}${hovered ? " hovered" : ""}`}
+      title={groundingTitle(tier, segment.gap, segment.support)}
+      onMouseEnter={() => links.onHover(id)}
+      onMouseLeave={() => links.onHover(null)}
+      onFocus={() => links.onHover(id)}
+      onBlur={() => links.onHover(null)}
+      onClick={() => links.onSelect(cites)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          links.onSelect(cites);
+        }
+      }}
+    >
+      {segment.text}
+    </span>
+  );
+}
+
+/** The one place a tier becomes a mark on the page, so every surface reads a tier alike. */
+export function GroundedSegments({
+  segments,
+  links,
+}: {
+  segments: readonly GroundingSegment[];
+  links: GroundingLinks;
+}) {
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.cites !== undefined ? (
+          <GroundedSpan key={index} segment={segment} links={links} />
+        ) : segment.unbacked ? (
+          <span key={index} className="grounding-unbacked" title={UNBACKED_TITLE}>
+            {segment.text}
+          </span>
+        ) : (
+          <Fragment key={index}>{segment.text}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+function GroundedText({
+  text,
+  spans,
+  grounding,
+}: {
+  text: string;
+  spans: readonly AuditedSpan[];
+  grounding: GroundingView;
+}) {
+  const segments = useMemo(() => segmentAuditedText(text, spans), [text, spans]);
+  return (
+    <span className="approval-argument-scalar">
+      <span className="approval-argument-value">
+        <GroundedSegments segments={segments} links={grounding} />
+      </span>
+    </span>
+  );
+}
+
+export function ApprovalArguments({ value, grounding }: ApprovalArgumentsProps) {
+  // Until the server's grading arrives, the declared spans still mark where citations sit.
+  const declared = groundingSpans(value);
+  const spans: readonly AuditedSpan[] =
+    grounding?.status === "ready"
+      ? grounding.spans
+      : declared.map((span) => ({ ...span, tier: "inconclusive" as const }));
+  // Citations are provenance, not content: they annotate the arguments, never join them.
+  const shown = withoutGroundingArgument(value);
+
+  if (isRecord(shown)) {
+    const entries = Object.entries(shown);
     if (entries.length === 0) {
       return <div className="approval-arguments-empty">No arguments</div>;
     }
     return (
       <dl className="approval-arguments">
-        {entries.map(([key, item]) => (
-          <div className="approval-argument" key={key}>
-            <dt title={key}>{formatArgumentLabel(key)}</dt>
-            <dd>
-              <ArgumentValue value={item} />
-            </dd>
-          </div>
-        ))}
+        {entries.map(([key, item]) => {
+          // A call that cites anything is a grounded call, so every one of its text
+          // arguments is read for coverage — including the ones that cite nothing, where
+          // an uncovered figure is exactly what would otherwise pass unremarked.
+          const cited =
+            grounding && typeof item === "string" ? spans.filter((span) => span.arg === key) : [];
+          return (
+            <div className="approval-argument" key={key}>
+              <dt title={key}>{formatArgumentLabel(key)}</dt>
+              <dd>
+                {grounding && typeof item === "string" && item !== "" ? (
+                  <GroundedText text={item} spans={cited} grounding={grounding} />
+                ) : (
+                  <ArgumentValue value={item} />
+                )}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
     );
   }
 
   return (
     <div className="approval-arguments approval-arguments-single">
-      <ArgumentValue value={value} />
+      <ArgumentValue value={shown} />
     </div>
   );
 }
@@ -444,8 +628,12 @@ export function ApprovalArgumentEditor({
   onChange,
   onRawChange,
 }: ApprovalArgumentEditorProps) {
+  // Editing a quoted argument invalidates its citations, so the fields view hides them;
+  // the JSON view still shows them, and edits keep the key because paths are named.
+  const shown = withoutGroundingArgument(value);
+  const fields = isStructured(shown) ? shown : undefined;
   const supportsFields =
-    isStructured(value) && (Array.isArray(value) ? value.length > 0 : Object.keys(value).length > 0);
+    fields !== undefined && (Array.isArray(fields) ? fields.length > 0 : Object.keys(fields).length > 0);
   const [mode, setMode] = useState<"fields" | "json">(supportsFields ? "fields" : "json");
   const errorId = useId();
 
@@ -480,10 +668,10 @@ export function ApprovalArgumentEditor({
         </div>
       )}
 
-      {mode === "fields" && supportsFields ? (
+      {mode === "fields" && supportsFields && fields ? (
         <div className="approval-fields">
-          {Array.isArray(value) ? (
-            value.map((item, index) => (
+          {Array.isArray(fields) ? (
+            fields.map((item, index) => (
               <ArgumentField
                 key={index}
                 label={`Item ${index + 1}`}
@@ -493,7 +681,7 @@ export function ApprovalArgumentEditor({
               />
             ))
           ) : (
-            Object.entries(value).map(([key, item]) => (
+            Object.entries(fields).map(([key, item]) => (
               <ArgumentField
                 key={key}
                 label={formatArgumentLabel(key)}

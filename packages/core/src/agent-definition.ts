@@ -27,12 +27,22 @@ export const interruptConfigSchema = z.union([
     allowedDecisions: z.array(
       z.enum(["approve", "edit", "reject", "respond"]) satisfies z.ZodType<HitlDecision>,
     ).min(1),
+    verifiedArgs: z.array(z.string().min(1)).min(1).optional(),
   }),
 ]);
 
 export type InterruptConfig =
   | boolean
-  | { allowedDecisions: HitlDecision[] };
+  | {
+      allowedDecisions: HitlDecision[];
+      /**
+       * Arguments whose prose the model must cite. Grounding is only meaningful
+       * behind an approval gate, so it rides on the same per-tool config.
+       * Explicitly `| undefined` so zod-parsed configs stay assignable under
+       * `exactOptionalPropertyTypes`.
+       */
+      verifiedArgs?: string[] | undefined;
+    };
 
 export type InterruptOnPolicy = Record<string, InterruptConfig>;
 
@@ -135,16 +145,21 @@ export function parseInterruptOn(frontmatter: Record<string, unknown>): Interrup
       parsed[ref] = config;
       continue;
     }
-    const decisions = config && typeof config === "object" && !Array.isArray(config)
-      ? (config as { allowedDecisions?: unknown }).allowedDecisions
+    const policy = config && typeof config === "object" && !Array.isArray(config)
+      ? config as { allowedDecisions?: unknown; verifiedArgs?: unknown }
       : undefined;
+    const decisions = policy?.allowedDecisions;
     const allowedDecisions = Array.isArray(decisions)
       ? decisions.filter(
           (decision): decision is HitlDecision =>
             typeof decision === "string" && HITL_DECISIONS.has(decision as HitlDecision),
         )
       : [];
-    parsed[ref] = { allowedDecisions: allowedDecisions.length > 0 ? allowedDecisions : DEFAULT_DECISIONS };
+    const verifiedArgs = stringList(policy?.verifiedArgs);
+    parsed[ref] = {
+      allowedDecisions: allowedDecisions.length > 0 ? allowedDecisions : DEFAULT_DECISIONS,
+      ...(verifiedArgs.length > 0 ? { verifiedArgs } : {}),
+    };
   }
   return parsed;
 }

@@ -4,6 +4,7 @@ import {
   expandToolPattern,
   InvalidWildcardError,
   isWildcard,
+  type InterruptOnPolicy,
   type ToolCatalog,
 } from "@pizza-bot/core";
 import type { ToolCatalogInfo } from "@/api-client";
@@ -129,4 +130,25 @@ export function coveringWildcard(ref: string, refs: readonly string[]): string |
       otherSource === "mcp" && otherServer === server && pattern.endsWith("*") && own.startsWith(pattern.slice(0, -1))
     );
   });
+}
+
+/**
+ * Unchecking stashes the tool's policy and rechecking restores it, so settings
+ * the editor has no control for (such as `verifiedArgs`) survive the round trip.
+ */
+export function toggleAskFirst(
+  policy: InterruptOnPolicy,
+  ref: string,
+  checked: boolean,
+  unchecked: Map<string, InterruptOnPolicy[string]>,
+): InterruptOnPolicy {
+  const next = { ...policy };
+  if (checked) {
+    next[ref] = unchecked.get(ref) ?? { allowedDecisions: ["approve", "edit", "reject"] };
+  } else {
+    const removed = next[ref];
+    if (removed) unchecked.set(ref, removed);
+    delete next[ref];
+  }
+  return next;
 }

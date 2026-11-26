@@ -1,3 +1,5 @@
+import type { GroundingJudgeSetting } from "./grounding-judge.js";
+
 export type ThemePreference = "light" | "dark" | "system";
 
 export interface AppSettings {
@@ -15,6 +17,8 @@ export interface AppSettings {
   maxToolCalls: number;
   /** Per-run subagent tool-call limit; -1 disables the limit. */
   maxSubagentToolCalls: number;
+  /** Which model checks cited claims at an approval gate; `off` leaves every claim unchecked. */
+  groundingJudge: GroundingJudgeSetting;
 }
 
 export type AppSettingsPatch = Partial<AppSettings>;
@@ -26,6 +30,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableAutomations: false,
   maxToolCalls: 100,
   maxSubagentToolCalls: 150,
+  groundingJudge: "off",
 };
 
 /** Bounds the persona addendum so it cannot bloat every prompt unboundedly. */
@@ -41,4 +46,12 @@ export function isPromptAddendum(value: unknown): value is string {
 
 export function isMaxToolCalls(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && (value === -1 || value > 0);
+}
+
+export function isGroundingJudgeSetting(value: unknown): value is GroundingJudgeSetting {
+  return (
+    typeof value === "string" &&
+    (value === "off" || value === "auto" || /^[^:\s]+:\S+$/.test(value)) &&
+    value.length <= 256
+  );
 }

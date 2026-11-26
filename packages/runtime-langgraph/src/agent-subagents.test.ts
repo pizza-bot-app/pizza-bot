@@ -255,6 +255,48 @@ describe("resolveAgentSubagents", () => {
     const resolved = await resolve(catalog({ ...agent("terse"), systemPrompt: "" }));
     expect(resolved![0]!.systemPrompt).toBe("terse description");
   });
+
+  it("gives a citing agent an evidence ledger, and only a citing agent", async () => {
+    const send = {
+      name: "outlook__send",
+      schema: { type: "object", properties: { body: { type: "string" } }, required: ["body"] },
+    };
+    const deps = {
+      tools: { "mcp:outlook:send": send, "mcp:outlook:search": { name: "outlook__search" } },
+      catalog: { outlook: ["send", "search"] },
+      evidenceRecorder: async () => undefined,
+    };
+    const grounded = agent("citer", ["mcp:outlook:send", "mcp:outlook:search"], {
+      "mcp:outlook:send": { allowedDecisions: ["approve"], verifiedArgs: ["body"] },
+    });
+    const ungrounded = agent("gater", ["mcp:outlook:send"], {
+      "mcp:outlook:send": { allowedDecisions: ["approve"] },
+    });
+
+    const resolved = await resolve(catalog(grounded, ungrounded), deps);
+    const names = (index: number) =>
+      resolved![index]!.middleware?.map((middleware) => middleware.name);
+    expect(names(0)).toContain("evidenceLedger");
+    expect(names(1)).not.toContain("evidenceLedger");
+  });
+
+  it("omits the ledger when the server wired no recorder", async () => {
+    const resolved = await resolve(
+      catalog(agent("citer", ["mcp:outlook:send"], {
+        "mcp:outlook:send": { allowedDecisions: ["approve"], verifiedArgs: ["body"] },
+      })),
+      {
+        tools: {
+          "mcp:outlook:send": {
+            name: "outlook__send",
+            schema: { type: "object", properties: { body: { type: "string" } } },
+          },
+        },
+        catalog: { outlook: ["send"] },
+      },
+    );
+    expect(resolved![0]!.middleware?.map((m) => m.name)).not.toContain("evidenceLedger");
+  });
 });
 
 describe("eval capability", () => {

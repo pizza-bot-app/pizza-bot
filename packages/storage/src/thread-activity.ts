@@ -1,5 +1,8 @@
 import Database from "better-sqlite3";
 import type {
+  ApprovalDecision,
+  ApprovalVerdict,
+  ApprovalVerdictSpan,
   ThreadActivityEvent,
   ThreadActivityOutcome,
 } from "@pizza-bot/core";
@@ -149,6 +152,140 @@ function toThreadActivity(row: ThreadActivityRow): ThreadActivityEvent {
     outcome: row.outcome as ThreadActivityOutcome,
     interruptIds,
     threadTitle: row.thread_title,
+    createdAt: row.created_at,
+  };
+}
+
+interface ApprovalVerdictRow {
+  seq: number;
+  verdict_id: string;
+  thread_id: string;
+  run_id: string;
+  interrupt_id: string;
+  tool_name: string;
+  decision: string;
+  args: string | null;
+  spans: string;
+  created_at: string;
+}
+
+export interface AppendApprovalVerdict {
+  /** Stable per approved action, so a retried resume cannot double-record it. */
+  verdictId: string;
+  threadId: string;
+  runId: string;
+  interruptId: string;
+  toolName: string;
+  decision: ApprovalDecision;
+  args?: unknown;
+  spans: readonly ApprovalVerdictSpan[];
+  createdAt?: string;
+}
+
+/**
+ * What the server proved about an action's citations at the moment a human approved
+ * it. Rows outlive the evidence bodies their spans were audited against, and nothing
+ * but a thread deletion removes them.
+ */
+export class ApprovalVerdictStore {
+  constructor(private readonly db: Database.Database) {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS approval_verdicts (
+        seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+        verdict_id   TEXT NOT NULL UNIQUE,
+        thread_id    TEXT NOT NULL,
+        run_id       TEXT NOT NULL,
+        interrupt_id TEXT NOT NULL,
+        tool_name    TEXT NOT NULL,
+        decision     TEXT NOT NULL,
+        args         TEXT,
+        spans        TEXT NOT NULL,
+        created_at   TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_approval_verdicts_thread
+        ON approval_verdicts (thread_id, seq);
+    `);
+  }
+
+  append(input: AppendApprovalVerdict): {
+    verdict: ApprovalVerdict;
+    created: boolean;
+  } {
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO approval_verdicts
+           (verdict_id, thread_id, run_id, interrupt_id, tool_name, decision, args, spans, created_at)
+         VALUES
+           (@verdict_id, @thread_id, @run_id, @interrupt_id, @tool_name, @decision, @args, @spans, @created_at)`,
+      )
+      .run({
+        verdict_id: input.verdictId,
+        thread_id: input.threadId,
+        run_id: input.runId,
+        interrupt_id: input.interruptId,
+        tool_name: input.toolName,
+        decision: input.decision,
+        args: input.args === undefined ? null : JSON.stringify(input.args),
+        spans: JSON.stringify(input.spans),
+        created_at: input.createdAt ?? new Date().toISOString(),
+      });
+    const verdict = this.byVerdictId(input.verdictId);
+    if (!verdict) throw new Error(`failed to append approval verdict ${input.verdictId}`);
+    return { verdict, created: result.changes === 1 };
+  }
+
+  /** Oldest first, so a thread's approvals read in the order the reviewer made them. */
+  listByThread(threadId: string): ApprovalVerdict[] {
+    return this.db
+      .prepare<[string], ApprovalVerdictRow>(
+        "SELECT * FROM approval_verdicts WHERE thread_id = ? ORDER BY seq ASC",
+      )
+      .all(threadId)
+      .map(toApprovalVerdict);
+  }
+
+  deleteByThread(threadId: string): number {
+    return this.db
+      .prepare<[string]>("DELETE FROM approval_verdicts WHERE thread_id = ?")
+      .run(threadId).changes;
+  }
+
+  private byVerdictId(verdictId: string): ApprovalVerdict | undefined {
+    const row = this.db
+      .prepare<[string], ApprovalVerdictRow>(
+        "SELECT * FROM approval_verdicts WHERE verdict_id = ?",
+      )
+      .get(verdictId);
+    return row ? toApprovalVerdict(row) : undefined;
+  }
+}
+
+function toApprovalVerdict(row: ApprovalVerdictRow): ApprovalVerdict {
+  let spans: ApprovalVerdictSpan[] = [];
+  try {
+    const parsed = JSON.parse(row.spans) as unknown;
+    if (Array.isArray(parsed)) spans = parsed as ApprovalVerdictSpan[];
+  } catch {
+    // A corrupt span list must not hide the fact that this action was approved.
+  }
+  let args: unknown;
+  if (row.args !== null) {
+    try {
+      args = JSON.parse(row.args);
+    } catch {
+      // Same: unreadable arguments leave the tiers, which are the verdict itself.
+    }
+  }
+  return {
+    seq: row.seq,
+    verdictId: row.verdict_id,
+    threadId: row.thread_id,
+    runId: row.run_id,
+    interruptId: row.interrupt_id,
+    toolName: row.tool_name,
+    decision: row.decision as ApprovalDecision,
+    ...(args === undefined ? {} : { args }),
+    spans,
     createdAt: row.created_at,
   };
 }

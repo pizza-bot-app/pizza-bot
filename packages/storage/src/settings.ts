@@ -2,6 +2,7 @@
 import Database from "better-sqlite3";
 import {
   DEFAULT_SETTINGS,
+  isGroundingJudgeSetting,
   isMaxToolCalls,
   isPromptAddendum,
   isThemePreference,
@@ -61,6 +62,9 @@ export class SettingsStore {
       maxSubagentToolCalls: isMaxToolCalls(stored.maxSubagentToolCalls)
         ? stored.maxSubagentToolCalls
         : DEFAULT_SETTINGS.maxSubagentToolCalls,
+      groundingJudge: isGroundingJudgeSetting(stored.groundingJudge)
+        ? stored.groundingJudge
+        : DEFAULT_SETTINGS.groundingJudge,
     };
   }
 
@@ -92,6 +96,9 @@ export class SettingsStore {
     }
     if (patch.maxSubagentToolCalls !== undefined) {
       entries.push({ key: "maxSubagentToolCalls", value: JSON.stringify(patch.maxSubagentToolCalls) });
+    }
+    if (patch.groundingJudge !== undefined) {
+      entries.push({ key: "groundingJudge", value: JSON.stringify(patch.groundingJudge) });
     }
     if (entries.length > 0) writeAll(entries);
     return this.get();
