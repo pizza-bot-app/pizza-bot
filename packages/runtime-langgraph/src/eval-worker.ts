@@ -65,6 +65,12 @@ const session = new ReplSession(data.sessionId, {
   }),
 });
 
+// `eval` is the only public way to start the QuickJS runtime; the session queues
+// guest evals behind this one, and the host's watchdog waits for `ready`.
+void session.eval("undefined", -1).then(() => {
+  port.postMessage({ kind: "ready" } as WorkerToHost);
+});
+
 port.on("message", (message: HostToWorker) => {
   if (message.kind === "settle") {
     const entry = pending.get(message.id);
