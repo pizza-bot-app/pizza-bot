@@ -76,9 +76,8 @@ if (process.platform === "win32") {
 
 const iconsDir = path.join(repoRoot, "assets", "icons");
 
-const LINUX_DESCRIPTION = "An inbox for asynchronous AI work";
-const LINUX_PRODUCT_DESCRIPTION =
-  "An inbox for asynchronous AI work, built on DeepAgents and LangGraph.";
+const LINUX_DESCRIPTION = "A local-first inbox for long-running AI work";
+const LINUX_PRODUCT_DESCRIPTION = "A local-first inbox for long-running AI work.";
 // Forge appends the per-platform extension, so these stay extensionless. macOS
 // uses its own variant, padded for the rounded-rect mask Apple applies.
 const appIcon = path.join(iconsDir, process.platform === "darwin" ? "icon-mac" : "icon");
