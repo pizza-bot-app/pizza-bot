@@ -567,6 +567,20 @@ describe("TriggerService: graph targets", () => {
     svc.stop();
   });
 
+  it("leaves a waiting occurrence to the resume this process is already running", async () => {
+    const store = memStore();
+    waitingOccurrence(store, { graphId: "g" });
+    const m = mockLauncher();
+    const launcher: RunLauncher = { ...m.launcher, isRunning: (threadId) => threadId === "thread_paused" };
+    const svc = new TriggerService(launcher, store, { log: () => {}, awaitsInput: async () => false });
+    svc.start();
+    await settle();
+
+    expect(m.starts).toHaveLength(0);
+    expect(store.getOccurrence("occ")?.status).toBe("waiting");
+    svc.stop();
+  });
+
   it("leaves an occurrence waiting while its thread still awaits an answer", async () => {
     const store = memStore();
     waitingOccurrence(store, { graphId: "g" });

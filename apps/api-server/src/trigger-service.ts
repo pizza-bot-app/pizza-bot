@@ -27,6 +27,7 @@ export interface RunScopedEvent {
 export interface RunLauncher {
   start(threadId: string, input: RunInput, opts?: Partial<RunOptions>): RunHandle;
   subscribe(listener: (evt: RunScopedEvent) => void): Unsubscribe;
+  isRunning?(threadId: string): boolean;
 }
 
 export interface TriggerServiceOptions {
@@ -262,7 +263,9 @@ export class TriggerService {
   private async recoverInterruptedResume(occurrence: TriggerOccurrence): Promise<void> {
     if (!occurrence.threadId) return;
     const paused = await this.awaitsInput!(occurrence.threadId).catch(() => true);
-    if (paused) return;
+    // Recovery can run long after boot (automations enabled later), by which time
+    // the thread may be running a resume this process started; that run closes it.
+    if (paused || this.launcher.isRunning?.(occurrence.threadId)) return;
     const now = this.nowIso();
     if (!this.store.reopenWaitingOccurrence(occurrence.id, now)) return;
     if (!this.store.get(occurrence.triggerId)?.graphId) {
