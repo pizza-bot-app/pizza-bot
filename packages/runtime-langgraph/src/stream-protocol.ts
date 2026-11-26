@@ -13,6 +13,28 @@ export function toLangGraphInput(input: RunInput): { messages: unknown[] } | Com
 }
 
 /**
+ * A failed or stopped turn leaves its user message checkpointed with no reply,
+ * so sending that message again re-runs the turn instead of repeating it.
+ */
+export function withoutResentTurn(
+  input: { messages: unknown[] } | Command,
+  lastCheckpointed: unknown,
+): { messages: unknown[] } | Command {
+  if (!("messages" in input) || input.messages.length !== 1) return input;
+  const [sent] = input.messages as Array<{ role?: unknown; content?: unknown }>;
+  if (sent?.role !== "user" || !isHumanMessage(lastCheckpointed)) return input;
+  return JSON.stringify(sent.content) === JSON.stringify(lastCheckpointed.content)
+    ? { messages: [] }
+    : input;
+}
+
+function isHumanMessage(message: unknown): message is { content: unknown } {
+  if (!message || typeof message !== "object") return false;
+  const getType = (message as { getType?: unknown }).getType;
+  return typeof getType === "function" && getType.call(message) === "human";
+}
+
+/**
  * Keep attachment references in checkpointed messages. The model-call middleware
  * resolves them to base64 blocks without persisting the bytes.
  */
