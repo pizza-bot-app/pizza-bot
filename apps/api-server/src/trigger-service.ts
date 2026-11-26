@@ -230,19 +230,16 @@ export class TriggerService {
   private recoverMissedRun(trigger: TriggerDef): void {
     if (!trigger.cron) return;
     let scheduledAt: string | undefined;
-    if (!trigger.lastRunAt) {
-      scheduledAt = cronTickIso(this.now());
-    } else {
-      try {
-        const timezone = trigger.timezone ?? this.tz;
-        const next = new CronTime(trigger.cron, timezone).getNextDateFrom(
-          new Date(trigger.lastRunAt),
-          timezone,
-        );
-        if (next.toMillis() <= this.now()) scheduledAt = next.toUTC().toISO() ?? undefined;
-      } catch (error) {
-        this.log(`missed-run check failed for ${trigger.id}: ${errorMessage(error)}`);
-      }
+    try {
+      const timezone = trigger.timezone ?? this.tz;
+      // A trigger that has never run can only have missed ticks since it was created.
+      const next = new CronTime(trigger.cron, timezone).getNextDateFrom(
+        new Date(trigger.lastRunAt ?? trigger.createdAt),
+        timezone,
+      );
+      if (next.toMillis() <= this.now()) scheduledAt = next.toUTC().toISO() ?? undefined;
+    } catch (error) {
+      this.log(`missed-run check failed for ${trigger.id}: ${errorMessage(error)}`);
     }
     if (!scheduledAt) return;
     const occurrence = this.createOccurrence(trigger.id, "cron-recovery", { scheduledAt });
