@@ -63,10 +63,10 @@ describe("provider routes", () => {
       body: JSON.stringify(body),
     });
 
-  it("lists all eleven built-in providers with their authSchema", async () => {
+  it("lists all twelve built-in providers with their authSchema", async () => {
     const providers = await list();
     const ids = providers.map((p) => p.id).sort();
-    expect(ids).toEqual(["anthropic", "bedrock", "cheaperinference", "google", "litellm", "ollama", "openai", "openrouter", "opper", "requesty", "uberllm"]);
+    expect(ids).toEqual(["anthropic", "bedrock", "cheaperinference", "google", "litellm", "ollama", "openai", "openrouter", "opper", "requesty", "trustedrouter", "uberllm"]);
     const anthropic = providers.find((p) => p.id === "anthropic")!;
     expect(anthropic.configurable).toBe(true);
     expect(anthropic.availableWithoutConfig).toBe(false);
@@ -76,6 +76,7 @@ describe("provider routes", () => {
     expect(providers.find((p) => p.id === "opper")!.availableWithoutConfig).toBe(false);
     expect(providers.find((p) => p.id === "uberllm")!.availableWithoutConfig).toBe(false);
     expect(providers.find((p) => p.id === "cheaperinference")!.availableWithoutConfig).toBe(false);
+    expect(providers.find((p) => p.id === "trustedrouter")!.availableWithoutConfig).toBe(false);
     expect(providers.find((p) => p.id === "google")!.availableWithoutConfig).toBe(false);
     expect(providers.find((p) => p.id === "ollama")!.availableWithoutConfig).toBe(true);
     expect(providers.find((p) => p.id === "litellm")!.availableWithoutConfig).toBe(false);

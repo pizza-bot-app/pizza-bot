@@ -23,6 +23,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   openrouter: "OpenRouter",
   uberllm: "UberLLM",
   cheaperinference: "Cheaper Inference",
+  trustedrouter: "TrustedRouter",
   litellm: "LiteLLM",
 };
 
