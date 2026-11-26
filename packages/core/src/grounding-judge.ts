@@ -74,7 +74,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Judges copy a label as the prompt shows it, `[A3]`; the brackets are presentation. */
 function normalizeLabel(label: string): string {
-  return label.replace(/^\s*\[\s*|\s*\]\s*$/g, "").trim().toUpperCase();
+  let inner = label.trim();
+  if (inner.startsWith("[")) inner = inner.slice(1);
+  if (inner.endsWith("]")) inner = inner.slice(0, -1);
+  return inner.trim().toUpperCase();
 }
 
 /**
