@@ -17,7 +17,8 @@ export type TodoEventKind =
   | "completed"
   | "reopened"
   | "notified"
-  | "asked";
+  | "asked"
+  | "failed";
 
 export type TodoCheckInReason = "cron" | "manual" | "handoff";
 

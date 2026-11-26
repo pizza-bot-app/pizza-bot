@@ -11,6 +11,7 @@ import { BlankTurnNotice } from "./BlankTurnNotice.js";
 import { CutOffRetryNotice } from "./CutOffRetryNotice.js";
 import { useHotkey } from "../hotkeys/index.js";
 import { RecipientField } from "./RecipientField.js";
+import { messageAgentLabel, workThreadNotice } from "../lexicon.js";
 import type { RecipientOption, ThreadAgent } from "../lib/thread-agent.js";
 
 const INTERACTIVE_CHAT_SELECTOR =
@@ -42,6 +43,8 @@ export interface ChatPaneProps {
   headerActions?: ReactNode;
   searchTarget?: { messageId: string; token: number };
   onSearchTargetHandled?: (token: number) => void;
+  /** An agent's Todo work thread: read-only, with a way to the agent's own conversation. */
+  workThread?: { onOpenConversation: () => void };
 }
 
 export function ChatPane({
@@ -64,6 +67,7 @@ export function ChatPane({
   headerActions,
   searchTarget,
   onSearchTargetHandled,
+  workThread,
 }: ChatPaneProps) {
   const { messages, status, errorText, errorCode, blankTurn, retryingCutOff, queued, send, steerNow, cancelQueued, stop, decide } =
     useThreadSlice(threadId, hydrateOnMount);
@@ -128,6 +132,10 @@ export function ChatPane({
       )}
       {status === "idle" && blankTurn && <BlankTurnNotice reason={blankTurn} />}
       {status === "streaming" && retryingCutOff && <CutOffRetryNotice />}
+      {workThread ? (
+        <WorkThreadNotice agentName={agent?.name ?? "the agent"} onOpenConversation={workThread.onOpenConversation} />
+      ) : (
+        <>
       {recipient && (
         <RecipientField
           name={agent?.name ?? "Pizza Bot"}
@@ -154,7 +162,27 @@ export function ChatPane({
         composerRef={composerRef}
         history={history}
         {...(agent ? { recipientName: agent.name } : {})}
+        {...(agent?.model ? { pinnedModel: { id: agent.model, setBy: agent.name } } : {})}
       />
+        </>
+      )}
+    </div>
+  );
+}
+
+export function WorkThreadNotice({
+  agentName,
+  onOpenConversation,
+}: {
+  agentName: string;
+  onOpenConversation: () => void;
+}) {
+  return (
+    <div className="work-thread-notice" role="note">
+      <span>{workThreadNotice(agentName)}</span>
+      <button type="button" className="btn-secondary" onClick={onOpenConversation}>
+        {messageAgentLabel(agentName)}
+      </button>
     </div>
   );
 }

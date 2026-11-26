@@ -156,4 +156,31 @@ describe("compileGraphSpec", () => {
     };
     await expect(drain()).rejects.toThrow("Tool mcp:gone:x is not connected.");
   });
+
+  it("runs the agent an agent node names, on the node's model", async () => {
+    const asked: Array<[string | undefined, string | undefined]> = [];
+    const graph = compileGraphSpec(
+      spec({
+        id: "named",
+        name: "Named",
+        nodes: [{ id: "research", type: "agent", prompt: "Find fares", agentId: "researcher", model: "m1", output: "found" }],
+        edges: [{ from: "start", to: "research" }, { from: "research", to: "end" }],
+      }),
+      {
+        checkpointer: new MemorySaver(),
+        agentFor: async (modelId, agentId) => {
+          asked.push([modelId, agentId]);
+          return { runAsNode: async (prompt) => `${agentId}:${prompt}` };
+        },
+        modelFor: async () => new EchoModel({}),
+        tool: () => undefined,
+      },
+    );
+    for await (const _ of graph.streamProtocol({ graphInput: {} }, { threadId: "named" })) {
+      // drain
+    }
+    expect(asked).toEqual([["m1", "researcher"]]);
+    expect((await graph.getState("named")).values).toMatchObject({ found: "researcher:Find fares" });
+  });
 });
+

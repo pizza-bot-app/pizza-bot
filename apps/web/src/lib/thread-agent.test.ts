@@ -41,6 +41,11 @@ describe("threadAgent", () => {
     });
   });
 
+  it("carries the model an agent pins", () => {
+    expect(threadAgent("research", [entry("research", { model: "bedrock:opus" })], assistant).model).toBe("bedrock:opus");
+    expect(threadAgent("research", [entry("research")], assistant).model).toBeUndefined();
+  });
+
   it("says why an agent can't reply", () => {
     expect(threadAgent("research", [entry("research", { enabled: false })], assistant).unavailable).toBe("Disabled");
     expect(

@@ -197,6 +197,19 @@ describe("TodoService ambient access", () => {
     expect(h.posted).toHaveLength(1);
   });
 
+  it("records a failed check-in with its error", () => {
+    const h = harness();
+    const { todo, threadId } = ownedTodo(h);
+    h.service.recordFailure(threadId, "The security token included in the request is invalid.");
+    h.service.recordFailure("not-a-check-in", "ignored");
+    expect(h.service.get(todo.id)!.history.at(-1)).toMatchObject({
+      kind: "failed",
+      actor: "researcher",
+      threadId,
+      note: "The security token included in the request is invalid.",
+    });
+  });
+
   it("records a pause as a question to the user", () => {
     const h = harness();
     const { todo, threadId } = ownedTodo(h);

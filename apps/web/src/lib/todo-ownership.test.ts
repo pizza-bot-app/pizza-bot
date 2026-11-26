@@ -49,7 +49,20 @@ describe("todoTimeline", () => {
     ]);
   });
 
-  it("marks only check-in and question threads as the agent's work thread", () => {
+  it("describes a failed check-in and links its work thread", () => {
+    const [entry] = todoTimeline(
+      [event({ id: "1", kind: "failed", threadId: "bg", note: "The model is unavailable." })],
+      nameOf,
+    );
+    expect(entry).toMatchObject({
+      text: "Researcher's check-in failed: The model is unavailable.",
+      threadId: "bg",
+      workAgentId: "researcher",
+    });
+    expect(todoTimeline([event({ id: "2", kind: "failed" })], nameOf)[0]?.text).toBe("Researcher's check-in failed");
+  });
+
+  it("marks only check-in, question, and failure threads as the agent's work thread", () => {
     const entries = todoTimeline(
       [
         event({ id: "1", kind: "check-in", reason: "handoff", threadId: "bg" }),

@@ -325,7 +325,7 @@ export function threadRoutes(host: AgentHost): Hono {
 
     const forkId = newThreadId();
     // The messages reducer is additive and the new checkpoint starts empty.
-    await graph.updateState(forkId, { messages: slice });
+    await graph.updateStateAsFinished(forkId, { messages: slice });
 
     const record = host.threadStore.create({
       threadId: forkId,

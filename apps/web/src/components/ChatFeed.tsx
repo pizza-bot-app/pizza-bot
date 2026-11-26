@@ -91,7 +91,8 @@ export function ChatFeed({
   onSurfacePointerDown,
 }: ChatFeedProps) {
   const assistantName = assistant?.name ?? "Pizza Bot";
-  const assistantAvatar = assistant?.avatar || "🍕";
+  // An agent without an avatar shows its initials; only the default assistant is 🍕.
+  const assistantAvatar = assistant ? assistant.avatar || undefined : "🍕";
   const searchTargetsRef = useRef(new Map<string, HTMLElement>());
   const registerSearchTarget = useCallback((messageId: string, element: HTMLElement | null) => {
     if (element) searchTargetsRef.current.set(messageId, element);
@@ -153,7 +154,7 @@ export function ChatFeed({
               >
                 {m.role === "assistant" && (
                   <div className="message-author">
-                    <Avatar label={assistantName} avatar={assistantAvatar} size={22} />
+                    <Avatar label={assistantName} {...(assistantAvatar ? { avatar: assistantAvatar } : {})} size={22} />
                     <span className="message-author-name">{assistantName}</span>
                   </div>
                 )}
@@ -365,6 +366,9 @@ export function InterruptConfirmation({
   const allowed = part.allowedDecisions ?? ["approve", "edit", "reject"];
   const canRespond = !isBatch && allowed.includes("respond");
   const canEdit = !isBatch && allowed.includes("edit");
+  // A batch is approved or rejected as a whole, whatever each call allows.
+  const canApprove = isBatch || allowed.includes("approve");
+  const canReject = isBatch || allowed.includes("reject");
   const editState = approvalEditState(originalDraft, draft);
 
   useEffect(() => {
@@ -440,7 +444,7 @@ export function InterruptConfirmation({
             </>
           ) : (
             <>
-              Approve <b>{toolLabel}</b>?
+              {canApprove ? "Approve" : "Review"} <b>{toolLabel}</b>?
             </>
           )}
         </span>
@@ -495,12 +499,14 @@ export function InterruptConfirmation({
               Revert changes
             </ConfirmationAction>
           )}
-          <ConfirmationAction
-            variant="outline"
-            onClick={() => onDecision?.(part.toolCallId, "reject")}
-          >
-            Reject
-          </ConfirmationAction>
+          {canReject && (
+            <ConfirmationAction
+              variant="outline"
+              onClick={() => onDecision?.(part.toolCallId, "reject")}
+            >
+              Reject
+            </ConfirmationAction>
+          )}
           {canRespond && !editing && (
             responding ? (
               <>
@@ -528,7 +534,7 @@ export function InterruptConfirmation({
               </ConfirmationAction>
             )
           )}
-          {!responding && (!editing || !editState.changed) && (
+          {canApprove && !responding && (!editing || !editState.changed) && (
             <ConfirmationAction onClick={() => onDecision?.(part.toolCallId, "approve")}>
               Approve
             </ConfirmationAction>

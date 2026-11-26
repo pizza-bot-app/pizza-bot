@@ -502,7 +502,7 @@ export class AgentHost {
       },
       log: (m) => console.log(m),
     });
-    this.protocolEndUnsub = this.protocolRuns.onEnd(({ threadId, runId, status, inputType }) => {
+    this.protocolEndUnsub = this.protocolRuns.onEnd(({ threadId, runId, status, inputType, error }) => {
       const outcome = terminalActivityOutcome(status);
       if (!outcome) return;
       void this.queueThreadMaintenance(threadId, async () => {
@@ -517,6 +517,11 @@ export class AgentHost {
             if (this.threadStore.get(threadId)?.background) this.todoService.recordPause(threadId);
             await this.runMaintenance.reindexThread(threadId);
             return;
+          }
+          if (status === "error" || status === "timeout") {
+            if (this.threadStore.get(threadId)?.background) {
+              this.todoService.recordFailure(threadId, error ?? (status === "timeout" ? "The check-in timed out." : "The check-in failed."));
+            }
           }
           await this.runMaintenance.onRunEnd(threadId);
           const awaitingAction = await this.readThreadAwaitingAction(
@@ -947,7 +952,8 @@ export class AgentHost {
     if (cached?.fingerprint === fingerprint) return { spec, graph: cached.graph };
     const graph = compileGraphSpec(spec, {
       ...(this.persistence.checkpointer ? { checkpointer: this.persistence.checkpointer } : {}),
-      agentFor: (modelId) => this.agentFor(modelId),
+      agentFor: async (modelId, agentId) =>
+        agentId ? (await this.graphs!.rootAgentFor(agentId, modelId ?? this.modelId)).agent : this.agentFor(modelId),
       modelFor: (modelId) => this.graphs!.buildModel(modelId ?? this.modelId),
       tool: (ref) => this.mcpTools[ref] as StructuredToolInterface | undefined,
     });

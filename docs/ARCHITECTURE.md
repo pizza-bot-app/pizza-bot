@@ -519,7 +519,10 @@ and `reassign_todo` hands the Todo on. A handoff needs a note, refuses an agent
 that already handed this Todo on, is capped at `TODO_MAX_HANDOFFS` since the user
 last assigned it, and wakes the new owner at once with occurrence reason
 `handoff` in a new background thread. Background threads stay out of the Inbox
-list and the activity stream unless they wait on the user.
+list and the activity stream unless they wait on the user; a check-in that ends in
+an error is recorded on the Todo as a `failed` event with the error's message.
+`notify_user` and forks write state with `updateStateAsFinished`, which writes as
+the graph's terminal node so the thread has no pending step.
 
 ### Graph runs
 
@@ -540,7 +543,8 @@ with no expressions, so a graph without `llm`/`agent` nodes is deterministic.
 - **Input.** The run starts from `input` state: `{ trigger, prompt?, body? }`
   for a trigger (a webhook body is delivered as JSON, not mined for a prompt), or
   the caller's object for `POST /graphs/:id/runs`.
-- **The agent node** runs the assistant inside the node with the node's config,
+- **The agent node** runs the assistant (or, with `agentId`, that agent definition as its
+  root agent) inside the node with the node's config,
   so its checkpoints, stream frames, and approval pauses nest under the
   `<node>:<task>` namespace and resume through the parent.
 - **The human node** calls `interrupt()` with a `GraphHumanRequest`. It resumes

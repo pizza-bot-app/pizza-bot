@@ -52,6 +52,8 @@ const nodeSchema = z.discriminatedUnion("type", [
     type: z.literal("agent"),
     prompt: z.string().min(1),
     model: z.string().optional(),
+    /** Runs this agent definition instead of the assistant; its pinned model wins over `model`. */
+    agentId: z.string().min(1).max(64).optional(),
     output: key,
   }),
   z.object({ ...base, type: z.literal("human"), prompt: z.string().min(1), output: key }),

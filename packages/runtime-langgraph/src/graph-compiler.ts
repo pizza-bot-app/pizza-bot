@@ -31,7 +31,7 @@ export interface GraphNodeAgent {
 /** Resolved per node execution, so model and MCP reloads reach graphs compiled earlier. */
 export interface GraphRuntimeDeps {
   checkpointer?: BaseCheckpointSaver;
-  agentFor(modelId?: string): Promise<GraphNodeAgent>;
+  agentFor(modelId?: string, agentId?: string): Promise<GraphNodeAgent>;
   modelFor(modelId?: string): Promise<BaseChatModel>;
   tool(ref: string): StructuredToolInterface | undefined;
 }
@@ -106,7 +106,7 @@ function nodeFn(node: GraphNodeSpec, deps: GraphRuntimeDeps): NodeFn {
       };
     case "agent":
       return async (state, config) => {
-        const agent = await deps.agentFor(node.model);
+        const agent = await deps.agentFor(node.model, node.agentId);
         return { [node.output]: await agent.runAsNode(renderText(node.prompt, state), config) };
       };
     case "human":

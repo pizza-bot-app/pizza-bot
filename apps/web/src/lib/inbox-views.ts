@@ -20,3 +20,37 @@ export function inboxThreads<T extends FilterableThread>(
   }
   return listed;
 }
+
+/**
+ * Server rows plus a placeholder for each open or locally known thread the server
+ * does not list. A work thread drops out of the server list once answered, so its
+ * placeholder keeps the `background` flag and stays out of the Inbox views.
+ */
+export function mergeThreadRows(
+  listed: readonly ThreadInfo[],
+  local: Iterable<string>,
+  titles: ReadonlyMap<string, string> | undefined,
+  backgroundIds: ReadonlySet<string> | undefined,
+): ThreadInfo[] {
+  const known = new Map<string, ThreadInfo>();
+  for (const t of listed) {
+    const title = titles?.get(t.threadId);
+    known.set(t.threadId, title && title !== t.title ? { ...t, title } : t);
+  }
+  for (const id of local) {
+    if (known.has(id)) continue;
+    known.set(id, {
+      threadId: id,
+      title: titles?.get(id) ?? "New conversation",
+      source: "user",
+      pinned: false,
+      unread: false,
+      awaitingAction: false,
+      createdAt: "",
+      lastActivityAt: "",
+      ...(backgroundIds?.has(id) ? { background: true as const } : {}),
+    });
+  }
+  return [...known.values()];
+}
+

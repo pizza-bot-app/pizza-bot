@@ -35,6 +35,23 @@ describe("InterruptConfirmation", () => {
     expect(html).not.toContain("Reject");
   });
 
+  it("offers only the decisions the interrupt allows", () => {
+    const approveOnly = renderToStaticMarkup(
+      <InterruptConfirmation part={approvalPart({ allowedDecisions: ["approve"] })} />,
+    );
+    expect(approveOnly).toContain(">Approve</button>");
+    expect(approveOnly).not.toContain(">Reject</button>");
+    expect(approveOnly).not.toContain(">Edit</button>");
+
+    const rejectOrRespond = renderToStaticMarkup(
+      <InterruptConfirmation part={approvalPart({ allowedDecisions: ["reject", "respond"] })} />,
+    );
+    expect(rejectOrRespond).toContain(">Reject</button>");
+    expect(rejectOrRespond).toContain(">Respond</button>");
+    expect(rejectOrRespond).not.toContain(">Approve</button>");
+    expect(rejectOrRespond).toContain("Review <b>");
+  });
+
   it("reads a question only from a non-blank string field", () => {
     expect(questionText({ question: "Why?" })).toBe("Why?");
     expect(questionText({ question: "  " })).toBeUndefined();

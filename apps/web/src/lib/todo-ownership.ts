@@ -61,10 +61,14 @@ function sentence(event: TodoEvent, nameOf: (agentId: string) => string): string
       return `${actor} sent you an update`;
     case "asked":
       return `${actor} asked you a question`;
+    case "failed": {
+      const whose = event.actor === "user" ? "The" : `${actor}'s`;
+      return note ? `${whose} check-in failed: ${note}` : `${whose} check-in failed`;
+    }
   }
 }
 
-const WORK_THREAD_KINDS = new Set<TodoEvent["kind"]>(["check-in", "asked"]);
+const WORK_THREAD_KINDS = new Set<TodoEvent["kind"]>(["check-in", "asked", "failed"]);
 
 /** The Todo's history as display sentences, newest first. */
 export function todoTimeline(

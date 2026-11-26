@@ -139,7 +139,7 @@ function fakeHost(history: ForkMessage[], runningThreads: Set<string> = new Set(
       async getState(threadId: string) {
         return { threadId, checkpointId: "chk_src", values: { messages: history }, next: [], createdAt: "t0" };
       },
-      async updateState(threadId: string, values: unknown) {
+      async updateStateAsFinished(threadId: string, values: unknown) {
         updated = { threadId, values };
         return { checkpointId: "chk_new", threadId };
       },

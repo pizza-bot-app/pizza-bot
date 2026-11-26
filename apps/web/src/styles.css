@@ -2376,6 +2376,7 @@ select:focus-visible,
 .todo-timeline-entry { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--text); }
 .todo-timeline-icon { flex: 0 0 auto; margin-top: 2px; color: var(--dim); }
 .todo-timeline-entry.kind-asked .todo-timeline-icon { color: var(--warning, #f5a623); }
+.todo-timeline-entry.kind-failed .todo-timeline-icon { color: var(--danger, #e5484d); }
 .todo-timeline-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .todo-timeline-link {
   padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left;
@@ -2403,10 +2404,34 @@ select:focus-visible,
 }
 .recipient-label { font-weight: 600; }
 .recipient-name { color: var(--text); font-weight: 600; }
+/* The native arrow and popup ignore the theme, so both are drawn from theme tokens. */
 .recipient-select {
-  height: 26px; padding: 0 8px; max-width: 100%; min-width: 0;
-  border: 1px solid var(--border); border-radius: 6px;
-  background: var(--panel-2); color: var(--text); font-size: 12.5px; font-weight: 600;
+  appearance: none; -webkit-appearance: none;
+  height: 26px; padding: 0 26px 0 9px; max-width: 100%; min-width: 0;
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  background-color: var(--panel-2); color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+    linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 11px, calc(100% - 9px) 11px;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+.recipient-select:hover { border-color: color-mix(in oklch, var(--brand) 40%, var(--border)); }
+.recipient-select:focus-visible { outline: 2px solid color-mix(in oklch, var(--brand) 55%, transparent); outline-offset: 1px; }
+.recipient-select option { background: var(--panel); color: var(--text); }
+.recipient-select option:disabled { color: var(--dim); }
+
+.work-thread-notice {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 0 auto 12px; padding: 10px 14px; width: calc(100% - 32px); max-width: var(--composer-max, 860px);
+  border: 1px dashed var(--border); border-radius: 10px;
+  font-size: 13px; color: var(--dim);
+}
+.composer-model-pinned {
+  display: inline-flex; align-items: center; height: 32px; padding: 0 10px; max-width: min(300px, 55vw);
+  color: var(--dim); font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: default;
 }
 .welcome-unavailable { margin: 4px 0 0; font-size: 13px; color: var(--warning, #f5a623); }
 

@@ -373,11 +373,11 @@ describe("ProtocolRunManager", () => {
       },
     });
     const mgr = new ProtocolRunManager(streamFn);
-    const ends: string[] = [];
-    mgr.onEnd(({ status }) => ends.push(status));
+    const ends: Array<[string, string | undefined]> = [];
+    mgr.onEnd(({ status, error }) => ends.push([status, error]));
     mgr.start("t7", {} as RunInput);
     await tick();
-    expect(ends).toEqual(["error"]);
+    expect(ends).toEqual([["error", "boom"]]);
   });
 
   it("synthesizes a coded root lifecycle:failed frame when the stream throws (classifyError)", async () => {

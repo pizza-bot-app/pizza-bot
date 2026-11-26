@@ -48,7 +48,7 @@ import { useAppToast } from "./AppToast.js";
 import { SwipeToDelete } from "./SwipeToDelete.js";
 import { FolderNameDialog } from "./FolderNameDialog.js";
 import { L } from "../lexicon.js";
-import { inboxThreads, type InboxFilter } from "../lib/inbox-views.js";
+import { inboxThreads, mergeThreadRows, type InboxFilter } from "../lib/inbox-views.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,6 +71,8 @@ export interface SidebarProps {
   threadTitles?: ReadonlyMap<string, string>;
   /** Threads linked to an incomplete Todo. */
   flaggedThreadIds?: ReadonlySet<string>;
+  /** Work threads known locally, including ones the server no longer lists. */
+  backgroundThreadIds?: ReadonlySet<string>;
   listRef?: React.RefObject<HTMLDivElement | null>;
   onFocusComposer?: () => void;
 }
@@ -93,6 +95,7 @@ export function Sidebar({
   onThreadsLoaded,
   threadTitles,
   flaggedThreadIds,
+  backgroundThreadIds,
   listRef,
   onFocusComposer,
 }: SidebarProps) {
@@ -310,31 +313,12 @@ export function Sidebar({
   );
 
   const rows = useMemo(() => {
-    const known = new Map<string, ThreadInfo>();
-    for (const t of threads) {
-      const title = threadTitles?.get(t.threadId);
-      known.set(t.threadId, title && title !== t.title ? { ...t, title } : t);
-    }
     const synthetic = new Set(openedThreads);
     for (const id of localKnown) synthetic.add(id);
     // A fresh chat can render before its store attachment effect runs.
     if (activeThreadId) synthetic.add(activeThreadId);
-    for (const id of synthetic) {
-      if (!known.has(id)) {
-        known.set(id, {
-          threadId: id,
-          title: threadTitles?.get(id) ?? "New conversation",
-          source: "user",
-          pinned: false,
-          unread: false,
-          awaitingAction: false,
-          createdAt: "",
-          lastActivityAt: "",
-        });
-      }
-    }
-    return [...known.values()];
-  }, [threads, openedThreads, localKnown, activeThreadId, threadTitles]);
+    return mergeThreadRows(threads, synthetic, threadTitles, backgroundThreadIds);
+  }, [threads, openedThreads, localKnown, activeThreadId, threadTitles, backgroundThreadIds]);
 
   const isUnread = useCallback(
     (t: ThreadInfo) => t.unread && t.threadId !== activeThreadId,

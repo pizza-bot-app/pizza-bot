@@ -1,5 +1,6 @@
 import type { TodoEvent } from "@pizza-bot/core";
 import {
+  CircleAlert,
   CircleCheck,
   Forward,
   History,
@@ -25,6 +26,7 @@ const ICONS: Record<TodoEvent["kind"], LucideIcon> = {
   reopened: RotateCcw,
   notified: Mail,
   asked: MessageCircleQuestion,
+  failed: CircleAlert,
 };
 
 export function TodoTimeline({

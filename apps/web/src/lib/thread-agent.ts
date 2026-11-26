@@ -4,6 +4,8 @@ import { L } from "../lexicon.js";
 export interface ThreadAgent extends AgentInfo {
   /** Why the agent can't reply right now; absent when it can. */
   unavailable?: string;
+  /** A model the agent pins; it runs on this whatever the composer picks. */
+  model?: string;
 }
 
 export interface RecipientOption {
@@ -45,6 +47,7 @@ export function threadAgent(
     avatar: "",
     description: entry.description,
     suggestedPrompts: [],
+    ...(entry.model ? { model: entry.model } : {}),
     ...(reason ? { unavailable: reason } : {}),
   };
 }

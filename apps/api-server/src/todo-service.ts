@@ -155,6 +155,14 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     if (todo?.owner) this.deps.todos.appendEvent(todo.id, { kind: "asked", actor: todo.owner, threadId });
   }
 
+  /** A background check-in ended in an error; the next check-in still runs. */
+  recordFailure(threadId: string, message: string): void {
+    const todo = this.deps.todos.forBackgroundThread(threadId);
+    if (todo?.owner) {
+      this.deps.todos.appendEvent(todo.id, { kind: "failed", actor: todo.owner, threadId, note: message.slice(0, 500) });
+    }
+  }
+
   todoForThread(threadId: string): Todo | undefined {
     const todo = this.deps.todos.forBackgroundThread(threadId);
     return todo ? this.withCheckIn(todo) : undefined;
@@ -388,5 +396,7 @@ function describeEvent(event: TodoEvent, name: (id: string) => string): string {
       return `${at} ${who} told the user: ${event.note ?? ""}`;
     case "asked":
       return `${at} ${who} asked the user a question`;
+    case "failed":
+      return `${at} ${who}'s check-in failed: ${event.note ?? ""}`;
   }
 }

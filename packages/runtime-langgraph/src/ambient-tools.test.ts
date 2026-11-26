@@ -146,3 +146,18 @@ describe("ambient check-in tools", () => {
     expect(model.systemPrompts[0]).not.toContain("working unattended");
   });
 });
+
+describe("updateStateAsFinished", () => {
+  it("writes a message without leaving the thread looking mid-run", async () => {
+    const agent = await createAgentRootAgent(owner, { model: new ScriptedModel([]), checkpointer: new MemorySaver() });
+    const message = { messages: [{ role: "assistant", content: "Fares are in.", id: "m1" }] };
+
+    await agent.updateState("plain", message);
+    expect((await agent.getState("plain")).next).not.toEqual([]);
+
+    await agent.updateStateAsFinished("finished", message);
+    const state = await agent.getState("finished");
+    expect(state.next).toEqual([]);
+    expect((state.values as { messages?: unknown[] }).messages).toHaveLength(1);
+  });
+});

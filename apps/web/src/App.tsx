@@ -762,6 +762,7 @@ export function App() {
                   onThreadsLoaded={onThreadsLoaded}
                   threadTitles={threadTitles}
                   flaggedThreadIds={flaggedThreads}
+                  backgroundThreadIds={backgroundThreadIds}
                   listRef={listRef}
                   onFocusComposer={focusComposer}
                 />
@@ -819,6 +820,17 @@ export function App() {
                               searchTarget?.threadId === activeThreadId ? searchTarget : undefined
                             }
                             onSearchTargetHandled={onSearchTargetHandled}
+                            {...(activeAgentId && backgroundThreadIds.has(activeThreadId)
+                              ? {
+                                  workThread: {
+                                    onOpenConversation: () => {
+                                      onMessageAgent(activeAgentId).catch((error: unknown) =>
+                                        console.error("open agent conversation failed", error),
+                                      );
+                                    },
+                                  },
+                                }
+                              : {})}
                             headerActions={
                               <>
                                 {threadTitles.has(activeThreadId) &&

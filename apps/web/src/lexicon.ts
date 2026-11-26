@@ -149,3 +149,12 @@ export const L = {
 export function scheduleKindLabel(kind: "cron" | "webhook"): string {
   return kind === "cron" ? L.cronSchedule : L.webhookSchedule;
 }
+
+export function workThreadNotice(agentName: string): string {
+  return `This is ${agentName}'s work on a Todo. Message ${agentName} in your conversation with them.`;
+}
+
+export function messageAgentLabel(agentName: string): string {
+  return `Message ${agentName}`;
+}
+
