@@ -274,6 +274,32 @@ describe("ModelRegistry.listAll", () => {
   });
 });
 
+describe("ModelRegistry.fieldOptions", () => {
+  it("asks the provider only for fields its schema marks dynamic", async () => {
+    const fieldOptions = vi.fn(async () => [{ value: "default", label: "default" }]);
+    const registry = new ModelRegistry();
+    registry.register({
+      ...stubProvider({}),
+      authSchema: [{
+        id: "profile",
+        label: "Profile",
+        fields: [
+          { key: "profile", label: "Profile", type: "select", required: true, optionsSource: "dynamic" },
+          { key: "region", label: "Region", type: "text", required: false },
+        ],
+      }],
+      fieldOptions,
+    });
+
+    await expect(registry.fieldOptions("stub", "profile")).resolves.toEqual([
+      { value: "default", label: "default" },
+    ]);
+    await expect(registry.fieldOptions("stub", "region")).resolves.toBeUndefined();
+    await expect(registry.fieldOptions("missing", "profile")).resolves.toBeUndefined();
+    expect(fieldOptions).toHaveBeenCalledOnce();
+  });
+});
+
 describe("ModelRegistry degraded catalogs", () => {
   it("reports a provider that lost a catalog source without discarding its models", async () => {
     const provider = stubProvider({});

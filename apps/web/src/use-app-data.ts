@@ -292,8 +292,12 @@ export function useProvidersAdmin(
     refreshAuthoritative,
   );
   const setDefault = refreshAfter((model: string | null) => client.setDefaultModel(model), refreshDefaultAndModels);
+  const fieldOptions = useCallback(
+    (id: string, fieldKey: string) => client.providerFieldOptions(id, fieldKey),
+    [client],
+  );
 
-  return { providers, loading, defaultModel, refresh, save, remove, setDefault };
+  return { providers, loading, defaultModel, refresh, save, remove, setDefault, fieldOptions };
 }
 
 export function useModels(

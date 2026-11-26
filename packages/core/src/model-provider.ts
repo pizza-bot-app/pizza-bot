@@ -210,8 +210,19 @@ export interface ProviderAuthField {
   /** `json` values are stored as raw text; the provider parses and validates them. */
   type: "text" | "password" | "select" | "json";
   required: boolean;
-  options?: readonly { value: string; label: string }[];
+  options?: readonly ProviderFieldOption[];
+  /**
+   * Host-specific choices (local profile names) stay out of the schema and the
+   * saved-config view, so a raw `/providers` dump is safe to share; the form
+   * loads them through {@link ModelProvider.fieldOptions}.
+   */
+  optionsSource?: "dynamic";
   default?: string;
+}
+
+export interface ProviderFieldOption {
+  value: string;
+  label: string;
 }
 
 export interface ProviderAuthMethod {
@@ -239,6 +250,8 @@ export interface ModelProvider {
   ): ModelCatalogDegradation | undefined;
   /** Applies persisted configuration at registration and on later settings updates. */
   configure?(cfg: ResolvedProviderConfig): void;
+  /** Choices for a field marked `optionsSource: "dynamic"`. */
+  fieldOptions?(fieldKey: string): Promise<readonly ProviderFieldOption[]>;
   /**
    * Environment propagated to stdio MCP subprocesses so tools can reuse provider
    * credentials. Later providers win when keys collide.
@@ -311,6 +324,19 @@ export class ModelRegistry {
     this.catalog = undefined;
     this.catalogGeneration += 1;
     return true;
+  }
+
+  /** Undefined when the provider or a dynamic-options field by that key is unknown. */
+  async fieldOptions(
+    providerId: string,
+    fieldKey: string,
+  ): Promise<readonly ProviderFieldOption[] | undefined> {
+    const provider = this.providers.get(providerId);
+    const dynamic = provider?.authSchema?.some((method) =>
+      method.fields.some((field) => field.key === fieldKey && field.optionsSource === "dynamic")
+    );
+    if (!provider?.fieldOptions || !dynamic) return undefined;
+    return provider.fieldOptions(fieldKey);
   }
 
   setEnabledModels(providerId: string, modelIds: readonly string[] | undefined): void {

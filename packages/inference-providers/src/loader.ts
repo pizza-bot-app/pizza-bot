@@ -1,7 +1,7 @@
 /** Registers built-in inference providers. */
 import type { ModelProvider, ModelRegistry, ProviderConfigPort } from "@pizza-bot/core";
 import { expandMcpEnvVars } from "@pizza-bot/plugin-sdk";
-import { BedrockLangChainModelProvider, discoverAwsProfiles } from "./providers/bedrock/index.js";
+import { BedrockLangChainModelProvider } from "./providers/bedrock/index.js";
 import { AnthropicLangChainModelProvider } from "./providers/anthropic.js";
 import { GoogleLangChainModelProvider } from "./providers/google.js";
 import { OpenAiLangChainModelProvider } from "./providers/openai.js";
@@ -20,10 +20,7 @@ export async function registerBuiltinProviders(registry: ModelRegistry, configs?
     ? bedrockConfig.values.profile?.trim() || undefined
     : undefined;
   const providers: ModelProvider[] = [
-    new BedrockLangChainModelProvider({
-      profiles: await discoverAwsProfiles(),
-      ...(configuredProfile ? { profile: configuredProfile } : {}),
-    }),
+    new BedrockLangChainModelProvider(configuredProfile ? { profile: configuredProfile } : {}),
     new AnthropicLangChainModelProvider(),
     new GoogleLangChainModelProvider(),
     new OpenAiLangChainModelProvider(),

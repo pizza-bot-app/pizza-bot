@@ -214,6 +214,10 @@ export class GraphManager {
     return this.models.listProviders();
   }
 
+  providerFieldOptions(providerId: string, fieldKey: string) {
+    return this.models.fieldOptions(providerId, fieldKey);
+  }
+
   setEnabledModels(providerId: string, modelIds: readonly string[] | undefined): void {
     this.models.setEnabledModels(providerId, modelIds);
   }

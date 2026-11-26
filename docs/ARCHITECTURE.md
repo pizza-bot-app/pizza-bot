@@ -699,7 +699,11 @@ so adding a gateway means writing a spec. The OpenAI-compatible family and
 OpenRouter also accept an "Advanced request JSON" setting that is merged into
 every request body. It is validated when settings are saved and rejects fields
 the agent depends on (`model`, `messages`, `tools`, `stream`, …) and the output
-cap, which the token budget setting owns. Provider quirks stay
+cap, which the token budget setting owns. A settings field whose choices
+name host resources (Bedrock's AWS profiles) declares `optionsSource:
+"dynamic"`: `GET /providers` omits its options and redacts its saved value, and
+the form loads both from `GET /providers/:id/fields/:key/options`, so a raw
+`/providers` dump is safe to paste into an issue. Provider quirks stay
 provider-local: the Bedrock adapter
 (`packages/inference-providers/src/providers/bedrock`) owns the `maxTokens`
 default
