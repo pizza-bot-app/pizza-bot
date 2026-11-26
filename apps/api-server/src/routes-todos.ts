@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { z } from "zod";
 import { todoCreateSchema, todoPatchSchema } from "@pizza-bot/core";
 import type { AgentHost } from "./agent-host.js";
 
@@ -10,7 +11,7 @@ export function todoRoutes(host: Pick<AgentHost, "todoStore" | "threadStore">): 
 
   app.post("/todos", async (c) => {
     const parsed = todoCreateSchema.safeParse(await c.req.json().catch(() => undefined));
-    if (!parsed.success) return c.json({ error: "invalid", detail: parsed.error.message }, 400);
+    if (!parsed.success) return c.json({ error: "invalid", detail: describe(parsed.error) }, 400);
     const unknown = parsed.data.threadIds?.find((id) => !host.threadStore.get(id));
     if (unknown !== undefined) {
       return c.json({ error: "invalid", detail: `thread ${JSON.stringify(unknown)} not found` }, 400);
@@ -25,7 +26,7 @@ export function todoRoutes(host: Pick<AgentHost, "todoStore" | "threadStore">): 
 
   app.patch("/todos/:todo_id", async (c) => {
     const parsed = todoPatchSchema.safeParse(await c.req.json().catch(() => undefined));
-    if (!parsed.success) return c.json({ error: "invalid", detail: parsed.error.message }, 400);
+    if (!parsed.success) return c.json({ error: "invalid", detail: describe(parsed.error) }, 400);
     const todo = todos.update(c.req.param("todo_id"), parsed.data);
     return todo ? c.json(todo) : c.json({ error: "not_found" }, 404);
   });
@@ -45,4 +46,10 @@ export function todoRoutes(host: Pick<AgentHost, "todoStore" | "threadStore">): 
   });
 
   return app;
+}
+
+function describe(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "Request body"}: ${issue.message}`)
+    .join("; ");
 }

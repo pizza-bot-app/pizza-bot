@@ -6,6 +6,7 @@ import {
   Brain,
   Cable,
   Inbox,
+  ListTodo,
   MoreHorizontal,
   Network,
   Pizza,
@@ -42,6 +43,12 @@ const inboxDestination: NavDestination = {
   view: "inbox",
   label: L.inboxSection,
   icon: Inbox,
+};
+
+const todosDestination: NavDestination = {
+  view: "todos",
+  label: L.todosSection,
+  icon: ListTodo,
 };
 
 const automationsDestination: NavDestination = {
@@ -156,6 +163,7 @@ export function AppNavigation({
 }: AppNavigationProps) {
   const desktopDestinations = [
     inboxDestination,
+    todosDestination,
     agentsDestination,
     skillsDestination,
     mcpDestination,
@@ -164,6 +172,7 @@ export function AppNavigation({
   ];
   const mobileDestinations = [
     inboxDestination,
+    todosDestination,
     agentsDestination,
     skillsDestination,
   ];

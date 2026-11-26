@@ -67,6 +67,11 @@ describe("todoRoutes", () => {
       expect((await routes.request("/todos", json("POST", body))).status).toBe(400);
     }
     expect((await routes.request("/todos", { method: "POST", body: "not json" })).status).toBe(400);
+    const refused = await routes.request("/todos", json("POST", { title: "x", dueDate: "2026-02-30" }));
+    expect(await refused.json()).toEqual({
+      error: "invalid",
+      detail: "dueDate: must be a calendar date (YYYY-MM-DD)",
+    });
     expect((await routes.request(`/todos/${todo.id}`, json("PATCH", { title: "   " }))).status).toBe(400);
     expect((await routes.request("/todos/missing", json("PATCH", { title: "x" }))).status).toBe(404);
   });

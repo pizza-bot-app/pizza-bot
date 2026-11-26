@@ -1,5 +1,6 @@
 export const L = {
   inboxSection: "Inbox",
+  todosSection: "Todos",
   memoriesSection: "Memories",
   agentsSection: "Agents",
   skillsSection: "Skills",
@@ -93,6 +94,17 @@ export const L = {
   webhook: "Webhook",
   webhooks: "Webhooks",
   run: "Run",
+  todo: "Todo",
+  todos: "Todos",
+
+  todoViewToday: "Today",
+  todoViewPlanned: "Planned",
+  todoViewImportant: "Important",
+  todoViewAll: "All",
+  todoViewCompleted: "Completed",
+  addTodoPlaceholder: "Add a todo",
+  flagThread: "Add to Todos",
+  flaggedThread: "In Todos",
 
   cronSchedule: "Scheduled",
   webhookSchedule: "Webhook",
@@ -111,6 +123,7 @@ export const L = {
   noSchedules: "No schedules yet",
   noWebhooks: "No webhooks yet",
   noPlugins: "No plugins installed",
+  noTodos: "Nothing here",
 } as const;
 
 export function scheduleKindLabel(kind: "cron" | "webhook"): string {

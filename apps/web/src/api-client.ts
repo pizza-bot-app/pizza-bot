@@ -16,6 +16,9 @@ import type {
   LocalFolderBrowseResult,
   LocalFolderList,
   GraphSpec,
+  Todo,
+  TodoCreateInput,
+  TodoPatch,
 } from "@pizza-bot/core";
 import type { ThreadStateValues } from "@pizza-bot/core";
 import {
@@ -200,6 +203,37 @@ export class ApiClient {
         method: "DELETE",
       }),
     );
+  }
+
+  async listTodos(): Promise<Todo[]> {
+    return this.json("list todos", "/todos");
+  }
+
+  async createTodo(input: TodoCreateInput): Promise<Todo> {
+    return this.json("create todo", "/todos", { method: "POST", body: input });
+  }
+
+  async updateTodo(todoId: string, patch: TodoPatch): Promise<Todo> {
+    return this.json("update todo", `/todos/${encodeURIComponent(todoId)}`, {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+
+  async deleteTodo(todoId: string): Promise<boolean> {
+    return deletedFlag(
+      await this.json("delete todo", `/todos/${encodeURIComponent(todoId)}`, {
+        method: "DELETE",
+      }),
+    );
+  }
+
+  async linkTodoThread(todoId: string, threadId: string): Promise<Todo> {
+    return this.json("link todo thread", todoThreadPath(todoId, threadId), { method: "PUT" });
+  }
+
+  async unlinkTodoThread(todoId: string, threadId: string): Promise<Todo> {
+    return this.json("unlink todo thread", todoThreadPath(todoId, threadId), { method: "DELETE" });
   }
 
   async watchThreadChanges(
@@ -653,6 +687,10 @@ export class ApiClient {
       }
     ).default;
   }
+}
+
+function todoThreadPath(todoId: string, threadId: string): string {
+  return `/todos/${encodeURIComponent(todoId)}/threads/${encodeURIComponent(threadId)}`;
 }
 
 async function fetchWithTimeout(

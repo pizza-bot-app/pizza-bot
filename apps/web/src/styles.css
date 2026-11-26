@@ -2307,3 +2307,65 @@ select:focus-visible,
 .graph-run-row-source { color: var(--dim); }
 .graph-run-row-await { color: var(--warn); font-weight: 600; }
 .graph-run-row-id { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.thread-flag { flex: 0 0 auto; color: var(--warning, #f5a623); fill: currentColor; }
+
+.todo-list-header { display: flex; flex-direction: column; gap: 10px; }
+/* Five views outgrow the list column; wrapping keeps every view visible. */
+.todo-views { flex: 0 0 auto; flex-wrap: wrap; }
+.todo-views .segmented-btn { flex: 1 0 auto; padding: 0 8px; }
+.todo-quick-add { position: relative; display: flex; align-items: center; }
+.todo-quick-add-icon { position: absolute; left: 12px; color: var(--brand); pointer-events: none; }
+
+.todo-row { align-items: center; gap: 10px; }
+.todo-row.completed .todo-row-title { text-decoration: line-through; color: var(--dim); font-weight: 500; }
+.todo-row-title { white-space: normal; overflow-wrap: anywhere; }
+.todo-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 11.5px; color: var(--dim); }
+.todo-due, .todo-linked { display: inline-flex; align-items: center; gap: 4px; }
+.todo-due.overdue { color: var(--danger, #e5484d); font-weight: 600; }
+
+.todo-check, .todo-star, .todo-icon-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  padding: 2px; border: 0; border-radius: 50%; background: transparent; color: var(--dim); cursor: pointer;
+}
+.todo-check:hover, .todo-check[aria-checked="true"] { color: var(--brand); }
+.todo-star:hover { color: var(--text); }
+.todo-star.active { color: var(--warning, #f5a623); }
+.todo-icon-btn { border-radius: 6px; padding: 4px; }
+.todo-icon-btn:hover { background: var(--panel-2); color: var(--text); }
+
+.todo-detail { display: flex; flex-direction: column; gap: 22px; max-width: 720px; }
+.todo-detail-head { display: flex; align-items: center; gap: 10px; }
+.todo-detail-title {
+  flex: 1; min-width: 0; padding: 6px 8px; margin-left: -8px;
+  border: 1px solid transparent; border-radius: 8px; background: transparent;
+  color: var(--text); font-size: 18px; font-weight: 700;
+}
+.todo-detail-title:hover { border-color: var(--border); }
+.todo-detail-title:focus { outline: none; border-color: var(--brand); }
+.todo-detail-title.completed { text-decoration: line-through; color: var(--dim); }
+.todo-detail-section { display: flex; flex-direction: column; gap: 8px; }
+.todo-detail-section-title {
+  display: flex; align-items: center; gap: 6px; margin: 0;
+  font-size: 12px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: .03em;
+}
+.todo-steps, .todo-threads { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.todo-step, .todo-thread { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.todo-step-title {
+  flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--text); font-size: 13.5px;
+}
+.todo-step-title:focus { outline: none; border-color: var(--brand); }
+.todo-step.completed .todo-step-title { text-decoration: line-through; color: var(--dim); }
+.todo-step-add { display: flex; align-items: center; gap: 8px; color: var(--dim); }
+.todo-step-add .field-input { flex: 1; }
+.todo-due-field { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.todo-due-field .field-input { width: auto; }
+.todo-thread-open {
+  flex: 1; min-width: 0; padding: 6px 10px; text-align: left;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text);
+  font-size: 13px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.todo-thread-open:hover { border-color: var(--brand); }
+.todo-notes { resize: vertical; min-height: 96px; }
+.todo-detail-foot { display: flex; align-items: center; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }

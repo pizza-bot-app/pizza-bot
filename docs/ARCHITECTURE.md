@@ -172,6 +172,11 @@ in `core/src/protocol-types.ts`:
   `interruptOn` is set — `HumanInTheLoopMiddleware`. The clock context is also
   attached to subagents and is never checkpointed. Task planning middleware
   is intentionally excluded, including from model-specific harness profiles.
+- **Todo tools** (`list_todos`, `create_todo`, `update_todo`,
+  `runtime-langgraph/src/todo-tools.ts`) go to the root agent only, over the
+  `TodoAccess` seam in `RuntimeDeps`; subagents never receive them. A Todo created
+  in a run is linked to that run's thread. Todos are plain to-dos: nothing wakes or
+  schedules work from them.
 - **Runaway-call limits** are per agent invocation, with no combined parent/child
   budget. The orchestrator allows 40 model calls and its user-configured per-run
   tool-call limit (100 by default); each `task`-invoked subagent independently
@@ -369,7 +374,7 @@ Two systems, injected as `RuntimeDeps` (`packages/storage`):
   long-term memory; durable analog to the in-memory store).
 
 Everything the platform itself owns — thread metadata, user-defined thread
-folders, triggers, terminal run activity, capability enablement preferences, the
+folders, Todos and their thread links, triggers, terminal run activity, capability enablement preferences, the
 FTS message index, and attachment metadata — lives in one
 `app.sqlite`, opened once via `openAppDatabase()`: a **single**
 `better-sqlite3` handle (one WAL lock) shared by the stores, rather than one
@@ -633,6 +638,12 @@ Activity panel renders observed subagent delegations and transcript drill-downs,
 not model-maintained progress state.
 
 The inbox sidebar treats `All`, `Unread`, and `Action` as global smart views.
+**Todos** sit beside the Inbox with their own smart views (Today, Planned,
+Important, All, Completed). Flagging a thread creates a Todo linked to it, and the
+Inbox marks threads linked to an incomplete Todo. Todo edits ride the
+`/threads/events` change stream, so a Todo the assistant creates mid-run appears
+without polling.
+
 User folders are an orthogonal, single-folder organization layer over thread
 metadata; deleting a folder moves its threads to `Inbox`. The filter control
 shows or hides the folder panel and resets the active view to `All` when hidden,

@@ -416,6 +416,74 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("creates, edits, links, and deletes todos", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const todo = {
+      id: "t/1",
+      title: "Reply",
+      notes: "",
+      importance: "normal",
+      steps: [],
+      completed: false,
+      threadIds: ["th 1"],
+      createdAt: "now",
+      updatedAt: "now",
+    };
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          method: init?.method,
+          body: typeof init?.body === "string" ? init.body : undefined,
+        });
+        const body = init?.method === "DELETE" && !url.includes("/threads/")
+          ? { deleted: true }
+          : url === "http://x/todos" && !init?.method
+            ? [todo]
+            : todo;
+        return new Response(JSON.stringify(body), { status: init?.method === "POST" ? 201 : 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    expect(await client.listTodos()).toEqual([todo]);
+    expect(await client.createTodo({ title: "Reply", threadIds: ["th 1"] })).toEqual(todo);
+    expect(await client.updateTodo("t/1", { dueDate: null, completed: true })).toEqual(todo);
+    expect(await client.linkTodoThread("t/1", "th 1")).toEqual(todo);
+    expect(await client.unlinkTodoThread("t/1", "th 1")).toEqual(todo);
+    expect(await client.deleteTodo("t/1")).toBe(true);
+    expect(calls).toEqual([
+      { url: "http://x/todos", method: undefined, body: undefined },
+      {
+        url: "http://x/todos",
+        method: "POST",
+        body: JSON.stringify({ title: "Reply", threadIds: ["th 1"] }),
+      },
+      {
+        url: "http://x/todos/t%2F1",
+        method: "PATCH",
+        body: JSON.stringify({ dueDate: null, completed: true }),
+      },
+      { url: "http://x/todos/t%2F1/threads/th%201", method: "PUT", body: undefined },
+      { url: "http://x/todos/t%2F1/threads/th%201", method: "DELETE", body: undefined },
+      { url: "http://x/todos/t%2F1", method: "DELETE", body: undefined },
+    ]);
+  });
+
+  it("surfaces a rejected todo as an ApiError with the server's sentence", async () => {
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async () =>
+        new Response(JSON.stringify({ error: "title must not be empty" }), {
+          status: 400,
+        })) as unknown as typeof fetch,
+    });
+
+    const failure = await client.createTodo({ title: " " }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(errorMessage(failure)).toBe("title must not be empty");
+  });
+
   it("watches authenticated thread-change events over SSE", async () => {
     const captured: { url?: string; headers?: RequestInit["headers"] } = {};
     const client = new ApiClient({

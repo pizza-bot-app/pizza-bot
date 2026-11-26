@@ -17,6 +17,7 @@ import {
   Pencil,
   Check,
   SlidersHorizontal,
+  Flag,
 } from "lucide-react";
 import type { ApiClient, FolderInfo, ThreadInfo, SearchHit } from "@/api-client";
 import { useKnownThreadIds, useRunningThreadIds } from "../use-thread-slice.js";
@@ -43,6 +44,7 @@ import { ConfirmationDialog } from "./ConfirmationDialog.js";
 import { useAppToast } from "./AppToast.js";
 import { SwipeToDelete } from "./SwipeToDelete.js";
 import { FolderNameDialog } from "./FolderNameDialog.js";
+import { L } from "../lexicon.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,6 +65,8 @@ export interface SidebarProps {
   onDeleted: (threadId: string) => void;
   onThreadsLoaded?: (rows: ThreadInfo[]) => void;
   threadTitles?: ReadonlyMap<string, string>;
+  /** Threads linked to an incomplete Todo. */
+  flaggedThreadIds?: ReadonlySet<string>;
   listRef?: React.RefObject<HTMLDivElement | null>;
   onFocusComposer?: () => void;
 }
@@ -84,6 +88,7 @@ export function Sidebar({
   onDeleted,
   onThreadsLoaded,
   threadTitles,
+  flaggedThreadIds,
   listRef,
   onFocusComposer,
 }: SidebarProps) {
@@ -724,6 +729,14 @@ export function Sidebar({
                                       <span className="thread-unread-dot" aria-label="Unread" />
                                     )}
                                     <span className="thread-title">{t.title}</span>
+                                    {flaggedThreadIds?.has(t.threadId) && (
+                                      <Flag
+                                        size={12}
+                                        className="thread-flag"
+                                        role="img"
+                                        aria-label={L.flaggedThread}
+                                      />
+                                    )}
                                     <span className="thread-time">
                                       {running ? "now" : relativeTime(t.lastActivityAt)}
                                     </span>

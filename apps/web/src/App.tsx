@@ -16,7 +16,7 @@ import {
 } from "./use-thread-slice.js";
 import { protocolStreamStore } from "./protocol-stream-store.js";
 import { resolveApiBase, resolveApiHeaders } from "./api-config.js";
-import { useAgentsAdmin, useGraphs, useSkillsAdmin, useMcpServersAdmin, useMemoriesAdmin, useModels, usePluginsAdmin, useProvidersAdmin, useStatus, useTriggers } from "./use-app-data.js";
+import { useAgentsAdmin, useGraphs, useSkillsAdmin, useMcpServersAdmin, useMemoriesAdmin, useModels, usePluginsAdmin, useProvidersAdmin, useStatus, useTodos, useTriggers } from "./use-app-data.js";
 import { PIZZA_BOT_AGENT } from "@pizza-bot/core";
 import { SkillsModule } from "./components/skills/SkillsModule.js";
 import { AgentsModule } from "./components/agents/AgentsModule.js";
@@ -26,6 +26,10 @@ import { MemoriesModule } from "./components/memories/MemoriesModule.js";
 import { TriggerModule } from "./components/schedules/TriggerModule.js";
 import { GraphsModule } from "./components/graphs/GraphsModule.js";
 import { GraphRunPane } from "./components/graphs/GraphRunPane.js";
+import { TodosModule } from "./components/todos/TodosModule.js";
+import { FlagThreadButton } from "./components/todos/FlagThreadButton.js";
+import { flaggedThreadIds, openTodoForThread } from "./lib/todo-views.js";
+import { subscribeSidebarRefresh } from "./sidebar-refresh.js";
 import {
   SettingsModule,
   type SettingsCategory,
@@ -152,6 +156,14 @@ export function App() {
 
   const triggers = useTriggers(client, 5_000, visibleAdmin.triggers);
   const graphs = useGraphs(client, 5_000, visibleAdmin.graphs);
+  const todos = useTodos(client);
+  const refreshTodos = todos.refresh;
+  const flaggedThreads = useMemo(() => flaggedThreadIds(todos.todos), [todos.todos]);
+  const [todoFocus, setTodoFocus] = useState<{ id: string; token: number } | null>(null);
+  const openTodo = useCallback((todoId: string) => {
+    setTodoFocus((prev) => ({ id: todoId, token: (prev?.token ?? 0) + 1 }));
+    setView("todos");
+  }, []);
 
   const { theme, persona, features, agent: agentSettings } = useSettings(client);
 
@@ -210,6 +222,25 @@ export function App() {
       }
     }
   }, [noteGraphThreads]);
+
+  // The thread-change stream also reports Todo edits, including the orchestrator's.
+  const onThreadsLoaded = useCallback(
+    (rows: ThreadInfo[]) => {
+      seedThreadMetadata(rows);
+      refreshTodos().catch((error: unknown) => console.error("todo refresh failed", error));
+    },
+    [refreshTodos, seedThreadMetadata],
+  );
+  // Outside the Inbox no Sidebar follows the stream, so the Todos view follows it itself.
+  const viewingTodos = view === "todos";
+  useEffect(() => {
+    if (!viewingTodos) return;
+    return subscribeSidebarRefresh(
+      client,
+      () => Promise.all([refreshTodos(), client.listThreads().then(seedThreadMetadata)]),
+      (message, error) => console.error(message, error),
+    );
+  }, [client, refreshTodos, seedThreadMetadata, viewingTodos]);
 
   // Only the active pane renders; every thread's run remains owned by the store.
   // A thread is in this set once opened from a persisted source, meaning it should
@@ -435,7 +466,21 @@ export function App() {
             onViewChange={setView}
           />
 
-          {view === "automations" ? (
+          {view === "todos" ? (
+            <div className="module-hub">
+              <TodosModule
+                key={todoFocus?.token ?? 0}
+                {...(todoFocus ? { focusId: todoFocus.id } : {})}
+                todos={todos.todos}
+                threadTitles={threadTitles}
+                onCreate={todos.create}
+                onUpdate={todos.update}
+                onDelete={todos.remove}
+                onUnlinkThread={todos.unlinkThread}
+                onOpenThread={openNotifiedThread}
+              />
+            </div>
+          ) : view === "automations" ? (
             <div className="module-hub">
               <ModuleTabs
                 ariaLabel={L.automationsSection}
@@ -610,8 +655,9 @@ export function App() {
                   onOpenThread={(threadId) => openThread(threadId, true)}
                   onOpenSearchHit={onOpenSearchHit}
                   onDeleted={onThreadDeleted}
-                  onThreadsLoaded={seedThreadMetadata}
+                  onThreadsLoaded={onThreadsLoaded}
                   threadTitles={threadTitles}
+                  flaggedThreadIds={flaggedThreads}
                   listRef={listRef}
                   onFocusComposer={focusComposer}
                 />
@@ -657,20 +703,35 @@ export function App() {
                             }
                             onSearchTargetHandled={onSearchTargetHandled}
                             headerActions={
-                              isMobile ? (
-                                <button
-                                  className={`rail-toggle icon-only${showRail ? " active" : ""}`}
-                                  title={showRail ? "Hide activity" : "Show activity"}
-                                  aria-label={showRail ? "Hide activity" : "Show activity"}
-                                  aria-pressed={showRail}
-                                  onClick={() => setShowRail((v) => !v)}
-                                >
-                                  <Activity size={16} />
-                                  {Object.keys(delegations).length > 0 && (
-                                    <span className="rail-toggle-indicator" aria-hidden="true" />
-                                  )}
-                                </button>
-                              ) : undefined
+                              <>
+                                {threadTitles.has(activeThreadId) && (
+                                  <FlagThreadButton
+                                    todo={openTodoForThread(todos.todos, activeThreadId)}
+                                    compact={isMobile}
+                                    onFlag={() =>
+                                      todos.create({
+                                        title: (activeThreadTitle ?? "Conversation").slice(0, 200),
+                                        threadIds: [activeThreadId],
+                                      })
+                                    }
+                                    onOpenTodo={openTodo}
+                                  />
+                                )}
+                                {isMobile && (
+                                  <button
+                                    className={`rail-toggle icon-only${showRail ? " active" : ""}`}
+                                    title={showRail ? "Hide activity" : "Show activity"}
+                                    aria-label={showRail ? "Hide activity" : "Show activity"}
+                                    aria-pressed={showRail}
+                                    onClick={() => setShowRail((v) => !v)}
+                                  >
+                                    <Activity size={16} />
+                                    {Object.keys(delegations).length > 0 && (
+                                      <span className="rail-toggle-indicator" aria-hidden="true" />
+                                    )}
+                                  </button>
+                                )}
+                              </>
                             }
                           />
                         ) : (

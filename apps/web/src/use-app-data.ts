@@ -15,7 +15,7 @@ import type {
   ProviderView,
   PluginInfo,
 } from "@/api-client";
-import type { TriggerDef } from "@pizza-bot/core";
+import type { Todo, TodoCreateInput, TodoPatch, TriggerDef } from "@pizza-bot/core";
 
 function useAdminData<D>(
   load: () => Promise<D>,
@@ -343,6 +343,28 @@ export function useTriggers(client: ApiClient, intervalMs = 5_000, enabled = tru
   const run = refreshAfter((id: string) => client.runTrigger(id), refresh);
 
   return { triggers, loading, refresh, create, update, remove, invoke, run };
+}
+
+/** Unpolled: callers refresh it from the thread-change stream, which also reports Todo edits. */
+export function useTodos(client: ApiClient) {
+  const { data: todos, loading, refresh } = useAdminData(
+    useCallback(() => client.listTodos(), [client]),
+    [] as Todo[],
+  );
+
+  const create = refreshAfter((input: TodoCreateInput) => client.createTodo(input), refresh);
+  const update = refreshAfter((id: string, patch: TodoPatch) => client.updateTodo(id, patch), refresh);
+  const remove = refreshAfter((id: string) => client.deleteTodo(id), refresh);
+  const linkThread = refreshAfter(
+    (id: string, threadId: string) => client.linkTodoThread(id, threadId),
+    refresh,
+  );
+  const unlinkThread = refreshAfter(
+    (id: string, threadId: string) => client.unlinkTodoThread(id, threadId),
+    refresh,
+  );
+
+  return { todos, loading, refresh, create, update, remove, linkThread, unlinkThread };
 }
 
 export function useGraphs(client: ApiClient, intervalMs = 5_000, enabled = true) {
