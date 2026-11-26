@@ -94,7 +94,7 @@ describe("graph routes", () => {
     host.threadStore.create({ threadId: "thread_graph_1", graphId: "digest" });
     const stranded = await app.request("/graphs/digest", { method: "DELETE" });
     expect(stranded.status).toBe(409);
-    expect(await stranded.json()).toMatchObject({ error: "in_use", detail: expect.stringContaining("1 run ") });
+    expect(await stranded.json()).toMatchObject({ error: "in_use", detail: "1 run of this graph still exists; delete it first" });
     expect(await (await app.request("/graphs/digest/runs")).json()).toMatchObject([{ threadId: "thread_graph_1" }]);
     host.threadStore.delete("thread_graph_1");
 

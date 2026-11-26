@@ -34,7 +34,10 @@ export function graphRoutes(host: AgentHost): Hono {
     // A graph thread resolves its state through its spec, so deleting the spec would strand its runs.
     const runs = host.threadStore.listByGraph(id).length;
     if (runs > 0) {
-      return c.json({ error: "in_use", detail: `${runs} run${runs === 1 ? "" : "s"} of this graph still exist; delete them first` }, 409);
+      const detail = runs === 1
+        ? "1 run of this graph still exists; delete it first"
+        : `${runs} runs of this graph still exist; delete them first`;
+      return c.json({ error: "in_use", detail }, 409);
     }
     return (await host.graphRegistry.delete(id))
       ? c.json({ deleted: true })
