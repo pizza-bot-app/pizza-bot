@@ -147,5 +147,12 @@ describe("todoRoutes", () => {
     expect(refused.status).toBe(409);
     expect(await refused.json()).toMatchObject({ detail: expect.stringContaining("Assign this Todo") });
   });
+
+  it("answers a check-in on a missing Todo with 404", async () => {
+    const { routes } = testApp();
+    const missing = await routes.request("/todos/missing/check-in", { method: "POST" });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "not_found" });
+  });
 });
 

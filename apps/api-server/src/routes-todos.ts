@@ -47,8 +47,10 @@ export function todoRoutes(host: Pick<AgentHost, "todoService" | "todoStore" | "
   });
 
   app.post("/todos/:todo_id/check-in", (c) => {
+    const id = c.req.param("todo_id");
+    if (!todos.get(id)) return c.json({ error: "not_found" }, 404);
     try {
-      return c.json(todos.checkInNow(c.req.param("todo_id")), 202);
+      return c.json(todos.checkInNow(id), 202);
     } catch (error) {
       if (error instanceof TodoRefusal) return c.json({ error: "conflict", detail: error.message }, 409);
       throw error;
