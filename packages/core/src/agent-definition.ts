@@ -6,14 +6,21 @@ export const BUILTIN_EVAL_TOOL_REF = "builtin:eval";
 
 export const BUILTIN_EVAL_TOOL_DESCRIPTION = "Evaluate calculations and deterministic expressions.";
 
+/** Grants delegation to the other ready agents; it has effect only where the agent runs as the top-level agent. */
+export const BUILTIN_TASK_TOOL_REF = "builtin:task";
+
+export const BUILTIN_TASK_TOOL_DESCRIPTION = "Delegate work to other agents.";
+
+export const BUILTIN_TOOL_REFS: readonly string[] = [BUILTIN_EVAL_TOOL_REF, BUILTIN_TASK_TOOL_REF];
+
 /** An absent `model` and this value both mean the conversation's model. */
 export const INHERIT_MODEL = "inherit";
 
 export const toolRefSchema = z
   .string()
   .refine(
-    (ref) => ref === BUILTIN_EVAL_TOOL_REF || /^mcp:[^:\s]+:[^:\s]+$/.test(ref),
-    "Tool ref must be builtin:eval or mcp:<server>:<tool> (wildcards allowed)",
+    (ref) => BUILTIN_TOOL_REFS.includes(ref) || /^mcp:[^:\s]+:[^:\s]+$/.test(ref),
+    "Tool ref must be builtin:eval, builtin:task, or mcp:<server>:<tool> (wildcards allowed)",
   );
 
 export const interruptToolRefSchema = toolRefSchema.refine(

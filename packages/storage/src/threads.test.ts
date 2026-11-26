@@ -212,5 +212,33 @@ describe("ThreadStore: CRUD", () => {
     expect(store.get("legacy")?.graphId).toBeUndefined();
     expect(store.create({ threadId: "run", graphId: "triage" }).graphId).toBe("triage");
     expect(store.update("run", { title: "Triage run" })?.graphId).toBe("triage");
+    expect(store.get("legacy")?.agentId).toBeUndefined();
+    expect(store.create({ threadId: "agent", agentId: "researcher" }).agentId).toBe("researcher");
+  });
+});
+
+describe("ThreadStore: agent threads", () => {
+  it("keeps a thread's agent fixed across updates", () => {
+    const s = openThreadStore(tmpDb());
+    s.create({ threadId: "th1", agentId: "researcher" });
+    s.update("th1", { title: "Renamed", pinned: true });
+    expect(s.get("th1")).toMatchObject({ agentId: "researcher", title: "Renamed", pinned: true });
+    expect(s.get("th1")?.agentHome).toBeUndefined();
+  });
+
+  it("finds an agent's single home thread", () => {
+    const s = openThreadStore(tmpDb());
+    s.create({ threadId: "chat", agentId: "researcher" });
+    expect(s.agentHome("researcher")).toBeUndefined();
+    s.create({ threadId: "home", agentId: "researcher", agentHome: true, pinned: true });
+    expect(s.agentHome("researcher")).toMatchObject({ threadId: "home", agentHome: true, pinned: true });
+    expect(() => s.create({ threadId: "home2", agentId: "researcher", agentHome: true })).toThrow();
+    expect(s.agentHome("writer")).toBeUndefined();
+  });
+
+  it("ignores a home flag without an agent", () => {
+    const s = openThreadStore(tmpDb());
+    expect(s.create({ threadId: "th1", agentHome: true }).agentHome).toBeUndefined();
+    expect(s.get("th1")?.agentHome).toBeUndefined();
   });
 });

@@ -172,6 +172,17 @@ in `core/src/protocol-types.ts`:
   `interruptOn` is set — `HumanInTheLoopMiddleware`. The clock context is also
   attached to subagents and is never checkpointed. Task planning middleware
   is intentionally excluded, including from model-specific harness profiles.
+- **Agent threads.** A thread created with an `agentId` (fixed at creation, like
+  `graphId`) runs that agent definition as its top-level agent through
+  `createAgentRootAgent`: the definition's prompt, tools, skills, and approvals,
+  on its pinned model or else the conversation's. It gets no persona addendum,
+  no Todo tools, and no `eval` unless it declares `builtin:eval`. Delegation is a
+  grant: `builtin:task` gives it a `task` tool over the other ready agents, and
+  without it the tool is absent. `GraphManager.rootAgentFor` caches one compiled
+  graph per agent and model, cleared with the assistant's on capability changes.
+  An agent's home thread is its single pinned `agentHome` thread
+  (`POST /agents/:id/home`). An unavailable agent's thread still reads its
+  history through the assistant; runs on it fail with the agent's status.
 - **Todo tools** (`list_todos`, `create_todo`, `update_todo`,
   `runtime-langgraph/src/todo-tools.ts`) go to the root agent only, over the
   `TodoAccess` seam in `RuntimeDeps`; subagents never receive them. A Todo created
@@ -638,6 +649,11 @@ Activity panel renders observed subagent delegations and transcript drill-downs,
 not model-maintained progress state.
 
 The inbox sidebar treats `All`, `Unread`, and `Action` as global smart views.
+A new conversation has a **To:** picker (Pizza Bot or an enabled agent) until
+its first message; choosing an agent creates the thread with `metadata.agent_id`.
+Agent threads show the agent's name in the Inbox and welcome state, and the Agents
+view's Message action opens the agent's home thread.
+
 **Todos** sit beside the Inbox with their own smart views (Today, Planned,
 Important, All, Completed). Flagging a thread creates a Todo linked to it, and the
 Inbox marks threads linked to an incomplete Todo. Todo edits ride the

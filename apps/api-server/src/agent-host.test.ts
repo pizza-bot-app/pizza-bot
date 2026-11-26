@@ -550,6 +550,39 @@ writeFileSync(
   });
 });
 
+describe("AgentHost agent threads", () => {
+  let dataRoot: string;
+  let pluginsDir: string;
+  let host: AgentHost;
+
+  beforeEach(async () => {
+    dataRoot = mkdtempSync(join(tmpdir(), "agent-threads-data-"));
+    pluginsDir = mkdtempSync(join(tmpdir(), "agent-threads-plugins-"));
+    mkdirSync(join(dataRoot, "agents"), { recursive: true });
+    writeFileSync(
+      join(dataRoot, "agents", "researcher.md"),
+      "---\nname: researcher\ndescription: Finds sources.\n---\n\nYou research topics.\n",
+    );
+    host = await AgentHost.create({ dataRoot, pluginsDir });
+  });
+
+  afterEach(async () => {
+    await host.close();
+    for (const d of [dataRoot, pluginsDir]) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+
+  it("reads an agent thread through its agent, and an unavailable agent's thread through the assistant", async () => {
+    host.threadStore.create({ threadId: "with-agent", agentId: "researcher" });
+    host.threadStore.create({ threadId: "with-ghost", agentId: "ghost" });
+    host.threadStore.create({ threadId: "plain" });
+
+    const agentGraph = await host.threadGraph("with-agent");
+    expect(agentGraph).not.toBe(host.agent);
+    expect(await host.threadGraph("with-ghost")).toBe(host.agent);
+    expect(await host.threadGraph("plain")).toBe(host.agent);
+  });
+});
+
 describe("AgentHost.deleteThread", () => {
   let dataRoot: string;
   let pluginsDir: string;

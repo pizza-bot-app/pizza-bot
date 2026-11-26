@@ -146,6 +146,9 @@ function fakeHost(history: ForkMessage[], runningThreads: Set<string> = new Set(
     },
   } as unknown as import("./agent-host.js").AgentHost;
   Object.assign(host, {
+    async threadGraph() {
+      return host.agent;
+    },
     async deleteThread(threadId: string) {
       await host.protocolRuns.discardThread(threadId);
       const deleted = threadStore.delete(threadId);
@@ -165,6 +168,19 @@ function fakeHost(history: ForkMessage[], runningThreads: Set<string> = new Set(
 }
 
 describe("threadRoutes: fork", () => {
+  it("keeps the source thread's agent on the fork", async () => {
+    const { host } = fakeHost([human("a", "find sources"), ai("b")]);
+    host.threadStore.create({ threadId: "src", title: "Sources", agentId: "researcher" });
+    const res = await threadRoutes(host).request("/threads/src/fork", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messageId: "b" }),
+    });
+    expect(res.status).toBe(201);
+    const fork = (await res.json()) as { threadId: string };
+    expect(host.threadStore.get(fork.threadId)?.agentId).toBe("researcher");
+  });
+
   it("forks at a message, seeds the new thread, and records parent pointers", async () => {
     const history = [human("a", "want pizza"), ai("b"), human("c", "extra cheese")];
     const { host, getUpdated } = fakeHost(history);

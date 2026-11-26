@@ -1,6 +1,7 @@
 import {
   BUILTIN_EVAL_TOOL_DESCRIPTION,
   BUILTIN_EVAL_TOOL_REF,
+  BUILTIN_TOOL_REFS,
   ModelRegistry,
   ModelUnavailableError,
   projectAgentReadiness,
@@ -847,6 +848,15 @@ export class AgentHost {
     yield* agent.streamProtocol(input, cleaned);
   }
 
+  /** An agent thread's graph; an unavailable agent's history still reads through the assistant. */
+  private async agentThreadGraph(agentId: string): Promise<LangGraphThreadGraph> {
+    try {
+      return (await this.graphs!.rootAgentFor(agentId)).agent;
+    } catch {
+      return this.agent;
+    }
+  }
+
   private async *streamGraphRun(
     graphId: string,
     input: RunInput,
@@ -878,11 +888,13 @@ export class AgentHost {
     yield* graph.streamProtocol(input, cleaned);
   }
 
-  /** The graph whose checkpoints a thread holds: its graph run, or the assistant. */
+  /** The graph whose checkpoints a thread holds: its graph run, its agent, or the assistant. */
   async threadGraph(threadId: string): Promise<LangGraphThreadGraph> {
     await this.warmup;
-    const graphId = this.threadStore.get(threadId)?.graphId;
-    return graphId ? (await this.compiledGraph(graphId)).graph : this.agent;
+    const thread = this.threadStore.get(threadId);
+    if (thread?.graphId) return (await this.compiledGraph(thread.graphId)).graph;
+    if (thread?.agentId) return this.agentThreadGraph(thread.agentId);
+    return this.agent;
   }
 
   private async compiledGraph(graphId: string): Promise<{ spec: GraphSpec; graph: LangGraphThreadGraph }> {
@@ -910,9 +922,11 @@ export class AgentHost {
       typeof requestedModel === "string" && requestedModel.length > 0
         ? requestedModel
         : undefined;
-    const pinnedModel = this.threadStore.get(opts.threadId)?.modelId;
-    const modelId = explicitModel ?? pinnedModel ?? this.modelId;
-    const agent = await this.agentFor(modelId);
+    const existing = this.threadStore.get(opts.threadId);
+    const requestedModelId = explicitModel ?? existing?.modelId ?? this.modelId;
+    const { agent, modelId } = existing?.agentId
+      ? await this.graphs!.rootAgentFor(existing.agentId, requestedModelId)
+      : { agent: await this.agentFor(requestedModelId), modelId: requestedModelId };
     const thread = this.threadStore.ensure({ threadId: opts.threadId, modelId });
     if (thread.modelId !== modelId) {
       this.threadStore.update(opts.threadId, { modelId });
@@ -1131,7 +1145,7 @@ export class AgentHost {
         catalog,
         tools: new Set(Object.keys(tools)),
         mcpServers,
-        builtins: new Set([BUILTIN_EVAL_TOOL_REF]),
+        builtins: new Set(BUILTIN_TOOL_REFS),
         skills: new Set(skills.keys()),
       }),
       skills,

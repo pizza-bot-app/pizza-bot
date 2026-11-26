@@ -1,5 +1,11 @@
 import { Hono } from "hono";
-import { BUILTIN_EVAL_TOOL_DESCRIPTION, BUILTIN_EVAL_TOOL_REF, type SkillInfo } from "@pizza-bot/core";
+import {
+  BUILTIN_EVAL_TOOL_DESCRIPTION,
+  BUILTIN_EVAL_TOOL_REF,
+  BUILTIN_TASK_TOOL_DESCRIPTION,
+  BUILTIN_TASK_TOOL_REF,
+  type SkillInfo,
+} from "@pizza-bot/core";
 import type { AgentHost } from "./agent-host.js";
 
 export interface ToolInfo {
@@ -30,6 +36,7 @@ export function toolsRoutes(host: AgentHost): Hono {
     const catalog = await host.toolCatalog();
     const builtins: ToolInfo[] = [
       { ref: BUILTIN_EVAL_TOOL_REF, name: "eval", description: BUILTIN_EVAL_TOOL_DESCRIPTION },
+      { ref: BUILTIN_TASK_TOOL_REF, name: "task", description: BUILTIN_TASK_TOOL_DESCRIPTION },
     ];
     const servers: ToolServerInfo[] = Object.entries(catalog).map(([server, tools]) => ({
       server,

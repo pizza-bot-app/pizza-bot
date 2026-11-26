@@ -11,6 +11,7 @@ import {
   collectSkillPaths,
   resolveToolReferences,
   type AgentCatalog,
+  type AgentCatalogEntry,
   type RuntimeDeps,
   type RunInput,
   type RunOptions,
@@ -20,6 +21,8 @@ import {
   type InterruptConfig,
   type InterruptOnPolicy,
   BUILTIN_EVAL_TOOL_REF,
+  BUILTIN_TASK_TOOL_REF,
+  BUILTIN_TOOL_REFS,
   DEFAULT_SETTINGS,
 } from "@pizza-bot/core";
 import type { ProtocolEvent } from "@langchain/langgraph";
@@ -155,7 +158,7 @@ function hasEvalTool(refs: readonly string[]): boolean {
 }
 
 function mcpToolRefs(refs: readonly string[]): string[] {
-  return refs.filter((ref) => ref !== BUILTIN_EVAL_TOOL_REF);
+  return refs.filter((ref) => !BUILTIN_TOOL_REFS.includes(ref));
 }
 
 /**
@@ -413,6 +416,75 @@ export async function createPizzaBotAgent(
   }
   const { compiled, reloadsSkills } = await assemblePizzaBot(systemPrompt, deps);
   return new LangGraphAgent(compiled as CompiledGraph, reloadsSkills);
+}
+
+/**
+ * Compile one agent definition as the thread's top-level agent: its own prompt,
+ * model (`deps.model`, already resolved by the caller), tools, skills, and
+ * approvals. It delegates only if it declares `builtin:task`, and then only to
+ * the other ready agents; the assistant's Todo tools are not part of its surface.
+ */
+export async function createAgentRootAgent(
+  agent: AgentCatalogEntry,
+  deps: RuntimeDeps,
+): Promise<LangGraphAgent> {
+  const who = `agent "${agent.id}"`;
+  if (!deps.model) throw new Error(`${who}: no model resolved`);
+  const interruptOn = qualifyInterruptOn(agent.interruptOn, deps.catalog, who, deps.logger);
+  const approvals = interruptOn && Object.keys(interruptOn).length > 0 ? interruptOn : undefined;
+  if (approvals && !deps.checkpointer) {
+    throw new Error(`${who} declares interruptOn; a checkpointer is required for HITL but none was provided.`);
+  }
+  const backend = buildBackend({
+    ...(deps.skills ? { skills: deps.skills } : {}),
+    ...(deps.memoriesDir ? { memoriesDir: deps.memoriesDir } : {}),
+    ...(deps.memoryEnabled ? { memoryEnabled: deps.memoryEnabled } : {}),
+    ...(deps.localFolders ? { localFolders: deps.localFolders } : {}),
+  });
+
+  const middleware: unknown[] = [
+    blankTurnMiddleware(),
+    ...runLimitMiddleware({
+      ...AGENT_RUN_LIMITS.orchestrator,
+      toolCalls: deps.maxToolCalls ?? AGENT_RUN_LIMITS.orchestrator.toolCalls,
+    }),
+    toolErrorRecoveryMiddleware(),
+    currentDateTimeMiddleware(),
+  ];
+  if (deps.localFolders) middleware.push(localFolderContextMiddleware(deps.localFolders));
+  if (deps.attachmentResolver) middleware.push(attachmentInlineMiddleware(deps.attachmentResolver));
+
+  const roster = agent.declaredTools.includes(BUILTIN_TASK_TOOL_REF)
+    ? await resolveAgentSubagents(
+        new Map([...(deps.agents ?? new Map())].filter(([id]) => id !== agent.id)),
+        deps,
+        backend,
+      )
+    : undefined;
+  // Always mounted: with an empty roster it replaces DeepAgents' default by name, removing `task`.
+  middleware.push(taskDispatchMiddleware({ model: deps.model, subagents: roster ?? [] }));
+  if (hasEvalTool(agent.declaredTools)) {
+    middleware.push(await codeInterpreterMiddleware(
+      Boolean(roster?.length),
+      (roster ?? []).filter((subagent) => subagent.interruptOn).map((subagent) => subagent.name),
+    ));
+  }
+
+  const params: Record<string, unknown> = {
+    systemPrompt: agent.systemPrompt || agent.description,
+    model: deps.model,
+    backend,
+    middleware,
+    tools: resolveToolRefs(mcpToolRefs(agent.declaredTools), deps, who),
+  };
+  if (approvals) params.interruptOn = approvals;
+  if (deps.checkpointer) params.checkpointer = deps.checkpointer;
+  if (deps.store) params.store = deps.store;
+  const skills = collectSkillPaths(agent.skills, deps.skills);
+  if (skills.length > 0) params.skills = skills;
+
+  const compiled = await createDeepAgent(params as never);
+  return new LangGraphAgent(compiled as CompiledGraph, skills.length > 0);
 }
 
 export type { LangGraphAgent, LangGraphThreadGraph };

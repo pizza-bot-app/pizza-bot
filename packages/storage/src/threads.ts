@@ -22,6 +22,10 @@ export interface ThreadRecord {
   modelId?: string;
   /** Set at creation for a graph run; the thread's checkpoints belong to that graph. */
   graphId?: string;
+  /** Set at creation when the thread talks to an agent instead of the assistant; never changes. */
+  agentId?: string;
+  /** The agent's pinned home thread; each agent has at most one. */
+  agentHome?: boolean;
   lastMessage?: string;
   lastMessageRole?: string;
 }
@@ -38,6 +42,8 @@ interface ThreadRow {
   awaiting_action: number;
   model_id: string | null;
   graph_id: string | null;
+  agent_id: string | null;
+  agent_home: number;
   created_at: string;
   last_activity_at: string;
   last_message: string | null;
@@ -54,6 +60,8 @@ export interface NewThreadInput {
   parentCheckpointId?: string;
   modelId?: string;
   graphId?: string;
+  agentId?: string;
+  agentHome?: boolean;
   createdAt?: string;
 }
 
@@ -111,6 +119,15 @@ export class ThreadStore {
     if (!columns.some((column) => column.name === "graph_id")) {
       this.db.exec("ALTER TABLE threads ADD COLUMN graph_id TEXT");
     }
+    if (!columns.some((column) => column.name === "agent_id")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN agent_id TEXT");
+    }
+    if (!columns.some((column) => column.name === "agent_home")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN agent_home INTEGER NOT NULL DEFAULT 0");
+    }
+    this.db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_threads_agent_home ON threads (agent_id) WHERE agent_home = 1",
+    );
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_threads_folder ON threads (folder_id)");
   }
 
@@ -135,17 +152,19 @@ export class ThreadStore {
         : {}),
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
       ...(input.graphId !== undefined ? { graphId: input.graphId } : {}),
+      ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+      ...(input.agentId !== undefined && input.agentHome ? { agentHome: true } : {}),
     };
     this.db
       .prepare(
         `INSERT INTO threads
            (thread_id, title, folder_id, parent_thread_id, parent_checkpoint_id, source, pinned, unread,
-            awaiting_action, model_id, graph_id, created_at, last_activity_at, last_message,
-            last_message_role)
+            awaiting_action, model_id, graph_id, agent_id, agent_home, created_at, last_activity_at,
+            last_message, last_message_role)
          VALUES
            (@thread_id, @title, @folder_id, @parent_thread_id, @parent_checkpoint_id, @source, @pinned, @unread,
-            @awaiting_action, @model_id, @graph_id, @created_at, @last_activity_at, @last_message,
-            @last_message_role)`,
+            @awaiting_action, @model_id, @graph_id, @agent_id, @agent_home, @created_at, @last_activity_at,
+            @last_message, @last_message_role)`,
       )
       .run(toRow(rec));
     this.emit({ type: "upsert", threadId: rec.threadId });
@@ -171,6 +190,13 @@ export class ThreadStore {
       .prepare<[string], ThreadRow>("SELECT * FROM threads WHERE graph_id = ? ORDER BY last_activity_at DESC")
       .all(graphId);
     return rows.map(toThread);
+  }
+
+  agentHome(agentId: string): ThreadRecord | undefined {
+    const row = this.db
+      .prepare<[string], ThreadRow>("SELECT * FROM threads WHERE agent_id = ? AND agent_home = 1")
+      .get(agentId);
+    return row ? toThread(row) : undefined;
   }
 
   get(threadId: string): ThreadRecord | undefined {
@@ -253,6 +279,8 @@ function toThread(row: ThreadRow): ThreadRecord {
   if (row.parent_checkpoint_id !== null) rec.parentCheckpointId = row.parent_checkpoint_id;
   if (row.model_id !== null) rec.modelId = row.model_id;
   if (row.graph_id !== null) rec.graphId = row.graph_id;
+  if (row.agent_id !== null) rec.agentId = row.agent_id;
+  if (row.agent_home === 1) rec.agentHome = true;
   if (row.last_message !== null) rec.lastMessage = row.last_message;
   if (row.last_message_role !== null) rec.lastMessageRole = row.last_message_role;
   return rec;
@@ -271,6 +299,8 @@ function toRow(rec: ThreadRecord): ThreadRow {
     awaiting_action: rec.awaitingAction ? 1 : 0,
     model_id: rec.modelId ?? null,
     graph_id: rec.graphId ?? null,
+    agent_id: rec.agentId ?? null,
+    agent_home: rec.agentHome ? 1 : 0,
     created_at: rec.createdAt,
     last_activity_at: rec.lastActivityAt,
     last_message: rec.lastMessage ?? null,
