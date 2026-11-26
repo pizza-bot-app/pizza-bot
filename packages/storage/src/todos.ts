@@ -422,10 +422,11 @@ export class TodoStore implements TodoAccess {
 
   /** Drops a deleted thread from every Todo; the Todos themselves remain. */
   forgetThread(threadId: string): void {
-    const changes = this.db
-      .prepare("DELETE FROM todo_threads WHERE thread_id = ?")
+    const unlinked = this.db.prepare("DELETE FROM todo_threads WHERE thread_id = ?").run(threadId).changes;
+    const unreferenced = this.db
+      .prepare("UPDATE todo_events SET thread_id = NULL WHERE thread_id = ?")
       .run(threadId).changes;
-    if (changes > 0) this.emit();
+    if (unlinked + unreferenced > 0) this.emit();
   }
 
   subscribe(listener: () => void): () => void {

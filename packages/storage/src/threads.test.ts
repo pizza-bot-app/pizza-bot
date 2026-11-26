@@ -254,5 +254,13 @@ describe("ThreadStore: background threads", () => {
     s.update("bg", { awaitingAction: true });
     expect(s.list().map((t) => t.threadId).sort()).toEqual(["bg", "chat"]);
   });
+
+  it("lists a Todo's work threads newest first", () => {
+    const s = openThreadStore(tmpDb());
+    s.create({ threadId: "first", graphId: "filer", background: true, todoId: "todo-1" });
+    s.create({ threadId: "other", graphId: "filer", background: true, todoId: "todo-2" });
+    s.create({ threadId: "second", agentId: "researcher", background: true, todoId: "todo-1" });
+    expect(s.listByTodo("todo-1").map((t) => t.threadId)).toEqual(["second", "first"]);
+  });
 });
 

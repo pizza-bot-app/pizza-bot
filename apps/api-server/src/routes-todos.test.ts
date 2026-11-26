@@ -25,6 +25,7 @@ function testApp() {
     awaitsInput: async () => false,
     postToThread: async () => {},
     announce: async () => {},
+    deleteThreads: () => {},
     timezone: "UTC",
   });
   return {

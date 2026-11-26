@@ -516,6 +516,13 @@ export class AgentHost {
           threadTitle: threadActivityTitle(this.threadStore.get(threadId)),
         });
       },
+      deleteThreads: (threadIds) => {
+        for (const threadId of threadIds) {
+          this.deleteThread(threadId).catch((error: unknown) => {
+            console.warn(`[todos] removing work thread ${threadId} failed:`, error);
+          });
+        }
+      },
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
     this.runMaintenance = new RunMaintenance({

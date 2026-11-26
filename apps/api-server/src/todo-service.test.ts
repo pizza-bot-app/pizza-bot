@@ -27,6 +27,7 @@ function harness(options: { automations?: boolean; now?: () => number } = {}) {
   const fired: Array<[string, string]> = [];
   const cancelled: string[] = [];
   const announced: string[] = [];
+  const removed: string[] = [];
   let threadCounter = 0;
   const service: TodoService = new TodoService({
     todos: appDb.todos,
@@ -63,11 +64,15 @@ function harness(options: { automations?: boolean; now?: () => number } = {}) {
     announce: async (threadId) => {
       announced.push(threadId);
     },
+    deleteThreads: (threadIds) => {
+      removed.push(...threadIds);
+      for (const threadId of threadIds) appDb.threadStore.delete(threadId);
+    },
     timezone: "UTC",
     now: options.now ?? (() => NOW),
     newThreadId: () => `th-${threadCounter++}`,
   });
-  return { service, appDb, running, awaiting, posted, fired, cancelled, announced };
+  return { service, appDb, running, awaiting, posted, fired, cancelled, announced, removed };
 }
 
 function occurrence(reason: TriggerOccurrence["reason"]): TriggerOccurrence {
@@ -583,7 +588,7 @@ describe("TodoService review fixes", () => {
     const other = await ownedTodo(h);
     h.appDb.threadStore.update(other.threadId, { awaitingAction: true });
     h.service.delete(other.todo.id);
-    expect(h.appDb.threadStore.get(other.threadId)?.awaitingAction).toBe(false);
+    expect(h.removed).toEqual([other.threadId]);
   });
 
   it("cancels a running check-in when the Todo is taken back, reassigned, or deleted", async () => {
@@ -602,6 +607,33 @@ describe("TodoService review fixes", () => {
     h.running.add(deleted.threadId);
     h.service.delete(deleted.todo.id);
     expect(h.cancelled).toEqual([taken.threadId, moved.threadId, deleted.threadId]);
+  });
+
+  it("removes a deleted Todo's work threads", async () => {
+    const h = harness();
+    const { todo, threadId } = await ownedTodo(h);
+    await h.service.assign(todo.id, { owner: "booker" });
+    const second = thread(h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("cron")));
+    const kept = await ownedTodo(h);
+
+    h.service.delete(todo.id);
+
+    expect(h.removed.sort()).toEqual([threadId, second].sort());
+    expect(h.appDb.threadStore.get(kept.threadId)).toBeDefined();
+  });
+
+  it("keeps a Todo's newest five work threads, and any still running or waiting", async () => {
+    const h = harness();
+    const todo = h.service.create({ title: "File expenses" });
+    await h.service.assign(todo.id, { owner: "graph:triage" });
+    const checkIn = () => thread(h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("cron")));
+    const [running, waiting, next] = [checkIn(), checkIn(), checkIn()];
+    h.running.add(running);
+    h.appDb.threadStore.update(waiting, { awaitingAction: true });
+    const later = [next, ...Array.from({ length: 5 }, checkIn)];
+    expect(h.appDb.threadStore.listByTodo(todo.id).map((t) => t.threadId).sort()).toEqual(
+      [running, waiting, ...later.slice(-5)].sort(),
+    );
   });
 
   it("leaves a check-in running when its own agent hands the Todo on", async () => {

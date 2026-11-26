@@ -754,6 +754,25 @@ describe("AgentHost Todo check-in run ends", () => {
     expect(activityFor(threadId)).toEqual([]);
   });
 
+  it("removes a deleted Todo's work threads, so its workflow can be deleted", async () => {
+    const { todoId, threadId } = await checkInWorkflow({
+      id: "filer",
+      name: "Filer",
+      todoOutcome: "outcome",
+      nodes: [{ id: "file", type: "transform", set: { outcome: "done" } }],
+      edges: [{ from: "start", to: "file" }, { from: "file", to: "end" }],
+    });
+    await vi.waitFor(() => expect(host.todoService.get(todoId)?.completed).toBe(true), { timeout: 10_000 });
+
+    host.todoService.delete(todoId);
+
+    await vi.waitFor(async () => {
+      expect(host.threadStore.listByGraph("filer")).toEqual([]);
+      const checkpoint = await host.persistence.checkpointer.getTuple({ configurable: { thread_id: threadId, checkpoint_ns: "" } });
+      expect(checkpoint).toBeUndefined();
+    });
+  });
+
   it("records a pause as a question, marks the work thread for action, and reports it", async () => {
     const { todoId, threadId } = await checkInWorkflow({
       id: "approver",

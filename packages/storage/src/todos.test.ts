@@ -100,6 +100,15 @@ describe("TodoStore", () => {
     expect(s.get(b.id)!.threadIds).toEqual([]);
   });
 
+  it("drops a forgotten thread from timeline events", () => {
+    const s = store();
+    const todo = s.create({ title: "a" });
+    s.appendEvent(todo.id, { kind: "check-in", actor: "researcher", threadId: "gone", reason: "cron" });
+    s.appendEvent(todo.id, { kind: "check-in", actor: "researcher", threadId: "kept", reason: "cron" });
+    s.forgetThread("gone");
+    expect(s.get(todo.id)!.history.map((event) => event.threadId)).toEqual([undefined, "kept"]);
+  });
+
   it("deletes a Todo with its links", () => {
     const s = store();
     const todo = s.create({ title: "a", threadIds: ["th1"] });

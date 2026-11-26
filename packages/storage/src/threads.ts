@@ -216,6 +216,15 @@ export class ThreadStore {
     return rows.map(toThread);
   }
 
+  listByTodo(todoId: string): ThreadRecord[] {
+    const rows = this.db
+      .prepare<[string], ThreadRow>(
+        "SELECT * FROM threads WHERE todo_id = ? AND background = 1 ORDER BY created_at DESC, rowid DESC",
+      )
+      .all(todoId);
+    return rows.map(toThread);
+  }
+
   agentHome(agentId: string): ThreadRecord | undefined {
     const row = this.db
       .prepare<[string], ThreadRow>("SELECT * FROM threads WHERE agent_id = ? AND agent_home = 1")

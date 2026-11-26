@@ -59,6 +59,8 @@ export interface TodoServiceDeps {
   postToThread: (threadId: string, text: string) => Promise<void>;
   /** Raises a posted message as thread activity and indexes it for search. */
   announce: (threadId: string) => Promise<void>;
+  /** Removes threads with their checkpoints and search entries, in the background. */
+  deleteThreads: (threadIds: string[]) => void;
   /** Whether the thread's checkpoint is paused on a pending interrupt. */
   awaitsInput: (threadId: string) => Promise<boolean>;
   timezone: string;
@@ -70,6 +72,7 @@ export interface TodoServiceDeps {
 export class TodoRefusal extends Error {}
 
 const TIMELINE_IN_PROMPT = 20;
+const WORK_THREADS_KEPT = 5;
 const MAX_SNOOZE_MS = 90 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 let threadCounter = 0;
@@ -128,6 +131,8 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     if (current) this.closeWorkThread(current);
     this.releaseSubtasks(id);
     this.dropSchedule(id);
+    const workThreads = this.deps.threads.listByTodo(id).map((thread) => thread.threadId);
+    if (workThreads.length > 0) this.deps.deleteThreads(workThreads);
     return this.deps.todos.delete(id);
   }
 
@@ -230,6 +235,7 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
         todoId: todo.id,
       });
       this.deps.todos.setBackgroundThread(todo.id, threadId);
+      this.pruneWorkThreads(todo.id);
       const actor = `${TODO_GRAPH_OWNER_PREFIX}${todo.ownerGraph}`;
       this.deps.todos.appendEvent(todo.id, { kind: "check-in", actor, threadId, reason });
       return { threadId, graphId: todo.ownerGraph, input: { todo: graphTodoInput(todo), reason } };
@@ -601,7 +607,18 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
       todoId: todo.id,
     });
     this.deps.todos.setBackgroundThread(todo.id, thread.threadId);
+    this.pruneWorkThreads(todo.id);
     return thread.threadId;
+  }
+
+  /** A workflow owner adds a work thread per check-in; each one also blocks deleting that workflow. */
+  private pruneWorkThreads(todoId: string): void {
+    const stale = this.deps.threads
+      .listByTodo(todoId)
+      .slice(WORK_THREADS_KEPT)
+      .filter((thread) => !thread.awaitingAction && !this.deps.isRunning(thread.threadId))
+      .map((thread) => thread.threadId);
+    if (stale.length > 0) this.deps.deleteThreads(stale);
   }
 
   private async requireOwner(owner: string): Promise<void> {
