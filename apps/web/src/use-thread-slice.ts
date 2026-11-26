@@ -10,6 +10,7 @@ export interface ThreadBinding extends ProtocolThreadSlice {
   send: (text: string, model?: string, attachments?: AttachmentMeta[]) => Promise<void>;
   steerNow: (text: string, model?: string, attachments?: AttachmentMeta[]) => Promise<void>;
   cancelQueued: (index: number) => void;
+  retry: (model?: string) => Promise<void>;
   stop: () => Promise<void>;
   decide: (
     interruptId: string,
@@ -50,6 +51,10 @@ export function useThreadSlice(
     (index: number) => streamStore.cancelQueued(threadId, index),
     [threadId],
   );
+  const retry = useCallback(
+    (model?: string) => streamStore.retry(threadId, model),
+    [threadId],
+  );
   const stop = useCallback(() => streamStore.stop(threadId), [threadId]);
   const decide = useCallback(
     (interruptId: string, decision: HitlDecision, editedArgs?: unknown, editedName?: string, message?: string) =>
@@ -57,7 +62,7 @@ export function useThreadSlice(
     [threadId],
   );
 
-  return { ...slice, send, steerNow, cancelQueued, stop, decide };
+  return { ...slice, send, steerNow, cancelQueued, retry, stop, decide };
 }
 
 export function useThreadSliceReadOnly(threadId: string | null): ProtocolThreadSlice {

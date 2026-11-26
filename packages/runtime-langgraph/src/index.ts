@@ -16,6 +16,7 @@ import {
   type RuntimeDeps,
   type RunInput,
   type RunOptions,
+  type ThreadStateValues,
   type Logger,
   type ToolCatalog,
   type HitlDecision,
@@ -40,7 +41,7 @@ import { createWorkerCodeInterpreterMiddleware } from "./code-interpreter-middle
 import { taskDispatchMiddleware } from "./task-dispatch-middleware.js";
 import { todoTools } from "./todo-tools.js";
 import { AMBIENT_INTERRUPT_ON, AMBIENT_PROMPT, ambientTools } from "./ambient-tools.js";
-import { streamProtocolEvents, toLangGraphInput } from "./stream-protocol.js";
+import { streamProtocolEvents, toLangGraphInput, withoutResentTurn } from "./stream-protocol.js";
 import { LangGraphThreadGraph, contentText, type CompiledGraph } from "./thread-graph.js";
 
 // The built-in Codex profile otherwise restores the opt-in planning middleware.
@@ -385,9 +386,18 @@ class LangGraphAgent extends LangGraphThreadGraph {
     super(compiled);
   }
 
-  override streamProtocol(input: RunInput, opts: RunOptions): AsyncIterable<ProtocolEvent> {
-    const lgInput = withSkillReload(toLangGraphInput(input), this.reloadsSkills);
-    return streamProtocolEvents(this.compiled, lgInput, opts);
+  /** Stream native protocol frames, reloading skills only on message turns. */
+  override async *streamProtocol(input: RunInput, opts: RunOptions): AsyncIterable<ProtocolEvent> {
+    let lgInput = toLangGraphInput(input);
+    if ("messages" in lgInput) {
+      // Without readable state there is no earlier turn to recognize; the run proceeds as sent.
+      const snap = await this.compiled
+        .getState({ configurable: { thread_id: opts.threadId } })
+        .catch(() => undefined);
+      const messages = (snap?.values as ThreadStateValues | undefined)?.messages;
+      lgInput = withoutResentTurn(lgInput, messages?.at(-1));
+    }
+    yield* streamProtocolEvents(this.compiled, withSkillReload(lgInput, this.reloadsSkills), opts);
   }
 
   /**

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { Command } from "@langchain/langgraph";
-import { toLangGraphInput } from "./stream-protocol.js";
+import { toLangGraphInput, withoutResentTurn } from "./stream-protocol.js";
 import { attachmentUrl, type RunInput } from "@pizza-bot/core";
 
 describe("toLangGraphInput", () => {
@@ -40,5 +41,25 @@ describe("toLangGraphInput", () => {
     const out = toLangGraphInput({ command: { interruptId: "i1", response: { ok: true } } });
     expect(out).toBeInstanceOf(Command);
     expect((out as Command).resume).toEqual({ i1: { ok: true } });
+  });
+});
+
+describe("withoutResentTurn", () => {
+  const turn = (content: unknown) => ({ messages: [{ role: "user", content }] });
+
+  it("re-runs an unanswered user message instead of repeating it", () => {
+    expect(withoutResentTurn(turn("hello"), new HumanMessage("hello"))).toEqual({ messages: [] });
+  });
+
+  it("compares attachment blocks, not just text", () => {
+    const blocks = [{ type: "text", text: "look" }, { type: "file", url: "attachment://a1", mimeType: "image/png" }];
+    expect(withoutResentTurn(turn(blocks), new HumanMessage({ content: blocks as never }))).toEqual({ messages: [] });
+    expect(withoutResentTurn(turn("look"), new HumanMessage({ content: blocks as never }))).toEqual(turn("look"));
+  });
+
+  it("appends a different message, or any message after a reply", () => {
+    expect(withoutResentTurn(turn("hello"), new HumanMessage("hi"))).toEqual(turn("hello"));
+    expect(withoutResentTurn(turn("hello"), new AIMessage("hello"))).toEqual(turn("hello"));
+    expect(withoutResentTurn(turn("hello"), undefined)).toEqual(turn("hello"));
   });
 });

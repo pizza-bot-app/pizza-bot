@@ -847,12 +847,12 @@ the `provider:model` prefix. The composition root registers
 providers (`agent-host.ts` registers them through `registerBuiltinProviders`) and
 each turn carries its model as `configurable.model`. Amazon Bedrock, Anthropic,
 Google Gemini, OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference,
-LiteLLM, and Ollama are peer `ModelProvider` adapters;
+TrustedRouter, LiteLLM, and Ollama are peer `ModelProvider` adapters;
 another provider can follow the same pattern without changing the runtime,
 transport, or frontend. Each adapter is a peer submodule under
 `packages/inference-providers/src/providers/<id>` (Bedrock keeps its own
 subdirectory for the shim's multiple files). Hosted OpenAI-compatible gateways
-(Requesty, Opper, UberLLM, Cheaper Inference) and self-hosted proxies
+(Requesty, Opper, UberLLM, Cheaper Inference, TrustedRouter) and self-hosted proxies
 (LiteLLM) are not adapters of their own: each is an `OpenAiCompatibleSpec`
 (base URL, env prefix, optional featured listing, a reader for its `/models`
 entries or its own discovery hook, and whether the key is optional) run by the
@@ -877,7 +877,20 @@ families, xAI, and Gemma 4 use Responses, raw Anthropic model families use
 Messages, and other Mantle model families use Chat Completions. Mantle catalog
 entries retain the protocol family exposed by that catalog. The regional Mantle
 host and protocol paths are Bedrock concerns, and its HTTP transport supports
-both Bedrock API keys and SigV4 credentials. The OpenAI adapter
+both Bedrock API keys and SigV4 credentials. The Google adapter auto-detects
+Google AI Studio versus Vertex AI Express by verifying generation against AI
+Studio before falling back to Vertex; a saved Vertex AI project ID skips that
+check and selects Vertex. A project, from settings or `GOOGLE_CLOUD_PROJECT`,
+routes Vertex through a project-qualified endpoint (location from settings,
+`GOOGLE_CLOUD_LOCATION`, or `global`) so global and multi-region models work
+with the same API key. The environment only applies once the platform is
+Vertex, so an ambient project never moves an AI Studio key. Without one,
+Express's us-central1 model-not-found error names the key's project number,
+and the adapter retries once there and keeps the provider on it until its
+settings change. A run that fails before the model answers leaves its user
+message unanswered in the checkpoint; the runtime treats resending that same
+message as a re-run of the turn rather than a new message.
+The OpenAI adapter
 independently selects Automatic, Responses, or Chat Completions for custom
 compatible endpoints. The Anthropic adapter likewise owns custom Messages API
 endpoints and `x-api-key` versus bearer authentication. OpenAI-compatible

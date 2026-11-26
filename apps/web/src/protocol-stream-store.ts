@@ -96,7 +96,11 @@ interface QueuedSteer {
   text: string;
   model?: string;
   attachments?: AttachmentMeta[];
+  /** Re-runs the unanswered turn instead of sending `text`, which only labels the chip. */
+  retry?: true;
 }
+
+const QUEUED_RETRY_LABEL = "Retry";
 
 export class ProtocolStreamStore {
   private readonly entries = new Map<string, ThreadEntry>();
@@ -549,6 +553,13 @@ export class ProtocolStreamStore {
     }
   }
 
+  private async submitRetry(e: ThreadEntry, model?: string): Promise<void> {
+    await e.controller.submit(
+      { messages: [] },
+      model ? { config: { configurable: { model } } } : undefined,
+    );
+  }
+
   private drainQueued(threadId: string): void {
     const e = this.entries.get(threadId);
     if (!e || e.queued.length === 0) return;
@@ -596,12 +607,16 @@ export class ProtocolStreamStore {
   ): Promise<void> {
     let failed = false;
     try {
-      await this.submitTurn(
-        e,
-        pending.text,
-        pending.model,
-        pending.attachments,
-      );
+      if (pending.retry) {
+        await this.submitRetry(e, pending.model);
+      } else {
+        await this.submitTurn(
+          e,
+          pending.text,
+          pending.model,
+          pending.attachments,
+        );
+      }
     } catch (err) {
       failed = true;
       // Never discard input after a transient submit failure.
@@ -672,6 +687,36 @@ export class ProtocolStreamStore {
     this.recompute(threadId);
     this.drainQueued(threadId);
     this.pumpRunQueue();
+  }
+
+  /** Re-runs the thread's unanswered turn from its checkpoint without adding a message. */
+  async retry(threadId: string, model?: string): Promise<void> {
+    const status = this.getSlice(threadId).status;
+    if (
+      status === "streaming" ||
+      status === "interrupted" ||
+      this.activeRunThreads.has(threadId) ||
+      this.pendingRunThreadSet.has(threadId)
+    ) {
+      return;
+    }
+    const e = this.entry(threadId);
+    if (e.queued.length > 0 || this.activeRunThreads.size >= this.maxParallelRuns) {
+      if (!e.queued.some((q) => q.retry)) {
+        e.queued.push({ text: QUEUED_RETRY_LABEL, retry: true, ...(model ? { model } : {}) });
+        this.recompute(threadId);
+      }
+      this.drainQueued(threadId);
+      return;
+    }
+    this.activeRunThreads.add(threadId);
+    try {
+      await this.submitRetry(e, model);
+    } finally {
+      if (!e.runId && this.activeRunThreads.delete(threadId)) {
+        this.pumpRunQueue();
+      }
+    }
   }
 
   async stop(threadId: string): Promise<void> {

@@ -218,6 +218,8 @@ export interface ProviderAuthField {
    */
   optionsSource?: "dynamic";
   default?: string;
+  /** Shown beneath the field: when it is needed and what to enter. */
+  hint?: string;
 }
 
 export interface ProviderFieldOption {

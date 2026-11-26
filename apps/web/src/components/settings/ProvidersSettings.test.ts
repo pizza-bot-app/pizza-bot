@@ -1,8 +1,13 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ProviderConfigView, ProviderView } from "@/api-client";
 import type { ProviderAuthMethod } from "@pizza-bot/core";
 import {
   getProviderStatus,
+  FieldInput,
+  syncedMethodId,
+  syncedValues,
   secretKeysWithStoredValue,
   secretReferenceValidationError,
   unavailableLocalSecretValidationError,
@@ -227,5 +232,65 @@ describe("secretReferenceValidationError", () => {
 
   it("ignores non-secret fields", () => {
     expect(secretReferenceValidationError(method, { platform: "auto" }, false)).toBeUndefined();
+  });
+});
+
+describe("FieldInput", () => {
+  it("renders a field's hint beneath it", () => {
+    const html = renderToStaticMarkup(
+      createElement(FieldInput, {
+        field: { key: "project", label: "Project", type: "text", required: false, hint: "Needed for Gemini 4." },
+        options: [],
+        value: "",
+        hasStored: false,
+        unavailable: false,
+        localSecretStore: false,
+        onChange: () => undefined,
+      }),
+    );
+
+    expect(html).toContain('<span class="field-hint">Needed for Gemini 4.</span>');
+  });
+});
+
+describe("syncedValues", () => {
+  it("follows the server for fields the user has not edited", () => {
+    expect(
+      syncedValues(
+        { project: "", location: "global" },
+        { project: "", location: "global" },
+        { project: "my-project", location: "us" },
+      ),
+    ).toEqual({ project: "my-project", location: "us" });
+  });
+
+  it("keeps the user's unsaved edits", () => {
+    expect(
+      syncedValues(
+        { project: "draft", location: "global" },
+        { project: "", location: "global" },
+        { project: "my-project", location: "us" },
+      ),
+    ).toEqual({ project: "draft", location: "us" });
+  });
+
+  it("adds fields a newer schema introduces and drops removed ones", () => {
+    expect(
+      syncedValues(
+        { platform: "auto", legacy: "x" },
+        { platform: "auto", legacy: "x" },
+        { platform: "auto", project: "" },
+      ),
+    ).toEqual({ platform: "auto", project: "" });
+  });
+});
+
+describe("syncedMethodId", () => {
+  it("follows an auth method changed on the server", () => {
+    expect(syncedMethodId("api-key", "api-key", "profile")).toBe("profile");
+  });
+
+  it("keeps a method the user switched to locally", () => {
+    expect(syncedMethodId("access-keys", "api-key", "profile")).toBe("access-keys");
   });
 });

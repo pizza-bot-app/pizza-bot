@@ -54,6 +54,7 @@ body:
         - Opper
         - UberLLM
         - Cheaper Inference
+        - TrustedRouter
         - LiteLLM
         - Ollama
         - Not reached / not applicable

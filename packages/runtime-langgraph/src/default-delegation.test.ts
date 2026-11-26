@@ -116,8 +116,10 @@ async function captureModel(
     messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] }],
   };
   const options: RunOptions = { threadId: `delegation_${Math.random().toString(36).slice(2)}` };
+  // Drain the turn: the model replies without tool calls, and stopping at the first
+  // bound tool set would race the model call that records the system prompt.
   for await (const _ of agent.streamProtocol(input, options)) {
-    if (model.boundToolSets.length > 0) break;
+    // The captured tools and prompts are the result.
   }
   return model;
 }
