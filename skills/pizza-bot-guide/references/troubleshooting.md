@@ -8,8 +8,13 @@
 - Check the Logs screen for the provider or runtime error.
 - If a Google Gemini model fails on Vertex AI with
   `Publisher model ... us-central1 ... was not found`, set **Vertex AI project
-  ID** and leave **Vertex AI location** at `global` under **Settings >
-  Providers > Google** (Vertex AI Express serves only `us-central1`).
+  ID** (the project ID, or the number shown in `projects/<number>/` in the
+  error) and leave **Vertex AI location** at `global` under **Settings >
+  Providers > Google** (Vertex AI Express serves only `us-central1`). Under
+  **Auto-detect**, a project ID selects Vertex AI, so clear it if the key is a
+  Google AI Studio key.
+- After fixing the cause of a failed run, choose **Retry** on the error, or send
+  the same message again; either re-runs the turn without repeating the message.
 
 ## A skill is unavailable
 
