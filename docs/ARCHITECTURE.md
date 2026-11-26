@@ -675,12 +675,12 @@ the `provider:model` prefix. The composition root registers
 providers (`agent-host.ts` registers them through `registerBuiltinProviders`) and
 each turn carries its model as `configurable.model`. Amazon Bedrock, Anthropic,
 Google Gemini, OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference,
-LiteLLM, and Ollama are peer `ModelProvider` adapters;
+TrustedRouter, LiteLLM, and Ollama are peer `ModelProvider` adapters;
 another provider can follow the same pattern without changing the runtime,
 transport, or frontend. Each adapter is a peer submodule under
 `packages/inference-providers/src/providers/<id>` (Bedrock keeps its own
 subdirectory for the shim's multiple files). Hosted OpenAI-compatible gateways
-(Requesty, Opper, UberLLM, Cheaper Inference) and self-hosted proxies
+(Requesty, Opper, UberLLM, Cheaper Inference, TrustedRouter) and self-hosted proxies
 (LiteLLM) are not adapters of their own: each is an `OpenAiCompatibleSpec`
 (base URL, env prefix, optional featured listing, a reader for its `/models`
 entries or its own discovery hook, and whether the key is optional) run by the
