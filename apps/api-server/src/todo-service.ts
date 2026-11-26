@@ -57,6 +57,8 @@ export interface TodoServiceDeps {
   listGraphs: () => Promise<GraphSummary[]>;
   /** Appends an assistant message to a thread's checkpoint. */
   postToThread: (threadId: string, text: string) => Promise<void>;
+  /** Raises a posted message as thread activity and indexes it for search. */
+  announce: (threadId: string) => Promise<void>;
   /** Whether the thread's checkpoint is paused on a pending interrupt. */
   awaitsInput: (threadId: string) => Promise<boolean>;
   timezone: string;
@@ -551,6 +553,7 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
       lastMessageRole: "assistant",
     });
     this.deps.threads.touch(home.threadId);
+    await this.deps.announce(home.threadId);
     return home.threadId;
   }
 

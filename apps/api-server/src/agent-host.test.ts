@@ -587,6 +587,19 @@ describe("AgentHost agent threads", () => {
     expect(await host.threadGraph("plain")).toBe(host.agent);
   });
 
+  it("announces and indexes a message posted to an agent's home thread", async () => {
+    await host.agentFor();
+    const todo = host.todoService.create({ title: "Compare flights" });
+    host.todoStore.enqueueDigest("researcher", todo.id, "Fares to Lisbon dropped to 412 euros.");
+
+    await host.todoService.flushDigests();
+
+    const home = host.threadStore.agentHome("researcher")!;
+    const activity = host.threadActivity.listAfter(0).filter((event) => event.threadId === home.threadId);
+    expect(activity).toMatchObject([{ outcome: "message", threadTitle: "researcher" }]);
+    expect(host.search.search("Lisbon").map((hit) => hit.threadId)).toEqual([home.threadId]);
+  });
+
   it("still opens a thread whose agent pins a model that cannot load", async () => {
     host.threadStore.create({ threadId: "with-orphan", agentId: "orphaned" });
 

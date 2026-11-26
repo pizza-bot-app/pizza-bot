@@ -47,6 +47,8 @@ export function notificationForThreadActivity(
       return { ...base, kind: "run-failed", reason: event.outcome };
     case "interrupted":
       return { ...base, kind: "action-required" };
+    case "message":
+      return { ...base, kind: "message" };
     case "cancelled":
       return undefined;
   }

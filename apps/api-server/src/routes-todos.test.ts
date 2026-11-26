@@ -24,6 +24,7 @@ function testApp() {
     listGraphs: async () => [],
     awaitsInput: async () => false,
     postToThread: async () => {},
+    announce: async () => {},
     timezone: "UTC",
   });
   return {

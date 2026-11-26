@@ -26,6 +26,7 @@ function harness(options: { automations?: boolean; now?: () => number } = {}) {
   const posted: Array<[string, string]> = [];
   const fired: Array<[string, string]> = [];
   const cancelled: string[] = [];
+  const announced: string[] = [];
   let threadCounter = 0;
   const service: TodoService = new TodoService({
     todos: appDb.todos,
@@ -59,11 +60,14 @@ function harness(options: { automations?: boolean; now?: () => number } = {}) {
       posted.push([threadId, text]);
     },
     awaitsInput: async (threadId) => awaiting.has(threadId),
+    announce: async (threadId) => {
+      announced.push(threadId);
+    },
     timezone: "UTC",
     now: options.now ?? (() => NOW),
     newThreadId: () => `th-${threadCounter++}`,
   });
-  return { service, appDb, running, awaiting, posted, fired, cancelled };
+  return { service, appDb, running, awaiting, posted, fired, cancelled, announced };
 }
 
 function occurrence(reason: TriggerOccurrence["reason"]): TriggerOccurrence {
@@ -475,6 +479,7 @@ describe("TodoService review fixes", () => {
     const { threadId } = await ownedTodo(h);
     await Promise.all([h.service.notifyUser(threadId, "one"), h.service.notifyUser(threadId, "two")]);
     expect(h.posted.map(([, text]) => text).sort()).toEqual(["one", "two"]);
+    expect(h.announced).toEqual([h.posted[0]![0], h.posted[0]![0]]);
   });
 
   it("delivers a wake that arrived while the last check-in was busy", async () => {

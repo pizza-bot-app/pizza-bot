@@ -504,6 +504,18 @@ export class AgentHost {
           messages: [{ role: "assistant", content: text, id: `msg_notify_${randomUUID()}` }],
         });
       },
+      announce: async (threadId) => {
+        await this.runMaintenance.reindexThread(threadId);
+        const messageId = `msg_${randomUUID()}`;
+        this.threadActivity.append({
+          eventId: `${threadId}:${messageId}`,
+          threadId,
+          runId: messageId,
+          outcome: "message",
+          interruptIds: [],
+          threadTitle: threadActivityTitle(this.threadStore.get(threadId)),
+        });
+      },
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
     this.runMaintenance = new RunMaintenance({
