@@ -163,6 +163,7 @@ export function ChatFeed({
                     <PartErrorBoundary key={i}>
                       <PartView
                         part={part}
+                        literalHtml={m.role === "user"}
                         client={client}
                         onDecision={onDecision}
                         searchTargetMessageId={searchTarget?.messageId}
@@ -194,12 +195,14 @@ export function ChatFeed({
 
 function PartView({
   part,
+  literalHtml,
   client,
   onDecision,
   searchTargetMessageId,
   registerSearchTarget,
 }: {
   part: UIPartLike;
+  literalHtml: boolean;
   client: ApiClient;
   onDecision?: (
     interruptId: string,
@@ -211,7 +214,7 @@ function PartView({
   searchTargetMessageId?: string;
   registerSearchTarget: (messageId: string, element: HTMLElement | null) => void;
 }) {
-  if (part.type === "text") return <MessageResponse>{part.text}</MessageResponse>;
+  if (part.type === "text") return <MessageResponse literalHtml={literalHtml}>{part.text}</MessageResponse>;
 
   if (part.type === "reasoning") {
     return (
