@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
-import { SECRET_UNCHANGED } from "@/api-client";
+import { errorMessage, SECRET_UNCHANGED } from "@/api-client";
 import type {
   ProviderView,
   ProviderConfigView,
@@ -316,10 +316,10 @@ function ProviderRow({
       );
       notify({ title: `${provider.id} saved`, tone: "success" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e) ?? "Save failed");
       notify({
         title: `Could not save ${provider.id}`,
-        description: e instanceof Error ? e.message : undefined,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {
@@ -336,10 +336,10 @@ function ProviderRow({
       setModelPreferences({ mode: "all", selected: [] });
       notify({ title: `${provider.id} removed`, tone: "success" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Remove failed");
+      setError(errorMessage(e) ?? "Remove failed");
       notify({
         title: `Could not remove ${provider.id}`,
-        description: e instanceof Error ? e.message : undefined,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {

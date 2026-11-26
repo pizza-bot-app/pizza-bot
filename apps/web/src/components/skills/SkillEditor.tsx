@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { errorMessage } from "@/api-client";
 import type { SkillBundle, SkillSiblingFile, ToolCatalogInfo } from "@/api-client";
 import type { SkillInterruptOn } from "@pizza-bot/core";
 import { ChevronLeft, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
@@ -63,7 +64,7 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
       setDeclaredTools(draft.declaredTools);
       setInterruptOn(draft.interruptOn);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Generate failed");
+      setError(errorMessage(e) ?? "Generate failed");
     } finally {
       setGenerating(false);
     }
@@ -89,10 +90,10 @@ export function SkillEditor({ skill, tools, onSave, onGenerate, removalAction, c
       await onSave(bundle);
       notify({ title: isNew ? "Skill created" : "Skill saved", tone: "success" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e) ?? "Save failed");
       notify({
         title: "Could not save skill",
-        description: e instanceof Error ? e.message : undefined,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {

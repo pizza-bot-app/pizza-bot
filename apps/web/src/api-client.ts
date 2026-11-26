@@ -39,12 +39,26 @@ export class ApiError extends Error {
     readonly action: string,
     readonly status: number,
     readonly statusText: string,
-    detail?: string,
+    readonly detail?: string,
     readonly code?: string,
   ) {
     super(`${action} failed: ${status} ${detail ?? statusText}`);
     this.name = "ApiError";
   }
+
+  /** The server's own sentence for a rejected request; the full message otherwise. */
+  get userMessage(): string {
+    // Routes put either a machine code (`origin_not_allowed`) or a sentence in the body;
+    // only a sentence reads on its own, and 5xx details are not written for users.
+    const sentence = this.detail && /\s/.test(this.detail.trim()) ? this.detail.trim() : undefined;
+    return this.status >= 400 && this.status < 500 && sentence ? sentence : this.message;
+  }
+}
+
+/** Text for a form or toast, or undefined when the thrown value is not an error. */
+export function errorMessage(err: unknown): string | undefined {
+  if (err instanceof ApiError) return err.userMessage;
+  return err instanceof Error ? err.message : undefined;
 }
 
 interface RequestInitLike {
