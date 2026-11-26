@@ -4,6 +4,7 @@ import { errorMessage, SECRET_UNCHANGED } from "@/api-client";
 import type {
   ProviderView,
   ProviderConfigView,
+  ProviderFieldOptionsView,
   ProviderModelPreferences,
   ModelsInfo,
   StatusInfo,
@@ -12,12 +13,18 @@ import type {
   ModelCatalogStatus,
   ProviderAuthField,
   ProviderAuthMethod,
+  ProviderFieldOption,
 } from "@pizza-bot/core";
 import { isEnvReference } from "@pizza-bot/core";
 import { L } from "../../lexicon.js";
 import { providerLabel } from "../../model-options.js";
 import { ModelCombobox } from "../ModelCombobox.js";
 import { useAppToast } from "../AppToast.js";
+
+export type LoadFieldOptions = (
+  providerId: string,
+  fieldKey: string,
+) => Promise<ProviderFieldOptionsView>;
 
 // Secret inputs never receive stored values. Desktop stores raw keys in the OS
 // keychain; browser mode accepts only an environment-variable reference.
@@ -32,6 +39,7 @@ export interface ProvidersSettingsProps {
     preferences: ProviderModelPreferences,
   ) => Promise<unknown>;
   onRemove: (id: string) => Promise<unknown>;
+  onLoadFieldOptions: LoadFieldOptions;
   onRetryModels: () => Promise<unknown>;
   onSetDefault: (model: string | null) => Promise<unknown>;
   selectedProviderId: string | null;
@@ -73,6 +81,7 @@ export function ProvidersSettings({
   defaultModel,
   onSave,
   onRemove,
+  onLoadFieldOptions,
   onRetryModels,
   onSetDefault,
   selectedProviderId,
@@ -115,6 +124,7 @@ export function ProvidersSettings({
             catalog={allModels.providers?.find((catalog) => catalog.provider === p.id)}
             onSave={onSave}
             onRemove={onRemove}
+            onLoadFieldOptions={onLoadFieldOptions}
             onRetryModels={onRetryModels}
           />
         </div>
@@ -216,6 +226,7 @@ function ProviderRow({
   catalog,
   onSave,
   onRemove,
+  onLoadFieldOptions,
   onRetryModels,
 }: {
   provider: ProviderView;
@@ -227,6 +238,7 @@ function ProviderRow({
     preferences: ProviderModelPreferences,
   ) => Promise<unknown>;
   onRemove: (id: string) => Promise<unknown>;
+  onLoadFieldOptions: LoadFieldOptions;
   onRetryModels: () => Promise<unknown>;
 }) {
   const notify = useAppToast();
@@ -250,6 +262,33 @@ function ProviderRow({
   useEffect(() => {
     setModelPreferences(provider.modelPreferences);
   }, [provider.modelPreferences]);
+
+  const [dynamicOptions, setDynamicOptions] = useState<
+    Record<string, readonly ProviderFieldOption[]>
+  >({});
+  useEffect(() => {
+    let cancelled = false;
+    for (const field of method?.fields ?? []) {
+      if (field.optionsSource !== "dynamic") continue;
+      onLoadFieldOptions(provider.id, field.key).then(
+        ({ options, selected }) => {
+          if (cancelled) return;
+          setDynamicOptions((prev) => ({ ...prev, [field.key]: options }));
+          setValues((prev) =>
+            prev[field.key]
+              ? prev
+              : { ...prev, [field.key]: selected ?? options[0]?.value ?? "" },
+          );
+        },
+        (e: unknown) => {
+          if (!cancelled) setError(errorMessage(e) ?? `Could not load ${field.label} choices`);
+        },
+      );
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [method, provider.id, provider.config, onLoadFieldOptions]);
 
   const onMethodChange = (id: string) => {
     setMethodId(id);
@@ -373,6 +412,7 @@ function ProviderRow({
         <FieldInput
           key={field.key}
           field={field}
+          options={dynamicOptions[field.key] ?? field.options ?? []}
           value={values[field.key] ?? ""}
           hasStored={field.type === "password" && secretHasStored.has(field.key)}
           unavailable={field.type === "password" && unavailableSecrets.has(field.key)}
@@ -575,6 +615,7 @@ function ProviderModelsField({
 
 function FieldInput({
   field,
+  options,
   value,
   hasStored,
   unavailable,
@@ -582,6 +623,7 @@ function FieldInput({
   onChange,
 }: {
   field: ProviderAuthField;
+  options: readonly ProviderFieldOption[];
   value: string;
   hasStored: boolean;
   unavailable: boolean;
@@ -596,7 +638,7 @@ function FieldInput({
       </span>
       {field.type === "select" ? (
         <select className="field-input" value={value} onChange={(e) => onChange(e.target.value)}>
-          {(field.options ?? []).map((o) => (
+          {options.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>

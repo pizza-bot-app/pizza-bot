@@ -93,20 +93,21 @@ describe("BedrockLangChainModelProvider authentication", () => {
     vi.stubGlobal("fetch", sdk.mantleFetch);
   });
 
-  it("exposes discovered profiles and uses the configured profile for credentials", async () => {
+  it("serves discovered profiles outside the schema and uses the configured profile for credentials", async () => {
     const provider = new BedrockLangChainModelProvider({
-      profiles: ["default", "production"],
+      discoverProfiles: async () => ["default", "production"],
       region: "us-east-1",
     });
     provider.configure({ method: "aws-profile", values: { profile: "production" } });
 
-    expect(provider.authSchema[0]?.fields[0]).toMatchObject({
-      default: "default",
-      options: [
-        { value: "default", label: "default" },
-        { value: "production", label: "production" },
-      ],
-    });
+    const profileField = provider.authSchema[0]?.fields[0];
+    expect(profileField).toMatchObject({ key: "profile", optionsSource: "dynamic" });
+    expect(profileField).not.toHaveProperty("options");
+    expect(profileField).not.toHaveProperty("default");
+    await expect(provider.fieldOptions("profile")).resolves.toEqual([
+      { value: "default", label: "default" },
+      { value: "production", label: "production" },
+    ]);
     expect(provider.authSchema.map((method) => method.id)).toEqual([
       "aws-profile",
       "access-keys",
@@ -125,6 +126,18 @@ describe("BedrockLangChainModelProvider authentication", () => {
     expect(sdk.fromIni).toHaveBeenCalledWith({ profile: "production" });
     expect(sdk.fromNodeProviderChain).not.toHaveBeenCalled();
     expect(sdk.chatConfig?.credentials).toBe(sdk.iniCredentials);
+  });
+
+  it("keeps a saved profile selectable after it leaves the config file", async () => {
+    const provider = new BedrockLangChainModelProvider({
+      discoverProfiles: async () => ["default"],
+    });
+    provider.configure({ method: "aws-profile", values: { profile: "retired" } });
+
+    await expect(provider.fieldOptions("profile")).resolves.toEqual([
+      { value: "default", label: "default" },
+      { value: "retired", label: "retired" },
+    ]);
   });
 
   it("retains the ambient credential chain when no profile is configured", async () => {
@@ -151,7 +164,6 @@ describe("BedrockLangChainModelProvider authentication", () => {
           : { modelSummaries: [] }),
     };
     const provider = new BedrockLangChainModelProvider({
-      profiles: ["production"],
       client,
       modelsDevFetch: vi.fn(async () => new Response(JSON.stringify({
         "amazon-bedrock": {
@@ -337,9 +349,7 @@ describe("BedrockLangChainModelProvider authentication", () => {
     sdk.mantleFetch.mockImplementation(async () => new Response(JSON.stringify({
       data: [{ id: "openai.gpt-5.6-sol", display_name: "GPT-5.6 Sol" }],
     }), { status: 200 }));
-    const provider = new BedrockLangChainModelProvider({
-      profiles: ["production"],
-    });
+    const provider = new BedrockLangChainModelProvider();
     provider.configure({ method: "aws-profile", values: { profile: "production" } });
 
     await provider.listModels();
@@ -427,7 +437,6 @@ describe("BedrockLangChainModelProvider authentication", () => {
       }),
     };
     const provider = new BedrockLangChainModelProvider({
-      profiles: ["production"],
       client,
       modelsDevFetch: vi.fn(async () => new Response(JSON.stringify({
         "amazon-bedrock": {
@@ -478,7 +487,6 @@ describe("Bedrock catalog source failures", () => {
     send: (command: unknown) => Promise<unknown>,
   ): BedrockLangChainModelProvider {
     const provider = new BedrockLangChainModelProvider({
-      profiles: ["production"],
       client: { send },
       modelsDevFetch: vi.fn(async () => new Response("{}", { status: 200 })),
     });

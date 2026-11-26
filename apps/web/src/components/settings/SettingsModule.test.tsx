@@ -18,6 +18,7 @@ function renderSettings(maxToolCalls: number, maxSubagentToolCalls: number): str
       defaultModel={null}
       onProviderSave={async () => undefined}
       onProviderRemove={async () => undefined}
+      onLoadProviderFieldOptions={async () => ({ options: [] })}
       onRetryModels={async () => undefined}
       onSetDefaultModel={async () => undefined}
       enableMemories={false}

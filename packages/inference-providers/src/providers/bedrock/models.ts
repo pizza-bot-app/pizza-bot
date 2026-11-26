@@ -70,7 +70,8 @@ export interface BedrockProviderOptions {
   models?: ModelDescriptor[];
   maxTokens?: number;
   profile?: string;
-  profiles?: readonly string[];
+  /** Defaults to reading the AWS shared config file. */
+  discoverProfiles?: () => Promise<string[]>;
   client?: { send(command: unknown): Promise<unknown> };
   fetch?: typeof fetch;
   modelsDev?: ModelsDevCatalogLoader;
