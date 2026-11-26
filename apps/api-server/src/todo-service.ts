@@ -57,8 +57,8 @@ export interface TodoServiceDeps {
   listGraphs: () => Promise<GraphSummary[]>;
   /** Appends an assistant message to a thread's checkpoint. */
   postToThread: (threadId: string, text: string) => Promise<void>;
-  /** Raises a posted message as thread activity and indexes it for search. */
-  announce: (threadId: string) => Promise<void>;
+  /** Indexes a posted message for search and, with `notify`, raises it as thread activity. */
+  announce: (threadId: string, options: { notify: boolean }) => Promise<void>;
   /** Removes threads with their checkpoints and search entries, in the background. */
   deleteThreads: (threadIds: string[]) => void;
   /** Whether the thread's checkpoint is paused on a pending interrupt. */
@@ -256,9 +256,10 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     this.deps.todos.appendEvent(todo.id, { kind: "asked", actor, threadId, ...(question ? { note: question } : {}) });
     if (todo.owner && question) {
       // Best effort: the question still waits in the Action view if the home thread is busy.
-      await this.postToHome(todo.owner, `I have a question about "${todo.title}": ${question}\n\nAnswer it in the Action view.`).catch(
-        () => undefined,
-      );
+      // The paused work thread already raises its own notification.
+      await this.postToHome(todo.owner, `I have a question about "${todo.title}": ${question}\n\nAnswer it in the Action view.`, {
+        notify: false,
+      }).catch(() => undefined);
     }
   }
 
@@ -520,9 +521,9 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
   }
 
   /** Writes to one home thread run one at a time: concurrent writes would branch the same checkpoint. */
-  private async postToHome(agentId: string, text: string): Promise<string> {
+  private async postToHome(agentId: string, text: string, options = { notify: true }): Promise<string> {
     const previous = this.homeWrites.get(agentId) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(() => this.writeToHome(agentId, text));
+    const next = previous.catch(() => undefined).then(() => this.writeToHome(agentId, text, options));
     this.homeWrites.set(agentId, next);
     try {
       return await next;
@@ -531,7 +532,7 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     }
   }
 
-  private async writeToHome(agentId: string, text: string): Promise<string> {
+  private async writeToHome(agentId: string, text: string, options: { notify: boolean }): Promise<string> {
     const status = this.deps.agentStatus(agentId);
     const home =
       this.deps.threads.agentHome(agentId) ??
@@ -559,7 +560,7 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
       lastMessageRole: "assistant",
     });
     this.deps.threads.touch(home.threadId);
-    await this.deps.announce(home.threadId);
+    await this.deps.announce(home.threadId, options);
     return home.threadId;
   }
 

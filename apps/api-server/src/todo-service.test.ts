@@ -61,8 +61,8 @@ function harness(options: { automations?: boolean; now?: () => number } = {}) {
       posted.push([threadId, text]);
     },
     awaitsInput: async (threadId) => awaiting.has(threadId),
-    announce: async (threadId) => {
-      announced.push(threadId);
+    announce: async (threadId, { notify }) => {
+      announced.push(notify ? threadId : `quiet:${threadId}`);
     },
     deleteThreads: (threadIds) => {
       removed.push(...threadIds);
@@ -319,6 +319,7 @@ describe("TodoService ambient access", () => {
     await h.service.recordPause(threadId, "Window or aisle?");
     expect(h.service.get(todo.id)!.history.at(-1)).toMatchObject({ kind: "asked", actor: "researcher", threadId, note: "Window or aisle?" });
     expect(h.posted[0]![1]).toBe('I have a question about "Compare flights": Window or aisle?\n\nAnswer it in the Action view.');
+    expect(h.announced).toEqual([`quiet:${h.posted[0]![0]}`]);
   });
 
   it("records a failed check-in with its error", async () => {

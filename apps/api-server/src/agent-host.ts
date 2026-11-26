@@ -504,8 +504,9 @@ export class AgentHost {
           messages: [{ role: "assistant", content: text, id: `msg_notify_${randomUUID()}` }],
         });
       },
-      announce: async (threadId) => {
+      announce: async (threadId, { notify }) => {
         await this.runMaintenance.reindexThread(threadId);
+        if (!notify) return;
         const messageId = `msg_${randomUUID()}`;
         this.threadActivity.append({
           eventId: `${threadId}:${messageId}`,
