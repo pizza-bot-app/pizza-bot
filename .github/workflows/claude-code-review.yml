@@ -8,7 +8,7 @@ permissions:
   # Write so UI screenshots can be committed to the ui-screenshots branch,
   # the only way a comment can show an image.
   contents: write
-  # Required to post the review as inline comments on the pull request.
+  # Required to post findings and the verdict on the pull request.
   pull-requests: write
   issues: read
   # Lets GitHub mint the OIDC token that AWS exchanges for role credentials.
@@ -119,18 +119,18 @@ jobs:
             You are the required reviewer for ${{ github.repository }}/pull/${{ github.event.pull_request.number }}.
             The checkout is installed and built. CI separately runs the full build, typecheck, lint, and test suite, so do not re-run them wholesale.
 
-            1. Invoke the `code-review:code-review` skill with args `--comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}`. Skip its eligibility checks: this run gates the merge, so always review the current head, even if Claude has already reviewed or commented on an earlier push.
+            1. Invoke the `code-review:code-review` skill with args `--comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}`. Skip its eligibility checks: this run gates the merge, so always review the current head, even if Claude has already reviewed or commented on an earlier push. Post findings as inline comments, but no summary comment, not even the skill's "no issues found" one: the workflow posts your verdict and `summary`.
             2. For each finding the review would rank important, try to confirm it by executing code: run the relevant tests with `npx vitest run --dir <workspace> --reporter=agent`, or write a small failing test (run it the same way) or `npx tsx` probe under `.agent-review/`. Live model calls are unavailable; use the scripted-model harness in tests/langgraph-compat when a probe needs the runtime.
-            3. Return verdict "block" if any important finding stands, whether it is confirmed by execution or clear from reading the code. Otherwise return "ship".
+            3. Return verdict "block" if any important finding stands, whether it is confirmed by execution or clear from reading the code. Otherwise return "ship". Write `summary` for the pull request's readers: what was checked, what was run, and what was found.
             4. In `files_reviewed`, list every changed file whose diff you read, by its repository path. Tests, snapshots, lockfiles, and images may be left out. The workflow fails a "ship" verdict that leaves out any other changed file.
 
             Run every agent and task the review starts in the foreground, never with `run_in_background`, and wait for each to return before you continue: your verdict ends the session, so anything still running is lost. If the review did not finish (an agent failed, or you ran out of turns or time), return "block" and say which part went unreviewed; "ship" means the whole diff was reviewed.
           # --allowedTools REPLACES the action's default tool set, so the
           # subagent tool the review skill starts its reviewers with, the read
-          # tools, the inline-comment MCP tool (started only when named here),
-          # and `gh pr comment` (how the skill reports a clean review) must all be
-          # listed. The npm/npx entries run the pull request's own code; that is
-          # safe only because the first step admits collaborator branches alone.
+          # tools, and the inline-comment MCP tool (started only when named here)
+          # must all be listed. The npm/npx entries run the pull request's own
+          # code; that is safe only because the first step admits collaborator
+          # branches alone.
           #
           # Pinning the full model ID stops Claude Code from deriving a us.
           # profile from AWS_REGION. It does not confine the run to one model:
@@ -139,7 +139,7 @@ jobs:
           claude_args: |
             --model global.anthropic.claude-opus-5-5
             --max-turns 120
-            --allowedTools "Agent,Task,Skill,Glob,Grep,LS,Read,Write,mcp__playwright,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(npx vitest:*),Bash(npx tsx:*),Bash(npx tsc:*),Bash(npm test:*),Bash(npm run:*)"
+            --allowedTools "Agent,Task,Skill,Glob,Grep,LS,Read,Write,mcp__playwright,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(npx vitest:*),Bash(npx tsx:*),Bash(npx tsc:*),Bash(npm test:*),Bash(npm run:*)"
             ${{ steps.ui.outputs.started == 'true' && format('--mcp-config {0} --append-system-prompt-file .github/prompts/ui-screenshots.md', steps.ui.outputs.mcp_config) || '' }}
             --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["ship","block"]},"blocking_findings":{"type":"integer","minimum":0},"summary":{"type":"string"},"files_reviewed":{"type":"array","items":{"type":"string"}}},"required":["verdict","blocking_findings","summary","files_reviewed"],"additionalProperties":false}'
 
@@ -158,6 +158,7 @@ jobs:
       # Fails closed: a run that ends without structured output (a refusal, the
       # turn cap) blocks the merge just as a "block" verdict does.
       - name: Enforce verdict
+        id: enforce
         env:
           RESULT: ${{ steps.review.outputs.structured_output }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -179,8 +180,45 @@ jobs:
           reviewed=$(jq -r '.files_reviewed[]?' <<<"$RESULT" | sort -u)
           missing=$(comm -23 <(printf '%s\n' "$changed") <(printf '%s\n' "$reviewed") | sed '/^$/d')
           if [ -n "$missing" ]; then
-            { echo; echo "Not reviewed:"; sed 's/^/- /' <<<"$missing"; } >> "$GITHUB_STEP_SUMMARY"
+            { echo; echo "Not reviewed:"; sed 's/^/- /' <<<"$missing"; } \
+              | tee "$RUNNER_TEMP/not-reviewed.md" >> "$GITHUB_STEP_SUMMARY"
             echo "::error::Agent review returned ship without reviewing: $(paste -sd, - <<<"$missing")"
             exit 1
           fi
           echo "Agent review: ship"
+
+      # One comment per pull request, found by its marker and rewritten on each
+      # push. Posting is best effort: the check alone gates the merge.
+      - name: Post verdict
+        if: ${{ !cancelled() && steps.review.outcome != 'skipped' }}
+        continue-on-error: true
+        env:
+          RESULT: ${{ steps.review.outputs.structured_output }}
+          GATE: ${{ steps.enforce.outcome }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          marker='<!-- agent-review -->'
+          status=blocked
+          if [ "$GATE" = success ]; then status=passed; fi
+          summary=$(jq -r '.summary // empty' <<<"$RESULT" 2>/dev/null || true)
+          {
+            echo "$marker"
+            echo "## Agent review: $status"
+            echo
+            printf '%s\n' "${summary:-The review ended without a verdict.}"
+            if [ -f "$RUNNER_TEMP/not-reviewed.md" ]; then cat "$RUNNER_TEMP/not-reviewed.md"; fi
+            echo
+            echo "Commit $HEAD_SHA, [workflow run]($RUN_URL)"
+          } > "$RUNNER_TEMP/verdict.md"
+          comments="repos/$GITHUB_REPOSITORY/issues"
+          id=$(gh api --paginate "$comments/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" \
+            | head -n 1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "$comments/comments/$id" -F body=@"$RUNNER_TEMP/verdict.md" --silent
+          else
+            gh api --method POST "$comments/$PR/comments" -F body=@"$RUNNER_TEMP/verdict.md" --silent
+          fi

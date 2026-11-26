@@ -165,7 +165,9 @@ own AWS account and no model credential is stored here: each run exchanges its
 GitHub OIDC token for a short-lived IAM role session. `agent-review` is a required
 check: it reviews every push to a pull request, can build and run the code and
 screenshot UI changes, and ends in a `ship` or `block` verdict that fails the
-check on `block` or when the review could not finish.
+check on `block` or when the review could not finish. Findings arrive as inline
+comments; the verdict and the reviewer's summary go in a single comment that each
+push rewrites.
 
 Two workflows, split by what GitHub is willing to hand a run:
 
