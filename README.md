@@ -5,7 +5,7 @@
 <h1 align="center">Pizza Bot</h1>
 
 <p align="center">
-  <strong>An inbox for long-running AI work.</strong><br />
+  <strong>A local-first inbox for long-running AI work.</strong><br />
   Start or schedule a task, walk away, and come back to finished work in <b>Unread</b>
   and decisions waiting for you in <b>Action</b>.
 </p>

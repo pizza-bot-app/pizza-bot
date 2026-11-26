@@ -47,14 +47,41 @@ afterEach(() => {
 });
 
 describe("TriggerService: missed-run recovery", () => {
-  it("fires once for a never-run cron trigger", () => {
+  it("does NOT fire a never-run cron trigger before its first tick after creation", () => {
     const store = memStore();
-    store.create({ id: "t", kind: "cron", enabled: true, cron: "0 * * * *" });
+    const now = Date.parse("2026-07-05T12:30:00.000Z");
+    store.create({
+      id: "t",
+      kind: "cron",
+      enabled: true,
+      cron: "0 0 1 1 *",
+      createdAt: "2026-07-05T12:00:00.000Z",
+    });
     const m = mockLauncher();
-    const svc = new TriggerService(m.launcher, store, { log: () => {} });
+    const svc = new TriggerService(m.launcher, store, { now: () => now, log: () => {} });
+    svc.start();
+    expect(m.starts).toHaveLength(0);
+    expect(store.occurrences("t")).toHaveLength(0);
+    svc.stop();
+  });
+
+  it("fires once for a never-run cron trigger that missed a tick since creation", () => {
+    const store = memStore();
+    const now = Date.parse("2026-07-05T12:30:00.000Z");
+    store.create({
+      id: "t",
+      kind: "cron",
+      enabled: true,
+      cron: "0 * * * *",
+      createdAt: "2026-07-05T09:15:00.000Z",
+    });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, { now: () => now, log: () => {} });
     svc.start();
     expect(m.starts).toHaveLength(1);
-    expect(store.occurrences("t")).toHaveLength(1);
+    const [occurrence] = store.occurrences("t");
+    expect(occurrence?.reason).toBe("cron-recovery");
+    expect(occurrence?.scheduledAt).toBe("2026-07-05T10:00:00.000Z");
     svc.stop();
   });
 
