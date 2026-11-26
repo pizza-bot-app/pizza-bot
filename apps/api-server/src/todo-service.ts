@@ -80,6 +80,8 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
   /** Wakes that arrived while the Todo's last check-in was busy; delivered when that run ends. */
   private readonly pendingWakes = new Map<string, "handoff" | "subtask">();
   private readonly homeWrites = new Map<string, Promise<unknown>>();
+  /** Immediate notifications in flight per agent; they count toward the limit before they are recorded. */
+  private readonly sending = new Map<string, number>();
 
   constructor(private readonly deps: TodoServiceDeps) {
     this.newThreadId =
@@ -121,11 +123,8 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
   delete(id: string): boolean {
     const current = this.deps.todos.get(id);
     if (current) this.closeWorkThread(current);
-    const trigger = this.deps.triggers.forTodo(id);
-    if (trigger) {
-      this.deps.triggers.delete(trigger.id);
-      this.deps.scheduler()?.reload();
-    }
+    this.releaseSubtasks(id);
+    this.dropSchedule(id);
     return this.deps.todos.delete(id);
   }
 
@@ -202,19 +201,18 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     if (reason === "cron" && todo.snoozedUntil && Date.parse(todo.snoozedUntil) > this.now()) {
       return { skip: `the Todo is snoozed until ${todo.snoozedUntil}` };
     }
+    const ended = reason === "manual" ? undefined : this.endedAncestor(todo);
+    if (ended) {
+      this.notePaused(todo, `The Todo it is part of is ${ended}.`);
+      return { skip: `the Todo it is part of is ${ended}` };
+    }
     if (todo.owner) {
       const status = this.deps.agentStatus(todo.owner);
       if (!status?.ready) return { skip: `${status?.name ?? todo.owner} is unavailable` };
     }
     if (budgetUsedUp(todo)) {
-      if (!pausedSinceLastCheckIn(todo.history)) {
-        const { maxCheckIns, used } = todo.budget!;
-        this.deps.todos.appendEvent(todo.id, {
-          kind: "paused",
-          actor: "user",
-          note: `Check-in budget used up (${used} of ${maxCheckIns}).`,
-        });
-      }
+      const { maxCheckIns, used } = todo.budget!;
+      this.notePaused(todo, `Check-in budget used up (${used} of ${maxCheckIns}).`);
       return { skip: "the Todo's check-in budget is used up" };
     }
 
@@ -336,14 +334,20 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
       return "queued";
     }
     const since = new Date(this.now() - DAY_MS).toISOString();
-    const sent = this.deps.todos.countEvents("notified", todo.owner, since, true);
+    const inFlight = this.sending.get(todo.owner) ?? 0;
+    const sent = this.deps.todos.countEvents("notified", todo.owner, since, true) + inFlight;
     if (sent >= TODO_NOTIFY_LIMIT_PER_DAY) {
       throw new TodoRefusal(
         `You have already sent the user ${sent} updates in the last day; record this with update_todo instead.`,
       );
     }
-    const homeThreadId = await this.postToHome(todo.owner, message);
-    this.deps.todos.appendEvent(todo.id, { kind: "notified", actor: todo.owner, threadId: homeThreadId, note: message });
+    this.sending.set(todo.owner, inFlight + 1);
+    try {
+      const homeThreadId = await this.postToHome(todo.owner, message);
+      this.deps.todos.appendEvent(todo.id, { kind: "notified", actor: todo.owner, threadId: homeThreadId, note: message });
+    } finally {
+      this.sending.set(todo.owner, this.sending.get(todo.owner)! - 1);
+    }
     return "delivered";
   }
 
@@ -384,6 +388,11 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
 
   async requestTodo(threadId: string, toAgentId: string, title: string, note: string): Promise<Todo> {
     const parent = this.ownedBy(threadId);
+    if (parent.completed) throw new TodoRefusal("This Todo is complete; end your turn instead of asking for more.");
+    const ended = this.endedAncestor(parent);
+    if (ended) {
+      throw new TodoRefusal(`This is a subtask and the Todo it is part of is ${ended}; end your turn instead of asking for more.`);
+    }
     if (toAgentId === parent.owner) throw new TodoRefusal("Do the work yourself, or hand the whole Todo on with reassign_todo.");
     const target = this.deps.agentStatus(toAgentId);
     if (!target) throw new TodoRefusal(`There is no agent "${toAgentId}". ${this.handoffTargets(parent.owner)}`);
@@ -407,6 +416,7 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
       { parentTodoId: parent.id },
     );
     this.deps.todos.setOwner(child.id, toAgentId, { actor: parent.owner, note });
+    if (parent.budget) this.deps.todos.setPreferences(child.id, { maxCheckIns: parent.budget.maxCheckIns });
     // The child checks in on its parent's schedule, so work left after its first turn is picked up again.
     const parentSchedule = this.deps.triggers.forTodo(parent.id)?.cron;
     this.saveSchedule(this.deps.todos.get(child.id)!, parentSchedule ?? TODO_DEFAULT_CHECK_IN);
@@ -433,6 +443,40 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
       note: `finished: ${child.title}`,
     });
     if ((parent.owner || parent.ownerGraph) && !parent.completed) this.wake(parent.id, "subtask");
+  }
+
+  /**
+   * Why nothing is left for a subtask to serve: a Todo above it is complete or unowned.
+   * One the user assigned themselves, and anything below it, stands on its own.
+   */
+  private endedAncestor(todo: StoredTodo): "complete" | "no longer assigned" | undefined {
+    let current = todo;
+    while (current.parentTodoId && lastUserAssignment(current.history) < 0) {
+      const parent = this.deps.todos.get(current.parentTodoId);
+      if (!parent) return undefined;
+      if (parent.completed) return "complete";
+      if (!ownerOf(parent)) return "no longer assigned";
+      current = parent;
+    }
+    return undefined;
+  }
+
+  /** Deleting a parent cuts the link `endedAncestor` follows, so its subtasks are stopped here. */
+  private releaseSubtasks(parentId: string): void {
+    for (const child of this.deps.todos.children(parentId)) {
+      if (lastUserAssignment(child.history) >= 0) continue;
+      if (!child.completed && ownerOf(child)) {
+        this.closeWorkThread(child);
+        this.deps.todos.setOwner(child.id, null, { actor: "user" });
+      }
+      this.dropSchedule(child.id);
+    }
+  }
+
+  /** Records why check-ins stopped, once until the next check-in or assignment. */
+  private notePaused(todo: StoredTodo, note: string): void {
+    if (pausedSinceLastCheckIn(todo.history)) return;
+    this.deps.todos.appendEvent(todo.id, { kind: "paused", actor: "user", note });
   }
 
   private wake(todoId: string, reason: "handoff" | "subtask"): void {
@@ -641,12 +685,11 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
 
   private checkInPrompt(todo: StoredTodo, reason: TodoCheckInReason): string {
     const lastAssigned = [...todo.history].reverse().find((event) => event.kind === "assigned");
-    const lastSubtask = [...todo.history].reverse().find((event) => event.kind === "subtask");
     const why =
       reason === "handoff"
         ? `${this.agentName(lastAssigned?.actor ?? "")} handed this Todo to you; their note is the latest assignment in the timeline.`
         : reason === "subtask"
-          ? `A subtask you requested changed: ${lastSubtask?.note ?? "see the timeline"}.`
+          ? "A subtask you requested finished; it is the latest finished subtask in the timeline."
           : reason === "manual"
             ? "The user asked you to check in now."
             : "This is a scheduled check-in.";
@@ -735,7 +778,7 @@ function lastUserAssignment(history: readonly TodoEvent[]): number {
   return -1;
 }
 
-/** Whether the budget pause was already recorded since the last check-in or assignment. */
+/** Whether a pause was already recorded since the last check-in or assignment. */
 function pausedSinceLastCheckIn(history: readonly TodoEvent[]): boolean {
   for (const event of [...history].reverse()) {
     if (event.kind === "paused") return true;
