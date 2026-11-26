@@ -61,6 +61,7 @@ const todo: Todo = {
   threadIds: [],
   owner: "researcher",
   history: [],
+  notify: "immediate",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };
@@ -76,9 +77,17 @@ function recordingAccess() {
     notifyUser: async (threadId, message) => {
       calls.push(["notify", threadId, message]);
     },
-    reassign: (threadId, toAgentId, note) => {
+    reassign: async (threadId, toAgentId, note) => {
       calls.push(["reassign", threadId, { toAgentId, note }]);
       return { ...todo, owner: toAgentId };
+    },
+    snooze: (threadId, until, note) => {
+      calls.push(["snooze", threadId, { until, note }]);
+      return { ...todo, snoozedUntil: until };
+    },
+    requestTodo: async (threadId, toAgentId, title, note) => {
+      calls.push(["request", threadId, { toAgentId, title, note }]);
+      return { ...todo, id: "child", title, owner: toAgentId, parentTodoId: todo.id };
     },
   };
   return { access, calls };
@@ -136,6 +145,23 @@ describe("ambient check-in tools", () => {
     const agent = await createAgentRootAgent(owner, { model, checkpointer: new MemorySaver() }, { ambient: access });
     await drain(agent.streamProtocol(checkIn, { threadId: "bg-3" }));
     expect(calls).toEqual([["reassign", "bg-3", { toAgentId: "booker", note: "Book the Tuesday fare." }]]);
+  });
+
+  it("snoozes and requests subtasks through the host", async () => {
+    const model = new ScriptedModel([
+      [
+        { name: "request_todo", args: { toAgent: "booker", title: "Hold the Tuesday fare", note: "Need a 24h hold." } },
+        { name: "snooze_until", args: { until: "2026-12-01T09:00:00-08:00", reason: "Fares update Monday." } },
+      ],
+    ]);
+    const { access, calls } = recordingAccess();
+    const agent = await createAgentRootAgent(owner, { model, checkpointer: new MemorySaver() }, { ambient: access });
+    await drain(agent.streamProtocol(checkIn, { threadId: "bg-4" }));
+    expect(model.boundToolSets[0]).toEqual(expect.arrayContaining(["request_todo", "snooze_until"]));
+    expect(calls).toEqual([
+      ["request", "bg-4", { toAgentId: "booker", title: "Hold the Tuesday fare", note: "Need a 24h hold." }],
+      ["snooze", "bg-4", { until: "2026-12-01T09:00:00-08:00", note: "Fares update Monday." }],
+    ]);
   });
 
   it("is absent from an agent's ordinary conversations", async () => {

@@ -27,7 +27,9 @@ function setup() {
   const db = openAppDatabase(":memory:");
   dbs.push(db);
   const starts: Array<{ threadId: string; input: RunInput; opts?: Partial<RunOptions> }> = [];
+  const ownedTodos: Array<{ title: string; ownerGraph?: string }> = [];
   const host = {
+    todoService: { list: () => ownedTodos, refreshGraphs: async () => {} },
     graphRegistry: new GraphRegistry(path.join(dir, "graphs")),
     triggers: db.triggers,
     threadStore: db.threadStore,
@@ -90,6 +92,13 @@ describe("graph routes", () => {
     host.triggers.create({ id: "t", kind: "cron", cron: "0 9 * * *", graphId: "digest", enabled: true });
     expect((await app.request("/graphs/digest", { method: "DELETE" })).status).toBe(409);
     host.triggers.delete("t");
+
+    const owned = (host.todoService as unknown as { list: () => Array<{ title: string; ownerGraph?: string }> }).list();
+    owned.push({ title: "File the request", ownerGraph: "digest" });
+    const owning = await app.request("/graphs/digest", { method: "DELETE" });
+    expect(owning.status).toBe(409);
+    expect(await owning.json()).toMatchObject({ detail: 'this graph owns the Todo "File the request"; reassign it first' });
+    owned.pop();
 
     host.threadStore.create({ threadId: "thread_graph_1", graphId: "digest" });
     const stranded = await app.request("/graphs/digest", { method: "DELETE" });

@@ -552,6 +552,26 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("sends a graph owner, a snooze, the updates mode, and a check-in limit", async () => {
+    const bodies: unknown[] = [];
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ id: "t1" }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    await client.updateTodo("t1", { owner: "graph:triage" });
+    await client.updateTodo("t1", { snoozedUntil: "2026-12-01T09:00:00.000Z", notify: "digest", maxCheckIns: 5 });
+    await client.updateTodo("t1", { snoozedUntil: null, maxCheckIns: null });
+    expect(bodies).toEqual([
+      { owner: "graph:triage" },
+      { snoozedUntil: "2026-12-01T09:00:00.000Z", notify: "digest", maxCheckIns: 5 },
+      { snoozedUntil: null, maxCheckIns: null },
+    ]);
+  });
+
   it("surfaces a refused check-in with the server's sentence", async () => {
     const client = new ApiClient({
       baseUrl: "http://x",

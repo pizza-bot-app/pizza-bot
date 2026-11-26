@@ -157,7 +157,7 @@ export function App() {
   );
 
   const triggers = useTriggers(client, 5_000, visibleAdmin.triggers);
-  const graphs = useGraphs(client, 5_000, visibleAdmin.graphs);
+  const graphs = useGraphs(client, 5_000, visibleAdmin.graphs || view === "todos");
   const todos = useTodos(client);
   const refreshTodos = todos.refresh;
   const flaggedThreads = useMemo(() => flaggedThreadIds(todos.todos), [todos.todos]);
@@ -173,7 +173,7 @@ export function App() {
   const [threadModels, setThreadModels] = useState<Map<string, string>>(() => new Map());
   // A thread's graph is fixed at creation, so entries are only ever added.
   const [threadGraphIds, setThreadGraphIds] = useState<Map<string, string>>(() => new Map());
-  const noteGraphThreads = useCallback((rows: ThreadInfo[]) => {
+  const noteGraphThreads = useCallback((rows: Array<Pick<ThreadInfo, "threadId" | "graphId">>) => {
     setThreadGraphIds((prev) => {
       const added = rows.filter((row) => row.graphId && !prev.has(row.threadId));
       if (added.length === 0) return prev;
@@ -319,7 +319,8 @@ export function App() {
   const openTodoThread = useCallback(
     (threadId: string, workThread?: WorkThreadHint) => {
       if (workThread) {
-        noteAgentThreads([{ threadId, agentId: workThread.agentId }]);
+        if ("graphId" in workThread) noteGraphThreads([{ threadId, graphId: workThread.graphId }]);
+        else noteAgentThreads([{ threadId, agentId: workThread.agentId }]);
         noteBackgroundThreads([threadId]);
         setThreadTitles((prev) =>
           prev.has(threadId) ? prev : new Map(prev).set(threadId, workThread.title),
@@ -327,7 +328,7 @@ export function App() {
       }
       openNotifiedThread(threadId);
     },
-    [noteAgentThreads, noteBackgroundThreads, openNotifiedThread],
+    [noteAgentThreads, noteBackgroundThreads, noteGraphThreads, openNotifiedThread],
   );
   const desktopNotifications = useDesktopNotifications(
     openNotifiedThread,
@@ -573,6 +574,7 @@ export function App() {
                 todos={todos.todos}
                 threadTitles={threadTitles}
                 agents={catalogAgents}
+                graphs={graphs.listing.graphs}
                 automationsEnabled={features.enableAutomations}
                 awaitingThreadIds={awaitingThreadIds}
                 onCreate={todos.create}

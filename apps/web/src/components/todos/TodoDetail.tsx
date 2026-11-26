@@ -8,43 +8,60 @@ import {
 } from "@pizza-bot/core";
 import { errorMessage, type AgentCatalogEntryInfo } from "@/api-client";
 import {
+  Bot,
   CalendarDays,
   ChevronLeft,
   Circle,
   CircleCheck,
+  CornerLeftUp,
   ListChecks,
+  ListTree,
   MessageSquare,
   Plus,
   Star,
   StickyNote,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import { ConfirmationDialog } from "../ConfirmationDialog.js";
 import { relativeTime } from "../../lib/conversation.js";
 import { dueLabel, isOverdue } from "../../lib/todo-views.js";
+import { graphIdOf, ownerValue, workOwnerOf, type WorkOwner } from "../../lib/todo-ownership.js";
 import { L } from "../../lexicon.js";
-import { TodoAssignment } from "./TodoAssignment.js";
+import { TodoAssignment, type TodoGraphOption } from "./TodoAssignment.js";
 import { TodoTimeline } from "./TodoTimeline.js";
 
-/** Identifies an agent's work thread so it opens with its agent even while unlisted. */
-export interface WorkThreadHint {
-  agentId: string;
-  title: string;
-}
+/** Identifies a work thread (an agent's, or a graph run) so it opens correctly while unlisted. */
+export type WorkThreadHint = WorkOwner & { title: string };
 
 export interface TodoDetailProps {
   todo: Todo;
   today: string;
   threadTitles: ReadonlyMap<string, string>;
   agents: readonly AgentCatalogEntryInfo[];
+  graphs?: readonly TodoGraphOption[];
+  /** Every Todo, for this one's parent and subtasks. */
+  todos?: readonly Todo[];
   automationsEnabled: boolean;
   onUpdate: (patch: TodoPatch & TodoAssignmentPatch) => Promise<void>;
   onDelete: () => Promise<void>;
   onUnlinkThread: (threadId: string) => Promise<void>;
   onCheckIn: () => Promise<void>;
   onOpenThread: (threadId: string, workThread?: WorkThreadHint) => void;
+  onSelectTodo?: (todoId: string) => void;
   onBack?: () => void;
+}
+
+/** An owner or actor's display name: an agent's name, or a `graph:<id>`'s graph name. */
+export function ownerDisplayName(
+  id: string,
+  agents: readonly AgentCatalogEntryInfo[],
+  graphs: readonly TodoGraphOption[],
+): string {
+  const graphId = graphIdOf(id);
+  if (graphId) return graphs.find((graph) => graph.id === graphId)?.name ?? graphId;
+  return agents.find((agent) => agent.id === id)?.name ?? id;
 }
 
 type StepDraft = Pick<TodoStep, "title" | "completed"> & { id?: string };
@@ -61,15 +78,21 @@ export function TodoDetail({
   today,
   threadTitles,
   agents,
+  graphs = [],
+  todos = [],
   automationsEnabled,
   onUpdate,
   onDelete,
   onUnlinkThread,
   onCheckIn,
   onOpenThread,
+  onSelectTodo,
   onBack,
 }: TodoDetailProps) {
-  const nameOf = (agentId: string) => agents.find((agent) => agent.id === agentId)?.name ?? agentId;
+  const nameOf = (id: string) => ownerDisplayName(id, agents, graphs);
+  const owner = ownerValue(todo);
+  const parent = todo.parentTodoId ? todos.find((candidate) => candidate.id === todo.parentTodoId) : undefined;
+  const subtasks = todos.filter((candidate) => candidate.parentTodoId === todo.id);
   const [title, setTitle] = useState(todo.title);
   const [notes, setNotes] = useState(todo.notes);
   const [newStep, setNewStep] = useState("");
@@ -162,10 +185,47 @@ export function TodoDetail({
         automationsEnabled={automationsEnabled}
         onAssign={onUpdate}
         onCheckIn={onCheckIn}
+        graphs={graphs}
         onOpenWorkThread={(threadId) =>
-          onOpenThread(threadId, { agentId: todo.owner!, title: todo.title })
+          onOpenThread(threadId, owner ? { ...workOwnerOf(owner), title: todo.title } : undefined)
         }
       />
+
+      {parent && (
+        <p className="todo-parent-link">
+          <CornerLeftUp size={14} aria-hidden="true" /> {L.todoPartOf}{" "}
+          <button type="button" className="todo-timeline-link" onClick={() => onSelectTodo?.(parent.id)}>
+            {parent.title}
+          </button>
+        </p>
+      )}
+
+      {subtasks.length > 0 && (
+        <section className="todo-detail-section">
+          <h3 className="todo-detail-section-title">
+            <ListTree size={14} /> {L.todoSubtasks}
+          </h3>
+          <ul className="todo-subtasks">
+            {subtasks.map((child) => {
+              const childOwner = ownerValue(child);
+              return (
+                <li key={child.id} className={`todo-subtask${child.completed ? " completed" : ""}`}>
+                  {child.completed ? <CircleCheck size={14} aria-hidden="true" /> : <Circle size={14} aria-hidden="true" />}
+                  <button type="button" className="todo-thread-open" onClick={() => onSelectTodo?.(child.id)}>
+                    {child.title}
+                  </button>
+                  {childOwner && (
+                    <span className="todo-owner">
+                      {graphIdOf(childOwner) ? <Workflow size={11} aria-hidden="true" /> : <Bot size={11} aria-hidden="true" />}
+                      {nameOf(childOwner)}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <section className="todo-detail-section">
         <h3 className="todo-detail-section-title">
@@ -286,9 +346,10 @@ export function TodoDetail({
         onOpenThread={(entry) =>
           onOpenThread(
             entry.threadId,
-            entry.workAgentId ? { agentId: entry.workAgentId, title: todo.title } : undefined,
+            entry.workOwner ? { ...workOwnerOf(entry.workOwner), title: todo.title } : undefined,
           )
         }
+        {...(onSelectTodo ? { onOpenTodo: onSelectTodo } : {})}
       />
 
       <footer className="todo-detail-foot">

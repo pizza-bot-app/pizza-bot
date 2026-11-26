@@ -37,11 +37,17 @@ export interface TriggerServiceOptions {
   /** Whether a thread is still paused for a person after a run on it ends. */
   awaitsInput?: (threadId: string) => Promise<boolean>;
   newThreadId?: () => string;
-  /** Resolves a Todo check-in to its owner's background thread and prompt, or a reason to skip it. */
+  /**
+   * Resolves a Todo check-in to its owner's background thread and prompt, or to a
+   * run of the graph that owns it, or a reason to skip it.
+   */
   todoCheckIn?: (
     trigger: TriggerDef,
     occurrence: TriggerOccurrence,
-  ) => { threadId: string; prompt: string } | { skip: string };
+  ) =>
+    | { threadId: string; prompt: string }
+    | { threadId: string; graphId: string; input: Record<string, unknown> }
+    | { skip: string };
   maxAttempts?: number;
   log?: (msg: string) => void;
 }
@@ -148,7 +154,7 @@ export class TriggerService {
     return handle ? { handle } : undefined;
   }
 
-  runNow(triggerId: string, reason: "manual" | "handoff" = "manual"): { handle: RunHandle } | undefined {
+  runNow(triggerId: string, reason: "manual" | "handoff" | "subtask" = "manual"): { handle: RunHandle } | undefined {
     if (!this.isEnabled()) return undefined;
     const trigger = this.store.get(triggerId);
     if (!trigger || !trigger.enabled) return undefined;
@@ -353,8 +359,16 @@ export class TriggerService {
       return undefined;
     }
 
-    let checkIn: { threadId: string; prompt: string } | undefined;
+    let checkIn:
+      | { threadId: string; prompt: string }
+      | { threadId: string; graphId: string; input: Record<string, unknown> }
+      | undefined;
     if (trigger.todoId) {
+      if (begun.attempt > 1) {
+        // Replaying a check-in could repeat its side effects; the next check-in picks up instead.
+        this.store.killOccurrence(begun.id, "interrupted by a restart; the next check-in continues", this.nowIso());
+        return undefined;
+      }
       const resolved = this.todoCheckIn?.(trigger, begun) ?? { skip: "Todo check-ins are not available" };
       if ("skip" in resolved) {
         this.store.killOccurrence(begun.id, resolved.skip, this.nowIso());
@@ -366,14 +380,18 @@ export class TriggerService {
 
     // A recovered graph occurrence continues its own checkpoint rather than
     // re-running nodes (and their side effects) that already finished.
-    const continuing = trigger.graphId !== undefined && begun.attempt > 1 && begun.threadId !== undefined;
-    const threadId = checkIn?.threadId ?? (continuing ? begun.threadId! : this.mintThreadId());
-    const input: RunInput = trigger.graphId
+    const graphId = checkIn && "graphId" in checkIn ? checkIn.graphId : trigger.graphId;
+    const continuing = graphId !== undefined && begun.attempt > 1 && begun.threadId !== undefined;
+    const threadId = continuing ? begun.threadId! : (checkIn?.threadId ?? this.mintThreadId());
+    const input: RunInput = graphId
       ? {
-          graphInput: graphRunInput(trigger, begun),
+          graphInput: {
+            ...graphRunInput(trigger, begun),
+            ...(checkIn && "input" in checkIn ? checkIn.input : {}),
+          },
           ...(continuing ? { continueFromCheckpoint: true } : {}),
         }
-      : conversationInput(trigger, checkIn ? { ...begun, promptOverride: checkIn.prompt } : begun);
+      : conversationInput(trigger, checkIn && "prompt" in checkIn ? { ...begun, promptOverride: checkIn.prompt } : begun);
 
     try {
       // Reserve the run id and record it on the occurrence BEFORE launching, so a
@@ -390,7 +408,7 @@ export class TriggerService {
           source: "trigger",
           trigger_id: trigger.id,
           trigger_occurrence_id: begun.id,
-          ...(trigger.graphId ? { graph_id: trigger.graphId } : {}),
+          ...(graphId ? { graph_id: graphId } : {}),
           ...(trigger.todoId ? { todo_id: trigger.todoId } : {}),
         },
       });

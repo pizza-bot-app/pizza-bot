@@ -2391,6 +2391,19 @@ select:focus-visible,
   font-size: 10.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .todo-waiting { display: inline-flex; align-items: center; gap: 3px; color: var(--warning, #f5a623); font-size: 11.5px; font-weight: 600; }
+.todo-snoozed { display: inline-flex; align-items: center; gap: 3px; color: var(--dim); font-size: 11.5px; font-weight: 600; }
+.todo-snooze-custom { width: auto; }
+.todo-budget-input { width: 96px; }
+.todo-budget-input[aria-invalid="true"] { border-color: var(--danger, #e5484d); }
+.todo-row-parent {
+  display: block; margin-top: 1px; font-size: 11.5px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.todo-parent-link { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--dim); }
+.todo-subtasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.todo-subtask { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: var(--dim); }
+.todo-subtask.completed .todo-thread-open { text-decoration: line-through; color: var(--dim); }
+.todo-timeline-entry.kind-paused .todo-timeline-icon { color: var(--warning, #f5a623); }
 .thread-todo-marker {
   display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto;
   font-size: 11px; font-weight: 600; color: var(--dim);

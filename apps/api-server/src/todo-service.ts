@@ -2,7 +2,11 @@
 import { CronTime } from "cron";
 import {
   TODO_DEFAULT_CHECK_IN,
+  TODO_GRAPH_OWNER_PREFIX,
+  TODO_MAX_DEPTH,
   TODO_MAX_HANDOFFS,
+  TODO_MAX_OPEN_SUBTASKS,
+  TODO_NOTIFY_LIMIT_PER_DAY,
   type AmbientTodoAccess,
   type Todo,
   type TodoAccess,
@@ -24,6 +28,17 @@ export interface AgentStatus {
   detail?: string;
 }
 
+export interface GraphSummary {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export type CheckInLaunch =
+  | { threadId: string; prompt: string }
+  | { threadId: string; graphId: string; input: Record<string, unknown> }
+  | { skip: string };
+
 export interface TodoServiceDeps {
   todos: TodoStore;
   threads: ThreadStore;
@@ -34,9 +49,12 @@ export interface TodoServiceDeps {
   /** Enabled agents only; absent means no such agent or it is disabled. */
   agentStatus: (agentId: string) => AgentStatus | undefined;
   readyAgents: () => Array<{ id: string } & AgentStatus>;
+  /** Graph specs that parse; read when assigning and kept for the synchronous check-in hook. */
+  listGraphs: () => Promise<GraphSummary[]>;
   /** Appends an assistant message to a thread's checkpoint. */
   postToThread: (threadId: string, text: string) => Promise<void>;
   timezone: string;
+  now?: () => number;
   newThreadId?: () => string;
 }
 
@@ -44,14 +62,25 @@ export interface TodoServiceDeps {
 export class TodoRefusal extends Error {}
 
 const TIMELINE_IN_PROMPT = 20;
+const MAX_SNOOZE_MS = 90 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 let threadCounter = 0;
+
+type AgentOwned = StoredTodo & { owner: string };
 
 export class TodoService implements TodoAccess, AmbientTodoAccess {
   private readonly newThreadId: () => string;
+  private readonly now: () => number;
+  private graphs: GraphSummary[] = [];
 
   constructor(private readonly deps: TodoServiceDeps) {
     this.newThreadId =
       deps.newThreadId ?? (() => `thread_todo_${Date.now().toString(36)}_${threadCounter++}`);
+    this.now = deps.now ?? (() => Date.now());
+  }
+
+  async refreshGraphs(): Promise<void> {
+    this.graphs = await this.deps.listGraphs();
   }
 
   list(options?: { includeCompleted?: boolean }): Todo[] {
@@ -68,9 +97,11 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
   }
 
   update(id: string, patch: TodoPatch, actor = "user"): Todo | undefined {
+    const before = this.deps.todos.get(id);
     const todo = this.deps.todos.update(id, patch, actor);
     if (!todo) return undefined;
     if (patch.completed !== undefined) this.syncSchedule(todo);
+    if (todo.completed && !before?.completed) this.subtaskFinished(todo);
     return this.withCheckIn(todo);
   }
 
@@ -88,18 +119,31 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     return this.deps.todos.delete(id);
   }
 
-  /** The user's assignment edit; refuses an unknown or unready agent and an invalid schedule. */
-  assign(id: string, assignment: TodoAssignment): Todo | undefined {
+  /**
+   * The user's assignment edit. `owner` is an agent id or `graph:<id>`; refuses an
+   * unknown or unready owner, an invalid schedule, and a snooze outside 90 days.
+   */
+  async assign(id: string, assignment: TodoAssignment): Promise<Todo | undefined> {
     const current = this.deps.todos.get(id);
     if (!current) return undefined;
-    if (assignment.owner) this.requireReady(assignment.owner);
+    if (assignment.owner) await this.requireOwner(assignment.owner);
     if (assignment.checkIn) this.requireCron(assignment.checkIn);
+    if (assignment.snoozedUntil) this.requireSnooze(assignment.snoozedUntil);
 
-    const todo =
+    let todo =
       assignment.owner !== undefined
         ? this.deps.todos.setOwner(id, assignment.owner, { actor: "user" })!
         : current;
-    if (!todo.owner) {
+    if (assignment.notify !== undefined || assignment.maxCheckIns !== undefined) {
+      todo = this.deps.todos.setPreferences(id, {
+        ...(assignment.notify !== undefined ? { notify: assignment.notify } : {}),
+        ...(assignment.maxCheckIns !== undefined ? { maxCheckIns: assignment.maxCheckIns } : {}),
+      })!;
+    }
+    if (assignment.snoozedUntil !== undefined) {
+      todo = this.deps.todos.setSnooze(id, assignment.snoozedUntil, { actor: "user" })!;
+    }
+    if (!todo.owner && !todo.ownerGraph) {
       this.dropSchedule(id);
       return this.withCheckIn(todo);
     }
@@ -117,13 +161,18 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
   checkInNow(id: string): { threadId: string; runId: string } {
     const todo = this.deps.todos.get(id);
     if (!todo) throw new TodoRefusal("That Todo no longer exists.");
-    if (!todo.owner) throw new TodoRefusal("Assign this Todo to an agent before asking it to check in.");
+    if (!todo.owner && !todo.ownerGraph) {
+      throw new TodoRefusal("Assign this Todo to an agent or workflow before asking it to check in.");
+    }
     if (todo.completed) throw new TodoRefusal("This Todo is complete; reopen it to check in again.");
     if (!this.deps.automationsEnabled()) {
       throw new TodoRefusal("Check-ins are paused because Automations is turned off in Settings.");
     }
     const busy = this.busyReason(todo);
     if (busy) throw new TodoRefusal(busy);
+    if (budgetUsedUp(todo)) {
+      throw new TodoRefusal("This Todo has used its check-in budget; raise or clear the limit to check in again.");
+    }
     const trigger = this.deps.triggers.forTodo(id) ?? this.saveSchedule(todo, undefined);
     const started = this.deps.scheduler()?.runNow(trigger.id, "manual");
     if (!started) throw new TodoRefusal("The check-in could not start; try again in a moment.");
@@ -131,35 +180,106 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
   }
 
   /** TriggerService hook: where a check-in runs and what it is told, or why it is skipped. */
-  resolveCheckIn(
-    trigger: TriggerDef,
-    occurrence: TriggerOccurrence,
-  ): { threadId: string; prompt: string } | { skip: string } {
+  resolveCheckIn(trigger: TriggerDef, occurrence: TriggerOccurrence): CheckInLaunch {
     const todo = trigger.todoId ? this.deps.todos.get(trigger.todoId) : undefined;
     if (!todo) return { skip: "the Todo no longer exists" };
-    if (!todo.owner) return { skip: "the Todo has no owner" };
+    if (!todo.owner && !todo.ownerGraph) return { skip: "the Todo has no owner" };
     if (todo.completed) return { skip: "the Todo is complete" };
     const busy = this.busyReason(todo);
     if (busy) return { skip: busy };
+    const reason = checkInReason(occurrence.reason);
+    if (reason === "cron" && todo.snoozedUntil && Date.parse(todo.snoozedUntil) > this.now()) {
+      return { skip: `the Todo is snoozed until ${todo.snoozedUntil}` };
+    }
+    if (budgetUsedUp(todo)) {
+      if (todo.history.at(-1)?.kind !== "paused") {
+        const { maxCheckIns, used } = todo.budget!;
+        this.deps.todos.appendEvent(todo.id, {
+          kind: "paused",
+          actor: "user",
+          note: `Check-in budget used up (${used} of ${maxCheckIns}).`,
+        });
+      }
+      return { skip: "the Todo's check-in budget is used up" };
+    }
 
-    const threadId = this.backgroundThread(todo, todo.owner);
-    const reason: TodoCheckInReason =
-      occurrence.reason === "manual" || occurrence.reason === "handoff" ? occurrence.reason : "cron";
-    this.deps.todos.appendEvent(todo.id, { kind: "check-in", actor: todo.owner, threadId, reason });
+    if (todo.ownerGraph) {
+      const threadId = this.newThreadId();
+      this.deps.threads.create({
+        threadId,
+        title: todo.title,
+        source: "trigger",
+        graphId: todo.ownerGraph,
+        background: true,
+        todoId: todo.id,
+      });
+      this.deps.todos.setBackgroundThread(todo.id, threadId);
+      const actor = `${TODO_GRAPH_OWNER_PREFIX}${todo.ownerGraph}`;
+      this.deps.todos.appendEvent(todo.id, { kind: "check-in", actor, threadId, reason });
+      return { threadId, graphId: todo.ownerGraph, input: { todo: graphTodoInput(todo), reason } };
+    }
+
+    const owner = todo.owner!;
+    const threadId = this.backgroundThread(todo, owner);
+    this.deps.todos.appendEvent(todo.id, { kind: "check-in", actor: owner, threadId, reason });
     return { threadId, prompt: this.checkInPrompt(this.deps.todos.get(todo.id)!, reason) };
   }
 
   /** A background run ended waiting on the user: an `ask_user` question or an approval. */
-  recordPause(threadId: string): void {
+  async recordPause(threadId: string, question?: string): Promise<void> {
     const todo = this.deps.todos.forBackgroundThread(threadId);
-    if (todo?.owner) this.deps.todos.appendEvent(todo.id, { kind: "asked", actor: todo.owner, threadId });
+    if (!todo) return;
+    const actor = todo.owner ?? (todo.ownerGraph ? `${TODO_GRAPH_OWNER_PREFIX}${todo.ownerGraph}` : undefined);
+    if (!actor) return;
+    this.deps.todos.appendEvent(todo.id, { kind: "asked", actor, threadId, ...(question ? { note: question } : {}) });
+    if (todo.owner && question) {
+      // Best effort: the question still waits in the Action view if the home thread is busy.
+      await this.postToHome(todo.owner, `I have a question about "${todo.title}": ${question}\n\nAnswer it in the Action view.`).catch(
+        () => undefined,
+      );
+    }
   }
 
   /** A background check-in ended in an error; the next check-in still runs. */
   recordFailure(threadId: string, message: string): void {
     const todo = this.deps.todos.forBackgroundThread(threadId);
-    if (todo?.owner) {
-      this.deps.todos.appendEvent(todo.id, { kind: "failed", actor: todo.owner, threadId, note: message.slice(0, 500) });
+    const actor = todo?.owner ?? (todo?.ownerGraph ? `${TODO_GRAPH_OWNER_PREFIX}${todo.ownerGraph}` : undefined);
+    if (todo && actor) {
+      this.deps.todos.appendEvent(todo.id, { kind: "failed", actor, threadId, note: message.slice(0, 500) });
+    }
+  }
+
+  /**
+   * A graph check-in finished; its `todoOutcome` state value settles the Todo:
+   * done/complete/completed/true completes it, failed records a failure, and any
+   * other text is a progress note.
+   */
+  recordGraphOutcome(threadId: string, outcome: unknown): void {
+    const todo = this.deps.todos.forBackgroundThread(threadId);
+    if (!todo?.ownerGraph || outcome === undefined || outcome === null || outcome === "") return;
+    const actor = `${TODO_GRAPH_OWNER_PREFIX}${todo.ownerGraph}`;
+    const text = typeof outcome === "string" ? outcome.trim() : JSON.stringify(outcome);
+    if (outcome === true || ["done", "complete", "completed"].includes(text.toLowerCase())) {
+      this.update(todo.id, { completed: true }, actor);
+    } else if (text.toLowerCase() === "failed") {
+      this.deps.todos.appendEvent(todo.id, { kind: "failed", actor, threadId, note: "The workflow reported failure." });
+    } else {
+      this.deps.todos.appendEvent(todo.id, { kind: "progress", actor, note: text.slice(0, 2_000) });
+    }
+  }
+
+  /** Posts each agent's queued notifications as one message in its home thread. */
+  async flushDigests(): Promise<void> {
+    for (const [agentId, entries] of this.deps.todos.takeDigests()) {
+      const lines = entries.map((entry) => {
+        const title = this.deps.todos.get(entry.todoId)?.title ?? "A Todo";
+        return `- ${title}: ${entry.message}`;
+      });
+      try {
+        await this.postToHome(agentId, ["Here is today's digest:", "", ...lines].join("\n"));
+      } catch {
+        for (const entry of entries) this.deps.todos.enqueueDigest(agentId, entry.todoId, entry.message);
+      }
     }
   }
 
@@ -181,62 +301,160 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
 
   async notifyUser(threadId: string, message: string): Promise<void> {
     const todo = this.ownedBy(threadId);
-    const status = this.deps.agentStatus(todo.owner);
-    const home =
-      this.deps.threads.agentHome(todo.owner) ??
-      this.deps.threads.create({
-        threadId: this.newThreadId(),
-        title: status?.name ?? todo.owner,
-        agentId: todo.owner,
-        agentHome: true,
-        pinned: true,
+    if (todo.notify === "digest") {
+      this.deps.todos.enqueueDigest(todo.owner, todo.id, message);
+      this.deps.todos.appendEvent(todo.id, {
+        kind: "notified",
+        actor: todo.owner,
+        note: `Queued for the daily digest: ${message}`,
       });
-    if (this.deps.isRunning(home.threadId)) {
-      throw new TodoRefusal("The user is in a conversation with you right now; send this at your next check-in.");
+      return;
     }
-    await this.deps.postToThread(home.threadId, message);
-    this.deps.threads.update(home.threadId, {
-      unread: true,
-      lastMessage: message.slice(0, 500),
-      lastMessageRole: "assistant",
-    });
-    this.deps.threads.touch(home.threadId);
-    this.deps.todos.appendEvent(todo.id, { kind: "notified", actor: todo.owner, threadId: home.threadId, note: message });
-  }
-
-  reassign(threadId: string, toAgentId: string, note: string): Todo {
-    const todo = this.ownedBy(threadId);
-    if (toAgentId === todo.owner) throw new TodoRefusal("You already own this Todo.");
-    const target = this.deps.agentStatus(toAgentId);
-    if (!target) {
-      const ids = this.deps.readyAgents().filter((agent) => agent.id !== todo.owner).map((agent) => agent.id);
+    const since = new Date(this.now() - DAY_MS).toISOString();
+    const sent = this.deps.todos
+      .list()
+      .flatMap((candidate) => candidate.history)
+      .filter((event) => event.kind === "notified" && event.actor === todo.owner && event.threadId && event.at >= since)
+      .length;
+    if (sent >= TODO_NOTIFY_LIMIT_PER_DAY) {
       throw new TodoRefusal(
-        `There is no agent "${toAgentId}". ${ids.length > 0 ? `You can hand off to: ${ids.join(", ")}.` : "No other agent is available."}`,
+        `You have already sent the user ${sent} updates in the last day; record this with update_todo instead.`,
       );
     }
-    if (!target.ready) {
-      throw new TodoRefusal(`${target.name} is unavailable${target.detail ? ` (${target.detail})` : ""}; ask the user instead.`);
-    }
+    const homeThreadId = await this.postToHome(todo.owner, message);
+    this.deps.todos.appendEvent(todo.id, { kind: "notified", actor: todo.owner, threadId: homeThreadId, note: message });
+  }
+
+  async reassign(threadId: string, toAgentId: string, note: string): Promise<Todo> {
+    const todo = this.ownedBy(threadId);
+    if (toAgentId === todo.owner) throw new TodoRefusal("You already own this Todo.");
     const handoffs = handoffsSinceUserAssigned(todo.history);
     if (handoffs.length >= TODO_MAX_HANDOFFS) {
       throw new TodoRefusal(
         `This Todo has been handed off ${handoffs.length} times since the user assigned it; ask the user how to proceed instead.`,
       );
     }
-    if (handoffs.some((event) => event.actor === toAgentId)) {
-      throw new TodoRefusal(`${target.name} already handed this Todo on; ask the user instead of handing it back.`);
+    if (toAgentId.startsWith(TODO_GRAPH_OWNER_PREFIX)) {
+      await this.requireGraph(toAgentId.slice(TODO_GRAPH_OWNER_PREFIX.length));
+    } else {
+      const target = this.deps.agentStatus(toAgentId);
+      if (!target) {
+        throw new TodoRefusal(`There is no agent or workflow "${toAgentId}". ${this.handoffTargets(todo.owner)}`);
+      }
+      if (!target.ready) {
+        throw new TodoRefusal(`${target.name} is unavailable${target.detail ? ` (${target.detail})` : ""}; ask the user instead.`);
+      }
+      if (handoffs.some((event) => event.actor === toAgentId)) {
+        throw new TodoRefusal(`${target.name} already handed this Todo on; ask the user instead of handing it back.`);
+      }
     }
 
     const updated = this.deps.todos.setOwner(todo.id, toAgentId, { actor: todo.owner, note })!;
-    const trigger = this.deps.triggers.forTodo(todo.id);
-    if (trigger && this.deps.automationsEnabled()) this.deps.scheduler()?.runNow(trigger.id, "handoff");
-    return this.withCheckIn(updated);
+    this.wake(todo.id, "handoff");
+    return this.withCheckIn(this.deps.todos.get(updated.id)!);
   }
 
-  private ownedBy(threadId: string): StoredTodo & { owner: string } {
+  snooze(threadId: string, until: string, note: string): Todo {
+    const todo = this.ownedBy(threadId);
+    this.requireSnooze(until);
+    return this.withCheckIn(this.deps.todos.setSnooze(todo.id, until, { actor: todo.owner, note })!);
+  }
+
+  async requestTodo(threadId: string, toAgentId: string, title: string, note: string): Promise<Todo> {
+    const parent = this.ownedBy(threadId);
+    if (toAgentId === parent.owner) throw new TodoRefusal("Do the work yourself, or hand the whole Todo on with reassign_todo.");
+    const target = this.deps.agentStatus(toAgentId);
+    if (!target) throw new TodoRefusal(`There is no agent "${toAgentId}". ${this.handoffTargets(parent.owner)}`);
+    if (!target.ready) throw new TodoRefusal(`${target.name} is unavailable${target.detail ? ` (${target.detail})` : ""}.`);
+    if (this.depth(parent) + 1 >= TODO_MAX_DEPTH) {
+      throw new TodoRefusal(`Subtasks can only nest ${TODO_MAX_DEPTH} deep; ask the user how to split this up.`);
+    }
+    const open = this.deps.todos.children(parent.id).filter((child) => !child.completed).length;
+    if (open >= TODO_MAX_OPEN_SUBTASKS) {
+      throw new TodoRefusal(`This Todo already has ${open} open subtasks; wait for some to finish.`);
+    }
+
+    const child = this.deps.todos.create(
+      { title, notes: `Requested by ${this.agentName(parent.owner)} for "${parent.title}": ${note}` },
+      { parentTodoId: parent.id },
+    );
+    this.deps.todos.setOwner(child.id, toAgentId, { actor: parent.owner, note });
+    this.saveSchedule(this.deps.todos.get(child.id)!, undefined);
+    this.deps.todos.appendEvent(parent.id, {
+      kind: "subtask",
+      actor: parent.owner,
+      agentId: toAgentId,
+      todoId: child.id,
+      note: `requested: ${title}`,
+    });
+    this.wake(child.id, "handoff");
+    return this.withCheckIn(this.deps.todos.get(child.id)!);
+  }
+
+  private subtaskFinished(child: StoredTodo): void {
+    if (!child.parentTodoId) return;
+    const parent = this.deps.todos.get(child.parentTodoId);
+    if (!parent) return;
+    this.deps.todos.appendEvent(parent.id, {
+      kind: "subtask",
+      actor: child.owner ?? "user",
+      ...(child.owner ? { agentId: child.owner } : {}),
+      todoId: child.id,
+      note: `finished: ${child.title}`,
+    });
+    if ((parent.owner || parent.ownerGraph) && !parent.completed) this.wake(parent.id, "subtask");
+  }
+
+  private wake(todoId: string, reason: "handoff" | "subtask"): void {
+    const trigger = this.deps.triggers.forTodo(todoId);
+    if (trigger && this.deps.automationsEnabled()) this.deps.scheduler()?.runNow(trigger.id, reason);
+  }
+
+  private async postToHome(agentId: string, text: string): Promise<string> {
+    const status = this.deps.agentStatus(agentId);
+    const home =
+      this.deps.threads.agentHome(agentId) ??
+      this.deps.threads.create({
+        threadId: this.newThreadId(),
+        title: status?.name ?? agentId,
+        agentId,
+        agentHome: true,
+        pinned: true,
+      });
+    if (this.deps.isRunning(home.threadId)) {
+      throw new TodoRefusal("The user is in a conversation with you right now; send this at your next check-in.");
+    }
+    await this.deps.postToThread(home.threadId, text);
+    this.deps.threads.update(home.threadId, {
+      unread: true,
+      lastMessage: text.slice(0, 500),
+      lastMessageRole: "assistant",
+    });
+    this.deps.threads.touch(home.threadId);
+    return home.threadId;
+  }
+
+  private ownedBy(threadId: string): AgentOwned {
     const todo = this.deps.todos.forBackgroundThread(threadId);
     if (!todo?.owner) throw new TodoRefusal("This check-in no longer owns a Todo; end your turn.");
-    return todo as StoredTodo & { owner: string };
+    return todo as AgentOwned;
+  }
+
+  private depth(todo: StoredTodo): number {
+    let depth = 0;
+    let parentId = todo.parentTodoId;
+    while (parentId && depth < TODO_MAX_DEPTH + 1) {
+      depth++;
+      parentId = this.deps.todos.get(parentId)?.parentTodoId;
+    }
+    return depth;
+  }
+
+  private handoffTargets(owner: string): string {
+    const agents = this.deps.readyAgents().filter((agent) => agent.id !== owner).map((agent) => agent.id);
+    const graphs = this.graphs.map((graph) => `${TODO_GRAPH_OWNER_PREFIX}${graph.id}`);
+    const targets = [...agents, ...graphs];
+    return targets.length > 0 ? `You can hand off to: ${targets.join(", ")}.` : "No other agent is available.";
   }
 
   private busyReason(todo: StoredTodo): string | undefined {
@@ -249,7 +467,8 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
   }
 
   private backgroundThread(todo: StoredTodo, owner: string): string {
-    if (todo.backgroundThreadId && this.deps.threads.get(todo.backgroundThreadId)) return todo.backgroundThreadId;
+    const existing = todo.backgroundThreadId ? this.deps.threads.get(todo.backgroundThreadId) : undefined;
+    if (existing && existing.agentId === owner) return existing.threadId;
     const thread = this.deps.threads.create({
       threadId: this.newThreadId(),
       title: todo.title,
@@ -262,11 +481,22 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     return thread.threadId;
   }
 
-  private requireReady(agentId: string): void {
-    const status = this.deps.agentStatus(agentId);
-    if (!status) throw new TodoRefusal(`There is no enabled agent "${agentId}".`);
+  private async requireOwner(owner: string): Promise<void> {
+    if (owner.startsWith(TODO_GRAPH_OWNER_PREFIX)) {
+      await this.requireGraph(owner.slice(TODO_GRAPH_OWNER_PREFIX.length));
+      return;
+    }
+    const status = this.deps.agentStatus(owner);
+    if (!status) throw new TodoRefusal(`There is no enabled agent "${owner}".`);
     if (!status.ready) {
       throw new TodoRefusal(`${status.name} is unavailable${status.detail ? ` (${status.detail})` : ""}.`);
+    }
+  }
+
+  private async requireGraph(graphId: string): Promise<void> {
+    await this.refreshGraphs();
+    if (!this.graphs.some((graph) => graph.id === graphId)) {
+      throw new TodoRefusal(`There is no workflow "${graphId}".`);
     }
   }
 
@@ -276,6 +506,12 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     } catch {
       throw new TodoRefusal(`"${cron}" is not a valid check-in schedule; use a five-field cron expression.`);
     }
+  }
+
+  private requireSnooze(until: string): void {
+    const at = Date.parse(until);
+    if (Number.isNaN(at) || at <= this.now()) throw new TodoRefusal("Snooze until a time in the future.");
+    if (at - this.now() > MAX_SNOOZE_MS) throw new TodoRefusal("Snooze for at most 90 days.");
   }
 
   private saveSchedule(todo: StoredTodo, cron: string | undefined): TriggerDef {
@@ -314,7 +550,7 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
   }
 
   private withCheckIn(todo: StoredTodo): Todo {
-    const trigger = todo.owner ? this.deps.triggers.forTodo(todo.id) : undefined;
+    const trigger = todo.owner || todo.ownerGraph ? this.deps.triggers.forTodo(todo.id) : undefined;
     if (!trigger?.cron) return todo;
     const nextRunAt = trigger.enabled ? this.deps.scheduler()?.nextRunAt(trigger.id) : undefined;
     return {
@@ -327,14 +563,17 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     };
   }
 
-  private checkInPrompt(todo: StoredTodo & { owner?: string }, reason: TodoCheckInReason): string {
-    const handoff = reason === "handoff" ? [...todo.history].reverse().find((event) => event.kind === "assigned") : undefined;
+  private checkInPrompt(todo: StoredTodo, reason: TodoCheckInReason): string {
+    const lastAssigned = [...todo.history].reverse().find((event) => event.kind === "assigned");
+    const lastSubtask = [...todo.history].reverse().find((event) => event.kind === "subtask");
     const why =
       reason === "handoff"
-        ? `${this.agentName(handoff?.actor ?? "")} handed this Todo to you${handoff?.note ? ` with this note: ${handoff.note}` : "."}`
-        : reason === "manual"
-          ? "The user asked you to check in now."
-          : "This is a scheduled check-in.";
+        ? `${this.agentName(lastAssigned?.actor ?? "")} handed this Todo to you${lastAssigned?.note ? ` with this note: ${lastAssigned.note}` : "."}`
+        : reason === "subtask"
+          ? `A subtask you requested changed: ${lastSubtask?.note ?? "see the timeline"}.`
+          : reason === "manual"
+            ? "The user asked you to check in now."
+            : "This is a scheduled check-in.";
     const details = {
       title: todo.title,
       ...(todo.notes ? { notes: todo.notes } : {}),
@@ -342,27 +581,70 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
       importance: todo.importance,
       ...(todo.steps.length > 0 ? { steps: todo.steps } : {}),
       linkedConversations: todo.threadIds.length,
+      ...(todo.budget ? { checkInBudget: `${todo.budget.used} of ${todo.budget.maxCheckIns} used` } : {}),
+      notifications: todo.notify === "digest" ? "batched into a daily digest" : "sent as they happen",
     };
+    const parent = todo.parentTodoId ? this.deps.todos.get(todo.parentTodoId) : undefined;
+    const children = this.deps.todos.children(todo.id);
     const timeline = todo.history.slice(-TIMELINE_IN_PROMPT).map((event) => `- ${describeEvent(event, (id) => this.agentName(id))}`);
-    const others = this.deps.readyAgents().filter((agent) => agent.id !== todo.owner);
+    const agents = this.deps.readyAgents().filter((agent) => agent.id !== todo.owner);
     return [
       `Check-in on the Todo you own. ${why}`,
       "",
       "Todo:",
       JSON.stringify(details, null, 2),
+      ...(parent ? ["", `This is a subtask of "${parent.title}" (owned by ${this.agentName(parent.owner ?? "user")}).`] : []),
+      ...(children.length > 0
+        ? [
+            "",
+            "Subtasks you requested:",
+            ...children.map((child) => `- ${child.title} (${this.agentName(child.owner ?? "user")}): ${child.completed ? "done" : "open"}`),
+          ]
+        : []),
       "",
       "Timeline (oldest first):",
       ...(timeline.length > 0 ? timeline : ["- (nothing yet)"]),
       "",
-      "Agents you can hand off to with reassign_todo:",
-      ...(others.length > 0 ? others.map((agent) => `- ${agent.id}: ${agent.name}. ${agent.description}`) : ["- (none)"]),
+      "Agents you can hand off to with reassign_todo or ask for a subtask with request_todo:",
+      ...(agents.length > 0 ? agents.map((agent) => `- ${agent.id}: ${agent.name}. ${agent.description}`) : ["- (none)"]),
+      ...(this.graphs.length > 0
+        ? [
+            "",
+            "Workflows you can hand the whole Todo to with reassign_todo (a workflow is a final destination):",
+            ...this.graphs.map((graph) => `- ${TODO_GRAPH_OWNER_PREFIX}${graph.id}: ${graph.name}.${graph.description ? ` ${graph.description}` : ""}`),
+          ]
+        : []),
     ].join("\n");
   }
 
   private agentName(id: string): string {
     if (id === "user") return "The user";
+    if (id.startsWith(TODO_GRAPH_OWNER_PREFIX)) {
+      const graphId = id.slice(TODO_GRAPH_OWNER_PREFIX.length);
+      return `the ${this.graphs.find((graph) => graph.id === graphId)?.name ?? graphId} workflow`;
+    }
     return this.deps.agentStatus(id)?.name ?? id;
   }
+}
+
+function checkInReason(reason: TriggerOccurrence["reason"]): TodoCheckInReason {
+  return reason === "manual" || reason === "handoff" || reason === "subtask" ? reason : "cron";
+}
+
+function budgetUsedUp(todo: StoredTodo): boolean {
+  return todo.budget !== undefined && todo.budget.used >= todo.budget.maxCheckIns;
+}
+
+/** The `input.todo` a workflow check-in reads as `{{input.todo.…}}`. */
+function graphTodoInput(todo: StoredTodo): Record<string, unknown> {
+  return {
+    id: todo.id,
+    title: todo.title,
+    notes: todo.notes,
+    ...(todo.dueDate ? { dueDate: todo.dueDate } : {}),
+    importance: todo.importance,
+    steps: todo.steps,
+  };
 }
 
 /** Agent-acted assignments since the user last assigned the Todo. */
@@ -395,8 +677,14 @@ function describeEvent(event: TodoEvent, name: (id: string) => string): string {
     case "notified":
       return `${at} ${who} told the user: ${event.note ?? ""}`;
     case "asked":
-      return `${at} ${who} asked the user a question`;
+      return `${at} ${who} asked the user${event.note ? `: ${event.note}` : " a question"}`;
     case "failed":
       return `${at} ${who}'s check-in failed: ${event.note ?? ""}`;
+    case "snoozed":
+      return `${at} ${who} snoozed check-ins ${event.note ?? ""}`;
+    case "subtask":
+      return `${at} subtask ${event.note ?? ""} (${name(event.agentId ?? "user")})`;
+    case "paused":
+      return `${at} check-ins paused: ${event.note ?? ""}`;
   }
 }

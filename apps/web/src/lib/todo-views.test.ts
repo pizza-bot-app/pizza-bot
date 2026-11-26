@@ -19,6 +19,7 @@ function todo(id: string, fields: Partial<Todo> = {}): Todo {
     title: id,
     notes: "",
     importance: "normal",
+    notify: "immediate",
     steps: [],
     completed: false,
     threadIds: [],

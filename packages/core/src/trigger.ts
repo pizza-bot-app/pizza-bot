@@ -22,7 +22,7 @@ export interface TriggerDef {
   lastThreadId?: string;
 }
 
-export type TriggerOccurrenceReason = "cron" | "cron-recovery" | "manual" | "webhook" | "handoff";
+export type TriggerOccurrenceReason = "cron" | "cron-recovery" | "manual" | "webhook" | "handoff" | "subtask";
 
 export type TriggerOccurrenceStatus =
   | "pending"

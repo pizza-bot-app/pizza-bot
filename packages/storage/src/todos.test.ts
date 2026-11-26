@@ -185,4 +185,68 @@ describe("TodoStore", () => {
       expect(again.history).toEqual([]);
     });
   });
+
+  describe("refinements", () => {
+    it("stores a graph owner apart from an agent owner", () => {
+      const s = store();
+      const todo = s.create({ title: "Triage" });
+      const graphOwned = s.setOwner(todo.id, "graph:triage", { actor: "researcher", note: "Routine" })!;
+      expect(graphOwned.ownerGraph).toBe("triage");
+      expect(graphOwned.owner).toBeUndefined();
+      expect(graphOwned.history.at(-1)).toMatchObject({ kind: "assigned", agentId: "graph:triage" });
+      expect(s.setOwner(todo.id, "graph:triage", { actor: "user" })!.history).toHaveLength(1);
+    });
+
+    it("snoozes and lifts the snooze on the timeline, and a new owner starts unsnoozed", () => {
+      const s = store(ticking());
+      const todo = s.create({ title: "a" });
+      s.setOwner(todo.id, "researcher", { actor: "user" });
+      const snoozed = s.setSnooze(todo.id, "2026-12-01T09:00:00.000Z", { actor: "researcher", note: "Fares update Monday" })!;
+      expect(snoozed.snoozedUntil).toBe("2026-12-01T09:00:00.000Z");
+      expect(snoozed.history.at(-1)).toMatchObject({
+        kind: "snoozed",
+        note: "until 2026-12-01T09:00:00.000Z: Fares update Monday",
+      });
+      expect(s.setSnooze(todo.id, null, { actor: "user" })!.snoozedUntil).toBeUndefined();
+      s.setSnooze(todo.id, "2026-12-01T09:00:00.000Z", { actor: "user" });
+      expect(s.setOwner(todo.id, "booker", { actor: "researcher" })!.snoozedUntil).toBeUndefined();
+    });
+
+    it("counts budgeted check-ins since the user last assigned it", () => {
+      const s = store(ticking());
+      const todo = s.create({ title: "a" });
+      expect(s.get(todo.id)!.notify).toBe("immediate");
+      s.setOwner(todo.id, "researcher", { actor: "user" });
+      s.setPreferences(todo.id, { maxCheckIns: 3, notify: "digest" });
+      s.appendEvent(todo.id, { kind: "check-in", actor: "researcher", reason: "cron" });
+      s.appendEvent(todo.id, { kind: "check-in", actor: "researcher", reason: "cron" });
+      expect(s.get(todo.id)).toMatchObject({ notify: "digest", budget: { maxCheckIns: 3, used: 2 } });
+      s.setOwner(todo.id, "booker", { actor: "user" });
+      expect(s.get(todo.id)!.budget).toEqual({ maxCheckIns: 3, used: 0 });
+      expect(s.setPreferences(todo.id, { maxCheckIns: null })!.budget).toBeUndefined();
+    });
+
+    it("lists children and orphans them when the parent is deleted", () => {
+      const s = store(ticking());
+      const parent = s.create({ title: "Plan trip" });
+      const child = s.create({ title: "Book hotel" }, { parentTodoId: parent.id });
+      expect(child.parentTodoId).toBe(parent.id);
+      expect(s.children(parent.id).map((todo) => todo.id)).toEqual([child.id]);
+      s.delete(parent.id);
+      expect(s.get(child.id)!.parentTodoId).toBeUndefined();
+    });
+
+    it("queues digest entries by agent and hands each out once", () => {
+      const s = store(ticking());
+      const a = s.create({ title: "a" });
+      s.enqueueDigest("researcher", a.id, "first");
+      s.enqueueDigest("booker", a.id, "other");
+      s.enqueueDigest("researcher", a.id, "second");
+      const taken = s.takeDigests();
+      expect(taken.get("researcher")!.map((entry) => entry.message)).toEqual(["first", "second"]);
+      expect(taken.get("booker")).toHaveLength(1);
+      expect(s.takeDigests().size).toBe(0);
+    });
+  });
 });
+

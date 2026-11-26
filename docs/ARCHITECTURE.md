@@ -524,6 +524,33 @@ an error is recorded on the Todo as a `failed` event with the error's message.
 `notify_user` and forks write state with `updateStateAsFinished`, which writes as
 the graph's terminal node so the thread has no pending step.
 
+Refinements on top of check-ins:
+
+- **Snooze.** `snoozedUntil` (set by the user, or by the agent's `snooze_until`
+  tool, at most 90 days out) skips scheduled check-ins; asked-for check-ins,
+  handoffs, and subtask wakes still run.
+- **Budget.** `maxCheckIns` caps check-ins since the user last assigned the Todo;
+  once used up, check-ins are skipped and one `paused` event is recorded.
+- **Notifications.** An agent may send at most `TODO_NOTIFY_LIMIT_PER_DAY`
+  immediate notifications in a rolling day. A Todo in `digest` mode queues them
+  instead, and a host cron (`TODO_DIGEST_CRON`, 5 pm local, while Automations is
+  on) posts one message per agent to its home thread; a busy home thread keeps the
+  queue for the next run.
+- **Questions surface.** An `ask_user` pause also posts the question to the agent's
+  home thread, so it reads like a message from a colleague.
+- **Subtasks.** `request_todo` creates a child Todo (`parentTodoId`) owned by
+  another agent and wakes it; the parent keeps its Todo, sees its children in each
+  check-in prompt, and is woken with reason `subtask` when one finishes. Nesting is
+  capped at `TODO_MAX_DEPTH` and open children at `TODO_MAX_OPEN_SUBTASKS`.
+- **Workflows own Todos.** An owner of `graph:<id>` (stored in the same owner
+  column) is checked in on by running that graph with `input.todo`, each run in a
+  new background graph thread. The spec's `todoOutcome` names the state key that
+  settles the Todo when the run succeeds (`done`/`complete`/`completed`/`true`
+  completes it, `failed` records a failure, other text is a progress note). Agents
+  can hand a Todo to a workflow, which is a final destination; a graph that owns a
+  Todo cannot be deleted. A restarted check-in occurrence is closed rather than
+  replayed, so a check-in's side effects never repeat.
+
 ### Graph runs
 
 A trigger either starts a conversation with its `prompt` or, when it names a

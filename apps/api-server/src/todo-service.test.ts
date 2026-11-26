@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { openAppDatabase, type AppDatabase } from "@pizza-bot/storage";
 import type { RunHandle, TriggerOccurrence } from "@pizza-bot/core";
-import { TodoRefusal, TodoService, type AgentStatus } from "./todo-service.js";
+import { TodoRefusal, TodoService, type AgentStatus, type CheckInLaunch } from "./todo-service.js";
 
 const open: AppDatabase[] = [];
 
@@ -16,7 +16,9 @@ const AGENTS: Record<string, AgentStatus> = {
   broken: { name: "Broken", description: "Needs mail.", ready: false, detail: "mail is not configured" },
 };
 
-function harness(options: { automations?: boolean } = {}) {
+const NOW = Date.parse("2026-11-26T12:00:00.000Z");
+
+function harness(options: { automations?: boolean; now?: () => number } = {}) {
   const appDb = openAppDatabase(":memory:");
   open.push(appDb);
   const running = new Set<string>();
@@ -42,10 +44,12 @@ function harness(options: { automations?: boolean } = {}) {
     automationsEnabled: () => options.automations ?? true,
     agentStatus: (id) => AGENTS[id],
     readyAgents: () => Object.entries(AGENTS).filter(([, a]) => a.ready).map(([id, a]) => ({ id, ...a })),
+    listGraphs: async () => [{ id: "triage", name: "Triage", description: "Routes requests." }],
     postToThread: async (threadId, text) => {
       posted.push([threadId, text]);
     },
     timezone: "UTC",
+    now: options.now ?? (() => NOW),
     newThreadId: () => `th-${threadCounter++}`,
   });
   return { service, appDb, running, posted, fired };
@@ -55,85 +59,113 @@ function occurrence(reason: TriggerOccurrence["reason"]): TriggerOccurrence {
   return { reason } as TriggerOccurrence;
 }
 
+function prompt(launch: CheckInLaunch): string {
+  return "prompt" in launch ? launch.prompt : "";
+}
+
+function thread(launch: CheckInLaunch): string {
+  return "threadId" in launch ? launch.threadId : "";
+}
+
 describe("TodoService assignment", () => {
-  it("assigns with the default morning check-in, changes it, and stops it", () => {
+  it("assigns with the default morning check-in, changes it, and stops it", async () => {
     const { service, appDb } = harness();
     const todo = service.create({ title: "Compare flights" });
-    const assigned = service.assign(todo.id, { owner: "researcher" })!;
+    const assigned = (await service.assign(todo.id, { owner: "researcher" }))!;
     expect(assigned.owner).toBe("researcher");
     expect(assigned.checkIn).toEqual({ cron: "0 9 * * *", timezone: "UTC", nextRunAt: "2026-12-01T09:00:00.000Z" });
 
-    expect(service.assign(todo.id, { checkIn: "0 * * * *" })!.checkIn?.cron).toBe("0 * * * *");
-    const manualOnly = service.assign(todo.id, { checkIn: null })!;
+    expect((await service.assign(todo.id, { checkIn: "0 * * * *" }))!.checkIn?.cron).toBe("0 * * * *");
+    const manualOnly = (await service.assign(todo.id, { checkIn: null }))!;
     expect(manualOnly.owner).toBe("researcher");
     expect(manualOnly.checkIn).toBeUndefined();
     expect(appDb.triggers.forTodo(todo.id)).toMatchObject({ enabled: true, todoId: todo.id });
     expect(appDb.triggers.forTodo(todo.id)?.cron).toBeUndefined();
 
-    const unassigned = service.assign(todo.id, { owner: null })!;
+    const unassigned = (await service.assign(todo.id, { owner: null }))!;
     expect(unassigned.owner).toBeUndefined();
     expect(appDb.triggers.forTodo(todo.id)).toBeUndefined();
   });
 
-  it("refuses an unknown or unready agent and an invalid schedule", () => {
+  it("refuses an unknown or unready owner, an invalid schedule, and a bad snooze", async () => {
     const { service } = harness();
     const todo = service.create({ title: "a" });
-    expect(() => service.assign(todo.id, { owner: "ghost" })).toThrow(TodoRefusal);
-    expect(() => service.assign(todo.id, { owner: "broken" })).toThrow("Broken is unavailable (mail is not configured).");
-    expect(() => service.assign(todo.id, { owner: "researcher", checkIn: "every day" })).toThrow(/not a valid check-in schedule/);
+    await expect(service.assign(todo.id, { owner: "ghost" })).rejects.toThrow(TodoRefusal);
+    await expect(service.assign(todo.id, { owner: "broken" })).rejects.toThrow("Broken is unavailable (mail is not configured).");
+    await expect(service.assign(todo.id, { owner: "graph:ghost" })).rejects.toThrow('There is no workflow "ghost".');
+    await expect(service.assign(todo.id, { owner: "researcher", checkIn: "every day" })).rejects.toThrow(/not a valid check-in schedule/);
+    await expect(service.assign(todo.id, { snoozedUntil: "2026-01-01T00:00:00Z" })).rejects.toThrow(/in the future/);
+    await expect(service.assign(todo.id, { snoozedUntil: "2027-11-01T00:00:00Z" })).rejects.toThrow(/at most 90 days/);
     expect(service.get(todo.id)?.owner).toBeUndefined();
   });
 
-  it("pauses the schedule while the Todo is complete", () => {
+  it("pauses the schedule while the Todo is complete", async () => {
     const { service, appDb } = harness();
     const todo = service.create({ title: "a" });
-    service.assign(todo.id, { owner: "researcher" });
+    await service.assign(todo.id, { owner: "researcher" });
     expect(service.update(todo.id, { completed: true })!.checkIn?.nextRunAt).toBeUndefined();
     expect(appDb.triggers.forTodo(todo.id)?.enabled).toBe(false);
     service.update(todo.id, { completed: false });
     expect(appDb.triggers.forTodo(todo.id)?.enabled).toBe(true);
   });
 
-  it("deletes the schedule with the Todo", () => {
+  it("deletes the schedule with the Todo", async () => {
     const { service, appDb } = harness();
     const todo = service.create({ title: "a" });
-    service.assign(todo.id, { owner: "researcher" });
+    await service.assign(todo.id, { owner: "researcher" });
     service.delete(todo.id);
     expect(appDb.triggers.forTodo(todo.id)).toBeUndefined();
+  });
+
+  it("sets notification mode, budget, and snooze from the same assignment", async () => {
+    const { service } = harness();
+    const todo = service.create({ title: "a" });
+    const set = (await service.assign(todo.id, {
+      owner: "researcher",
+      notify: "digest",
+      maxCheckIns: 3,
+      snoozedUntil: "2026-11-28T09:00:00.000Z",
+    }))!;
+    expect(set).toMatchObject({
+      notify: "digest",
+      budget: { maxCheckIns: 3, used: 0 },
+      snoozedUntil: "2026-11-28T09:00:00.000Z",
+    });
+    expect((await service.assign(todo.id, { snoozedUntil: null }))!.snoozedUntil).toBeUndefined();
   });
 });
 
 describe("TodoService check-ins", () => {
-  it("runs a check-in in the owner's background thread and tells it about the Todo", () => {
+  it("runs a check-in in the owner's background thread and tells it about the Todo", async () => {
     const { service, appDb } = harness();
+    await service.refreshGraphs();
     const todo = service.create({ title: "Compare flights", notes: "Under $400" });
-    service.assign(todo.id, { owner: "researcher" });
+    await service.assign(todo.id, { owner: "researcher" });
     const trigger = appDb.triggers.forTodo(todo.id)!;
 
     const first = service.resolveCheckIn(trigger, occurrence("cron"));
-    expect("threadId" in first && first.prompt).toContain("This is a scheduled check-in.");
-    expect("threadId" in first && first.prompt).toContain('"title": "Compare flights"');
-    expect("threadId" in first && first.prompt).toContain("- booker: Booker. Books travel.");
-    expect("threadId" in first && first.prompt).not.toContain("- researcher:");
-    const threadId = "threadId" in first ? first.threadId : "";
+    expect(prompt(first)).toContain("This is a scheduled check-in.");
+    expect(prompt(first)).toContain('"title": "Compare flights"');
+    expect(prompt(first)).toContain("- booker: Booker. Books travel.");
+    expect(prompt(first)).toContain("- graph:triage: Triage. Routes requests.");
+    expect(prompt(first)).not.toContain("- researcher:");
+    const threadId = thread(first);
     expect(appDb.threadStore.get(threadId)).toMatchObject({
       background: true,
       agentId: "researcher",
       todoId: todo.id,
       title: "Compare flights",
     });
-    const again = service.resolveCheckIn(trigger, occurrence("cron-recovery"));
-    expect("threadId" in again && again.threadId).toBe(threadId);
+    expect(thread(service.resolveCheckIn(trigger, occurrence("cron-recovery")))).toBe(threadId);
     expect(service.get(todo.id)!.history.filter((e) => e.kind === "check-in").map((e) => e.reason)).toEqual(["cron", "cron"]);
   });
 
-  it("skips a check-in while the last one runs or waits, and once the Todo is done", () => {
+  it("skips a check-in while the last one runs or waits, and once the Todo is done", async () => {
     const { service, appDb, running } = harness();
     const todo = service.create({ title: "a" });
-    service.assign(todo.id, { owner: "researcher" });
+    await service.assign(todo.id, { owner: "researcher" });
     const trigger = appDb.triggers.forTodo(todo.id)!;
-    const first = service.resolveCheckIn(trigger, occurrence("cron"));
-    const threadId = "threadId" in first ? first.threadId : "";
+    const threadId = thread(service.resolveCheckIn(trigger, occurrence("cron")));
 
     running.add(threadId);
     expect(service.resolveCheckIn(trigger, occurrence("cron"))).toEqual({ skip: "the previous check-in is still running" });
@@ -147,32 +179,58 @@ describe("TodoService check-ins", () => {
     expect(service.resolveCheckIn(trigger, occurrence("cron"))).toEqual({ skip: "the Todo is complete" });
   });
 
-  it("checks in on request, and explains why it cannot", () => {
+  it("skips scheduled check-ins while snoozed, but not asked-for ones", async () => {
+    let now = NOW;
+    const { service, appDb } = harness({ now: () => now });
+    const todo = service.create({ title: "a" });
+    await service.assign(todo.id, { owner: "researcher", snoozedUntil: "2026-11-27T09:00:00.000Z" });
+    const trigger = appDb.triggers.forTodo(todo.id)!;
+    expect(service.resolveCheckIn(trigger, occurrence("cron"))).toEqual({
+      skip: "the Todo is snoozed until 2026-11-27T09:00:00.000Z",
+    });
+    expect("prompt" in service.resolveCheckIn(trigger, occurrence("manual"))).toBe(true);
+    now = Date.parse("2026-11-27T09:00:01.000Z");
+    expect("prompt" in service.resolveCheckIn(trigger, occurrence("cron"))).toBe(true);
+  });
+
+  it("stops checking in once the budget is used, and says so once", async () => {
+    const { service, appDb } = harness();
+    const todo = service.create({ title: "a" });
+    await service.assign(todo.id, { owner: "researcher", maxCheckIns: 1 });
+    const trigger = appDb.triggers.forTodo(todo.id)!;
+    expect("prompt" in service.resolveCheckIn(trigger, occurrence("cron"))).toBe(true);
+    expect(service.resolveCheckIn(trigger, occurrence("cron"))).toEqual({ skip: "the Todo's check-in budget is used up" });
+    service.resolveCheckIn(trigger, occurrence("cron"));
+    expect(service.get(todo.id)!.history.filter((e) => e.kind === "paused")).toHaveLength(1);
+    expect(() => service.checkInNow(todo.id)).toThrow(/check-in budget/);
+  });
+
+  it("checks in on request, and explains why it cannot", async () => {
     const { service } = harness();
     const todo = service.create({ title: "a" });
     expect(() => service.checkInNow(todo.id)).toThrow(/Assign this Todo/);
-    service.assign(todo.id, { owner: "researcher", checkIn: null });
+    await service.assign(todo.id, { owner: "researcher", checkIn: null });
     expect(service.checkInNow(todo.id)).toMatchObject({ runId: "run-1" });
     expect(service.get(todo.id)!.history.at(-1)).toMatchObject({ kind: "check-in", reason: "manual" });
 
     const paused = harness({ automations: false });
     const other = paused.service.create({ title: "b" });
-    paused.service.assign(other.id, { owner: "researcher" });
+    await paused.service.assign(other.id, { owner: "researcher" });
     expect(() => paused.service.checkInNow(other.id)).toThrow(/Automations is turned off/);
   });
 });
 
-function ownedTodo(h: ReturnType<typeof harness>, owner = "researcher") {
+async function ownedTodo(h: ReturnType<typeof harness>, owner = "researcher") {
   const todo = h.service.create({ title: "Compare flights" });
-  h.service.assign(todo.id, { owner });
-  const resolved = h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("cron"));
-  return { todo, threadId: "threadId" in resolved ? resolved.threadId : "" };
+  await h.service.assign(todo.id, { owner });
+  const threadId = thread(h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("cron")));
+  return { todo, threadId };
 }
 
 describe("TodoService ambient access", () => {
-  it("records progress and completion as the owner", () => {
+  it("records progress and completion as the owner", async () => {
     const h = harness();
-    const { todo, threadId } = ownedTodo(h);
+    const { todo, threadId } = await ownedTodo(h);
     expect(h.service.todoForThread(threadId)?.id).toBe(todo.id);
     const done = h.service.recordProgress(threadId, { note: "Booked nothing yet; fares found.", completed: true });
     expect(done.completed).toBe(true);
@@ -185,7 +243,7 @@ describe("TodoService ambient access", () => {
 
   it("notifies in the agent's home thread, creating it once, and waits out a live conversation", async () => {
     const h = harness();
-    const { todo, threadId } = ownedTodo(h);
+    const { todo, threadId } = await ownedTodo(h);
     await h.service.notifyUser(threadId, "Cheapest fare is Tuesday.");
     const home = h.appDb.threadStore.agentHome("researcher")!;
     expect(home).toMatchObject({ pinned: true, unread: true, lastMessage: "Cheapest fare is Tuesday.", title: "Researcher" });
@@ -197,9 +255,54 @@ describe("TodoService ambient access", () => {
     expect(h.posted).toHaveLength(1);
   });
 
-  it("records a failed check-in with its error", () => {
+  it("limits immediate notifications per agent per day", async () => {
     const h = harness();
-    const { todo, threadId } = ownedTodo(h);
+    const { threadId } = await ownedTodo(h);
+    for (let i = 0; i < 5; i++) await h.service.notifyUser(threadId, `update ${i}`);
+    await expect(h.service.notifyUser(threadId, "one more")).rejects.toThrow(/already sent the user 5 updates/);
+  });
+
+  it("queues digest notifications and posts one message per agent", async () => {
+    const h = harness();
+    const { todo, threadId } = await ownedTodo(h);
+    await h.service.assign(todo.id, { notify: "digest" });
+    await h.service.notifyUser(threadId, "Fares are in.");
+    await h.service.notifyUser(threadId, "Hotel is booked.");
+    expect(h.posted).toEqual([]);
+    expect(h.service.get(todo.id)!.history.at(-1)).toMatchObject({ kind: "notified", note: "Queued for the daily digest: Hotel is booked." });
+
+    await h.service.flushDigests();
+    expect(h.posted).toHaveLength(1);
+    expect(h.posted[0]![1]).toBe("Here is today's digest:\n\n- Compare flights: Fares are in.\n- Compare flights: Hotel is booked.");
+    await h.service.flushDigests();
+    expect(h.posted).toHaveLength(1);
+  });
+
+  it("keeps a digest queued while the user is talking to the agent", async () => {
+    const h = harness();
+    const { todo, threadId } = await ownedTodo(h);
+    await h.service.assign(todo.id, { notify: "digest" });
+    await h.service.notifyUser(threadId, "Fares are in.");
+    const home = h.appDb.threadStore.create({ threadId: "home", agentId: "researcher", agentHome: true });
+    h.running.add(home.threadId);
+    await h.service.flushDigests();
+    expect(h.posted).toEqual([]);
+    h.running.delete(home.threadId);
+    await h.service.flushDigests();
+    expect(h.posted).toHaveLength(1);
+  });
+
+  it("records a pause with its question and repeats the question in the home thread", async () => {
+    const h = harness();
+    const { todo, threadId } = await ownedTodo(h);
+    await h.service.recordPause(threadId, "Window or aisle?");
+    expect(h.service.get(todo.id)!.history.at(-1)).toMatchObject({ kind: "asked", actor: "researcher", threadId, note: "Window or aisle?" });
+    expect(h.posted[0]![1]).toBe('I have a question about "Compare flights": Window or aisle?\n\nAnswer it in the Action view.');
+  });
+
+  it("records a failed check-in with its error", async () => {
+    const h = harness();
+    const { todo, threadId } = await ownedTodo(h);
     h.service.recordFailure(threadId, "The security token included in the request is invalid.");
     h.service.recordFailure("not-a-check-in", "ignored");
     expect(h.service.get(todo.id)!.history.at(-1)).toMatchObject({
@@ -210,19 +313,20 @@ describe("TodoService ambient access", () => {
     });
   });
 
-  it("records a pause as a question to the user", () => {
+  it("snoozes as the owner", async () => {
     const h = harness();
-    const { todo, threadId } = ownedTodo(h);
-    h.service.recordPause(threadId);
-    expect(h.service.get(todo.id)!.history.at(-1)).toMatchObject({ kind: "asked", actor: "researcher", threadId });
+    const { todo, threadId } = await ownedTodo(h);
+    expect(h.service.snooze(threadId, "2026-11-30T09:00:00.000Z", "Fares update Monday").snoozedUntil).toBe("2026-11-30T09:00:00.000Z");
+    expect(h.service.get(todo.id)!.history.at(-1)).toMatchObject({ kind: "snoozed", actor: "researcher" });
+    expect(() => h.service.snooze(threadId, "2020-01-01T00:00:00Z", "past")).toThrow(/in the future/);
   });
 });
 
 describe("TodoService handoffs", () => {
-  it("hands off with the note, wakes the new owner, and retires the old thread", () => {
+  it("hands off with the note, wakes the new owner, and retires the old thread", async () => {
     const h = harness();
-    const { todo, threadId } = ownedTodo(h);
-    const handed = h.service.reassign(threadId, "booker", "Book the Tuesday fare.");
+    const { todo, threadId } = await ownedTodo(h);
+    const handed = await h.service.reassign(threadId, "booker", "Book the Tuesday fare.");
     expect(handed.owner).toBe("booker");
     expect(h.fired.at(-1)).toEqual([`todo_${todo.id}`, "handoff"]);
     const after = h.service.get(todo.id)!;
@@ -232,43 +336,109 @@ describe("TodoService handoffs", () => {
     expect(() => h.service.recordProgress(threadId, { note: "late" })).toThrow(/no longer owns a Todo/);
   });
 
-  it("puts the handoff note in the new owner's check-in", () => {
+  it("puts the handoff note in the new owner's check-in", async () => {
     const h = harness();
-    const { todo, threadId } = ownedTodo(h);
-    h.service.reassign(threadId, "booker", "Book the Tuesday fare.");
-    const prompt = h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("handoff"));
-    expect("prompt" in prompt && prompt.prompt).toContain("Researcher handed this Todo to you with this note: Book the Tuesday fare.");
+    const { todo, threadId } = await ownedTodo(h);
+    await h.service.reassign(threadId, "booker", "Book the Tuesday fare.");
+    const launch = h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("handoff"));
+    expect(prompt(launch)).toContain("Researcher handed this Todo to you with this note: Book the Tuesday fare.");
   });
 
-  it("refuses itself, unknown and unready agents, and handing back", () => {
+  it("refuses itself, unknown and unready agents, and handing back", async () => {
     const h = harness();
-    const { todo, threadId } = ownedTodo(h);
-    expect(() => h.service.reassign(threadId, "researcher", "x")).toThrow("You already own this Todo.");
-    expect(() => h.service.reassign(threadId, "ghost", "x")).toThrow(/You can hand off to: booker, writer/);
-    expect(() => h.service.reassign(threadId, "broken", "x")).toThrow(/Broken is unavailable/);
+    const { todo, threadId } = await ownedTodo(h);
+    await expect(h.service.reassign(threadId, "researcher", "x")).rejects.toThrow("You already own this Todo.");
+    await expect(h.service.reassign(threadId, "ghost", "x")).rejects.toThrow(/You can hand off to: booker, writer/);
+    await expect(h.service.reassign(threadId, "broken", "x")).rejects.toThrow(/Broken is unavailable/);
 
-    h.service.reassign(threadId, "booker", "over to you");
+    await h.service.reassign(threadId, "booker", "over to you");
     const bookerThread = h.service.get(todo.id)!.backgroundThreadId!;
-    expect(() => h.service.reassign(bookerThread, "researcher", "back to you")).toThrow(/already handed this Todo on/);
+    await expect(h.service.reassign(bookerThread, "researcher", "back to you")).rejects.toThrow(/already handed this Todo on/);
   });
 
-  it("caps handoffs since the user last assigned the Todo", () => {
+  it("caps handoffs since the user last assigned the Todo", async () => {
     const agents = ["a1", "a2", "a3", "a4", "a5", "a6", "a7"];
     for (const id of agents) AGENTS[id] = { name: id, description: id, ready: true };
     try {
       const h = harness();
-      const { todo, threadId } = ownedTodo(h, "a1");
-      let thread = threadId;
+      const { todo, threadId } = await ownedTodo(h, "a1");
+      let current = threadId;
       for (const next of agents.slice(1, 6)) {
-        h.service.reassign(thread, next, "next");
-        thread = h.service.get(todo.id)!.backgroundThreadId!;
+        await h.service.reassign(current, next, "next");
+        current = h.service.get(todo.id)!.backgroundThreadId!;
       }
-      expect(() => h.service.reassign(thread, "a7", "next")).toThrow(/handed off 5 times/);
-      h.service.assign(todo.id, { owner: "researcher" });
-      const fresh = h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("cron"));
-      expect(() => h.service.reassign("threadId" in fresh ? fresh.threadId : "", "a7", "next")).not.toThrow();
+      await expect(h.service.reassign(current, "a7", "next")).rejects.toThrow(/handed off 5 times/);
+      await h.service.assign(todo.id, { owner: "researcher" });
+      const fresh = thread(h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("cron")));
+      await expect(h.service.reassign(fresh, "a7", "next")).resolves.toBeDefined();
     } finally {
       for (const id of agents) delete AGENTS[id];
     }
+  });
+
+  it("hands off to a workflow, which runs as a graph check-in in a new background run", async () => {
+    const h = harness();
+    await h.service.refreshGraphs();
+    const { todo, threadId } = await ownedTodo(h);
+    const handed = await h.service.reassign(threadId, "graph:triage", "Routine; let the workflow file it.");
+    expect(handed.ownerGraph).toBe("triage");
+    expect(handed.owner).toBeUndefined();
+    const run = h.appDb.threadStore.get(handed.backgroundThreadId!)!;
+    expect(run).toMatchObject({ graphId: "triage", background: true, todoId: todo.id });
+    const launch = h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("cron"));
+    expect(launch).toMatchObject({ graphId: "triage", input: { todo: { id: todo.id, title: "Compare flights" }, reason: "cron" } });
+    await expect(h.service.reassign(threadId, "graph:ghost", "x")).rejects.toThrow(/no longer owns a Todo/);
+  });
+
+  it("settles a graph-owned Todo from the run's outcome", async () => {
+    const h = harness();
+    const todo = h.service.create({ title: "File the request" });
+    await h.service.assign(todo.id, { owner: "graph:triage" });
+    const launch = h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("cron"));
+    h.service.recordGraphOutcome(thread(launch), "Filed as ticket 42");
+    expect(h.service.get(todo.id)!.history.at(-1)).toMatchObject({ kind: "progress", actor: "graph:triage", note: "Filed as ticket 42" });
+    h.service.recordGraphOutcome(thread(launch), "done");
+    expect(h.service.get(todo.id)).toMatchObject({ completed: true });
+  });
+});
+
+describe("TodoService subtasks", () => {
+  it("creates a child owned by the other agent, wakes it, and wakes the parent when it finishes", async () => {
+    const h = harness();
+    const { todo, threadId } = await ownedTodo(h);
+    const child = await h.service.requestTodo(threadId, "booker", "Hold the Tuesday fare", "Need a 24h hold.");
+    expect(child).toMatchObject({ parentTodoId: todo.id, owner: "booker", title: "Hold the Tuesday fare" });
+    expect(child.notes).toContain('Requested by Researcher for "Compare flights": Need a 24h hold.');
+    expect(h.fired.at(-1)).toEqual([`todo_${child.id}`, "handoff"]);
+    expect(h.service.get(todo.id)!.history.at(-1)).toMatchObject({ kind: "subtask", agentId: "booker", todoId: child.id, note: "requested: Hold the Tuesday fare" });
+
+    const childThread = h.service.get(child.id)!.backgroundThreadId!;
+    h.service.recordProgress(childThread, { note: "Held.", completed: true });
+    expect(h.service.get(todo.id)!.history.filter((e) => e.kind === "subtask").at(-1)).toMatchObject({ note: "finished: Hold the Tuesday fare" });
+    expect(h.fired.at(-1)).toEqual([`todo_${todo.id}`, "subtask"]);
+  });
+
+  it("lists subtasks in the parent's check-in and the parent in the child's", async () => {
+    const h = harness();
+    const { todo, threadId } = await ownedTodo(h);
+    await h.service.requestTodo(threadId, "booker", "Hold the fare", "24h hold");
+    const parentPrompt = prompt(h.service.resolveCheckIn(h.appDb.triggers.forTodo(todo.id)!, occurrence("manual")));
+    expect(parentPrompt).toContain("- Hold the fare (Booker): open");
+  });
+
+  it("refuses itself, unknown agents, deep nesting, and too many open subtasks", async () => {
+    const h = harness();
+    const { threadId } = await ownedTodo(h);
+    await expect(h.service.requestTodo(threadId, "researcher", "x", "y")).rejects.toThrow(/Do the work yourself/);
+    await expect(h.service.requestTodo(threadId, "ghost", "x", "y")).rejects.toThrow(/There is no agent "ghost"/);
+
+    const level1 = await h.service.requestTodo(threadId, "booker", "Level 1", "n");
+    const level2 = await h.service.requestTodo(h.service.get(level1.id)!.backgroundThreadId!, "writer", "Level 2", "n");
+    await expect(
+      h.service.requestTodo(h.service.get(level2.id)!.backgroundThreadId!, "booker", "Level 3", "n"),
+    ).rejects.toThrow(/only nest 3 deep/);
+
+    for (let i = 0; i < 9; i++) await h.service.requestTodo(threadId, "writer", `Part ${i}`, "n");
+    await expect(h.service.requestTodo(threadId, "writer", "Too many", "n")).rejects.toThrow(/already has 10 open subtasks/);
   });
 });

@@ -74,3 +74,20 @@ describe("parseGraphSpec", () => {
     expect(errorsOf({ ...valid, edges: valid.edges.slice(1) })).toContain("no edge leaves start");
   });
 });
+
+describe("todoOutcome", () => {
+  const base = {
+    id: "triage",
+    name: "Triage",
+    nodes: [{ id: "decide", type: "transform", set: { outcome: "done" } }],
+    edges: [{ from: "start", to: "decide" }, { from: "decide", to: "end" }],
+  };
+
+  it("names a state key the graph writes", () => {
+    expect(parseGraphSpec({ ...base, todoOutcome: "outcome" })).toMatchObject({ ok: true });
+    expect(parseGraphSpec({ ...base, todoOutcome: "missing" })).toEqual({
+      ok: false,
+      errors: ['todoOutcome: no node writes "missing"'],
+    });
+  });
+});

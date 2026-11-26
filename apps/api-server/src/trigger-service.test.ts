@@ -659,3 +659,42 @@ describe("TriggerService: Todo check-ins", () => {
     svc.stop();
   });
 });
+
+describe("TriggerService: Todo check-ins owned by a graph", () => {
+  it("runs the graph with the Todo as input", () => {
+    const store = memStore();
+    store.create({ id: "todo_t1", kind: "cron", enabled: true, todoId: "t1" });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, {
+      log: () => {},
+      todoCheckIn: () => ({ threadId: "run-1", graphId: "triage", input: { todo: { id: "t1" }, reason: "manual" } }),
+    });
+    svc.runNow("todo_t1");
+    const start = m.starts[0]!;
+    expect(start.threadId).toBe("run-1");
+    expect(start.input).toMatchObject({ graphInput: { todo: { id: "t1" }, reason: "manual", trigger: { id: "todo_t1" } } });
+    expect(start.opts?.configurable).toMatchObject({ graph_id: "triage", todo_id: "t1" });
+  });
+
+  it("closes a check-in a restart interrupted instead of replaying it", () => {
+    const store = memStore();
+    store.create({ id: "todo_t1", kind: "cron", enabled: true, todoId: "t1" });
+    const at = new Date().toISOString();
+    store.createOccurrence({ id: "occ", triggerId: "todo_t1", scheduledAt: at, reason: "manual", now: at });
+    store.beginOccurrence("occ", at, 3);
+    let resolved = 0;
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, {
+      log: () => {},
+      todoCheckIn: () => {
+        resolved++;
+        return { threadId: "bg", prompt: "x" };
+      },
+    });
+    svc.start();
+    expect(resolved).toBe(0);
+    expect(m.starts).toHaveLength(0);
+    expect(store.getOccurrence("occ")).toMatchObject({ status: "dead", lastError: "interrupted by a restart; the next check-in continues" });
+    svc.stop();
+  });
+});

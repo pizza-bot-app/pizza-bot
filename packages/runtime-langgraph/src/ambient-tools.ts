@@ -9,7 +9,9 @@ export const AMBIENT_PROMPT = [
   "- `update_todo` records progress; always include a short note of what you did or learned, and mark the Todo complete when it is done.",
   "- `notify_user` sends the user a message; use it only for news they would want now, not for routine progress.",
   "- `ask_user` asks the user a question and waits for the answer; use it only when you are blocked on a decision only they can make.",
-  "- `reassign_todo` hands the Todo to another agent better suited to it, with a note; after that it is no longer yours.",
+  "- `reassign_todo` hands the Todo to another agent or a workflow better suited to it, with a note; after that it is no longer yours.",
+  "- `request_todo` asks another agent to do one part of the work as a subtask; you keep the Todo and see the subtask's progress at later check-ins.",
+  "- `snooze_until` skips your scheduled check-ins until a later time when nothing can change before then.",
   "Do what you can now, then end your turn; you will be woken again at the next check-in.",
 ].join("\n");
 
@@ -90,9 +92,9 @@ export function ambientTools(access: AmbientTodoAccess) {
   );
 
   const reassignTodo = tool(
-    (input: { toAgent: string; note: string }, config?: ToolRunnableConfig) => {
-      const todo = access.reassign(callingThread(config), input.toAgent, input.note);
-      return `Handed to ${todo.owner ?? input.toAgent}. The Todo is no longer yours; end your turn.`;
+    async (input: { toAgent: string; note: string }, config?: ToolRunnableConfig) => {
+      await access.reassign(callingThread(config), input.toAgent, input.note);
+      return `Handed to ${input.toAgent}. The Todo is no longer yours; end your turn.`;
     },
     {
       name: "reassign_todo",
@@ -100,11 +102,46 @@ export function ambientTools(access: AmbientTodoAccess) {
         "Hand the Todo you own to another agent better suited to it. The note is all they get: " +
         "say why, what you already did, and what is left.",
       schema: z.object({
-        toAgent: z.string().min(1).describe("The other agent's id."),
+        toAgent: z.string().min(1).describe("The other agent's id, or graph:<id> for a workflow."),
         note: note.describe("Why you are handing it on, what you tried, and what is left."),
       }),
     },
   );
 
-  return [updateTodo, notifyUser, askUser, reassignTodo] as const;
+  const requestTodo = tool(
+    async (input: { toAgent: string; title: string; note: string }, config?: ToolRunnableConfig) => {
+      const child = await access.requestTodo(callingThread(config), input.toAgent, input.title, input.note);
+      return `Asked ${input.toAgent} to do "${child.title}". You will see its progress at your next check-ins.`;
+    },
+    {
+      name: "request_todo",
+      description:
+        "Ask another agent to do one part of your Todo as a subtask. You keep your Todo; the " +
+        "subtask's progress shows at your later check-ins, and you are woken when it finishes.",
+      schema: z.object({
+        toAgent: z.string().min(1).describe("The other agent's id."),
+        title: z.string().trim().min(1).max(200).describe("Short imperative title for the subtask."),
+        note: note.describe("What you need, why, and anything they must know."),
+      }),
+    },
+  );
+
+  const snoozeUntil = tool(
+    (input: { until: string; reason: string }, config?: ToolRunnableConfig) => {
+      const todo = access.snooze(callingThread(config), input.until, input.reason);
+      return `Scheduled check-ins are skipped until ${todo.snoozedUntil ?? input.until}.`;
+    },
+    {
+      name: "snooze_until",
+      description:
+        "Skip your scheduled check-ins on this Todo until a later time, when nothing useful can " +
+        "happen before then. You are still woken if the user asks or a subtask finishes.",
+      schema: z.object({
+        until: z.string().describe("ISO 8601 date-time with offset, e.g. 2026-12-01T09:00:00-08:00, within 90 days."),
+        reason: note.describe("Why nothing can change before then."),
+      }),
+    },
+  );
+
+  return [updateTodo, notifyUser, askUser, reassignTodo, requestTodo, snoozeUntil] as const;
 }

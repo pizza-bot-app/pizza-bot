@@ -31,15 +31,13 @@ export function todoRoutes(host: Pick<AgentHost, "todoService" | "todoStore" | "
     const id = c.req.param("todo_id");
     const parsed = patchSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return c.json({ error: "invalid", detail: describe(parsed.error) }, 400);
-    const { owner, checkIn, ...patch } = parsed.data;
+    const { owner, checkIn, snoozedUntil, notify, maxCheckIns, ...patch } = parsed.data;
     if (!todos.get(id)) return c.json({ error: "not_found" }, 404);
     try {
-      if (owner !== undefined || checkIn !== undefined) {
-        todos.assign(id, {
-          ...(owner !== undefined ? { owner } : {}),
-          ...(checkIn !== undefined ? { checkIn } : {}),
-        });
-      }
+      const assignment = Object.fromEntries(
+        Object.entries({ owner, checkIn, snoozedUntil, notify, maxCheckIns }).filter(([, value]) => value !== undefined),
+      );
+      if (Object.keys(assignment).length > 0) await todos.assign(id, assignment);
     } catch (error) {
       if (error instanceof TodoRefusal) return c.json({ error: "invalid", detail: error.message }, 400);
       throw error;

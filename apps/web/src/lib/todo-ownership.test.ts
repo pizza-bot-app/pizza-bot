@@ -1,13 +1,26 @@
 import { describe, expect, it } from "vitest";
 import type { Todo, TodoEvent } from "@pizza-bot/core";
 import {
+  activeSnooze,
   checkInChoice,
+  graphIdOf,
+  localDateTimeToIso,
   nextCheckInLabel,
+  ownerValue,
+  parseCheckInLimit,
+  snoozePresets,
   todoTimeline,
   todosAwaitingUser,
+  whenLabel,
+  workOwnerOf,
 } from "./todo-ownership.js";
 
-const names: Record<string, string> = { researcher: "Researcher", writer: "Writer" };
+const names: Record<string, string> = {
+  researcher: "Researcher",
+  writer: "Writer",
+  booker: "Booker",
+  "graph:triage": "Triage",
+};
 const nameOf = (id: string) => names[id] ?? id;
 
 function event(fields: Partial<TodoEvent> & Pick<TodoEvent, "kind">): TodoEvent {
@@ -57,7 +70,7 @@ describe("todoTimeline", () => {
     expect(entry).toMatchObject({
       text: "Researcher's check-in failed: The model is unavailable.",
       threadId: "bg",
-      workAgentId: "researcher",
+      workOwner: "researcher",
     });
     expect(todoTimeline([event({ id: "2", kind: "failed" })], nameOf)[0]?.text).toBe("Researcher's check-in failed");
   });
@@ -70,9 +83,9 @@ describe("todoTimeline", () => {
       ],
       nameOf,
     );
-    expect(entries[1]).toMatchObject({ text: "Researcher checked in (handed off)", workAgentId: "researcher" });
+    expect(entries[1]).toMatchObject({ text: "Researcher checked in (handed off)", workOwner: "researcher" });
     expect(entries[0]).toMatchObject({ threadId: "home" });
-    expect(entries[0]!.workAgentId).toBeUndefined();
+    expect(entries[0]!.workOwner).toBeUndefined();
   });
 });
 
@@ -97,3 +110,89 @@ describe("nextCheckInLabel", () => {
     expect(nextCheckInLabel("2026-11-28T09:00:00.000Z", now)).not.toBe("");
   });
 });
+
+describe("owners", () => {
+  it("reads agent and graph owners as picker values and work-thread owners", () => {
+    expect(ownerValue({ owner: "researcher" })).toBe("researcher");
+    expect(ownerValue({ ownerGraph: "triage" })).toBe("graph:triage");
+    expect(ownerValue({})).toBeUndefined();
+    expect(graphIdOf("graph:triage")).toBe("triage");
+    expect(graphIdOf("researcher")).toBeUndefined();
+    expect(workOwnerOf("graph:triage")).toEqual({ graphId: "triage" });
+    expect(workOwnerOf("researcher")).toEqual({ agentId: "researcher" });
+  });
+});
+
+describe("refinement timeline sentences", () => {
+  it("describes snoozes, subtasks, pauses, and handoffs to a workflow", () => {
+    const until = "2026-12-01T09:00:00.000Z";
+    const history: TodoEvent[] = [
+      event({ id: "1", kind: "snoozed", note: `until ${until}: Fares update Monday` }),
+      event({ id: "2", kind: "snoozed", actor: "user", note: "snooze lifted" }),
+      event({ id: "3", kind: "subtask", agentId: "booker", todoId: "child", note: "requested: Book hotel" }),
+      event({ id: "4", kind: "subtask", agentId: "booker", todoId: "child", note: "finished: Book hotel" }),
+      event({ id: "5", kind: "paused", actor: "user", note: "Check-in budget used up (10 of 10)." }),
+      event({ id: "6", kind: "assigned", agentId: "graph:triage", note: "Routine" }),
+      event({ id: "7", kind: "completed", actor: "graph:triage" }),
+      event({ id: "8", kind: "check-in", reason: "subtask", threadId: "bg" }),
+    ];
+    const entries = todoTimeline(history, nameOf);
+    expect(entries.map((entry) => entry.text)).toEqual([
+      "Researcher checked in (a subtask finished)",
+      "Triage completed this",
+      "Researcher handed this to the Triage workflow: Routine",
+      "Check-ins paused: Check-in budget used up (10 of 10).",
+      "Booker finished: Book hotel",
+      "Researcher asked Booker to: Book hotel",
+      "You lifted the snooze",
+      `Researcher snoozed check-ins until ${whenLabel(until)} — Fares update Monday`,
+    ]);
+    expect(entries.find((entry) => entry.id === "3")?.todoId).toBe("child");
+  });
+
+  it("marks a graph's work thread with its graph owner", () => {
+    const [entry] = todoTimeline([event({ kind: "failed", actor: "graph:triage", threadId: "run-1" })], nameOf);
+    expect(entry).toMatchObject({ text: "Triage's check-in failed", workOwner: "graph:triage" });
+  });
+});
+
+describe("snooze helpers", () => {
+  it("offers later today, tomorrow 9 am, and next Monday 9 am in local time", () => {
+    const thursday = new Date(2026, 10, 26, 14, 30);
+    const [later, tomorrow, monday] = snoozePresets(thursday).map((preset) => new Date(preset.until));
+    expect(later!.getTime() - thursday.getTime()).toBe(3 * 60 * 60 * 1000);
+    expect([tomorrow!.getDate(), tomorrow!.getHours(), tomorrow!.getMinutes()]).toEqual([27, 9, 0]);
+    expect([monday!.getDay(), monday!.getDate(), monday!.getHours()]).toEqual([1, 30, 9]);
+  });
+
+  it("moves next Monday a week out when today is Monday", () => {
+    const mondayMorning = new Date(2026, 10, 30, 8, 0);
+    const monday = new Date(snoozePresets(mondayMorning)[2]!.until);
+    expect([monday.getDay(), monday.getDate()]).toEqual([1, 7]);
+  });
+
+  it("keeps only a snooze still in effect", () => {
+    const now = Date.parse("2026-11-26T12:00:00.000Z");
+    expect(activeSnooze("2026-11-27T09:00:00.000Z", now)).toBe("2026-11-27T09:00:00.000Z");
+    expect(activeSnooze("2026-11-25T09:00:00.000Z", now)).toBeUndefined();
+    expect(activeSnooze(undefined, now)).toBeUndefined();
+  });
+
+  it("turns a local date-time into an instant", () => {
+    expect(localDateTimeToIso("2026-12-01T09:00")).toBe(new Date(2026, 11, 1, 9, 0).toISOString());
+    expect(localDateTimeToIso("")).toBeUndefined();
+    expect(localDateTimeToIso("not a date")).toBeUndefined();
+  });
+});
+
+describe("parseCheckInLimit", () => {
+  it("clears on blank, accepts 1-1000, and rejects anything else", () => {
+    expect(parseCheckInLimit("  ")).toBeNull();
+    expect(parseCheckInLimit("10")).toBe(10);
+    expect(parseCheckInLimit("0")).toBeUndefined();
+    expect(parseCheckInLimit("1001")).toBeUndefined();
+    expect(parseCheckInLimit("2.5")).toBeUndefined();
+    expect(parseCheckInLimit("ten")).toBeUndefined();
+  });
+});
+

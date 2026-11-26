@@ -20,6 +20,7 @@ function testApp() {
     automationsEnabled: () => true,
     agentStatus: (id) => (id === "researcher" ? { name: "Researcher", description: "Finds sources.", ready: true } : undefined),
     readyAgents: () => [],
+    listGraphs: async () => [],
     postToThread: async () => {},
     timezone: "UTC",
   });

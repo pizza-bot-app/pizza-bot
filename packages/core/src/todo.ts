@@ -18,9 +18,12 @@ export type TodoEventKind =
   | "reopened"
   | "notified"
   | "asked"
-  | "failed";
+  | "failed"
+  | "snoozed"
+  | "subtask"
+  | "paused";
 
-export type TodoCheckInReason = "cron" | "manual" | "handoff";
+export type TodoCheckInReason = "cron" | "manual" | "handoff" | "subtask";
 
 /** One timeline entry. `actor` is "user" or the acting agent's id; an agent-acted `assigned` is a handoff. */
 export interface TodoEvent {
@@ -28,12 +31,16 @@ export interface TodoEvent {
   at: string;
   kind: TodoEventKind;
   actor: "user" | string;
-  /** For `assigned`: the new owner. */
+  /** For `assigned`: the new owner. For `subtask`: the child's owner. */
   agentId?: string;
+  /** For `subtask`: the child Todo. */
+  todoId?: string;
   note?: string;
   threadId?: string;
   reason?: TodoCheckInReason;
 }
+
+export type TodoNotifyMode = "immediate" | "digest";
 
 export interface TodoCheckIn {
   cron: string;
@@ -57,8 +64,18 @@ export interface Todo {
   owner?: string;
   /** The owner's check-in schedule; absent means check-ins only when asked or handed off. */
   checkIn?: TodoCheckIn;
+  /** A graph that owns it instead of an agent; each check-in is a run of that graph. */
+  ownerGraph?: string;
   /** Where the current owner's check-ins run; hidden from the Inbox unless it awaits the user. */
   backgroundThreadId?: string;
+  /** Scheduled check-ins are skipped until then; asked-for check-ins and handoffs still run. */
+  snoozedUntil?: string;
+  /** `digest` batches the owner's notifications into one daily message. */
+  notify: TodoNotifyMode;
+  /** Check-ins allowed since the user last assigned it; `used` counts them. */
+  budget?: { maxCheckIns: number; used: number };
+  /** The Todo an agent split this one off from with `request_todo`. */
+  parentTodoId?: string;
   /** Oldest first. */
   history: TodoEvent[];
   createdAt: string;
@@ -114,10 +131,23 @@ export const TODO_NOTE_MAX = 2_000;
 /** Agent-to-agent handoffs allowed since the user last assigned the Todo. */
 export const TODO_MAX_HANDOFFS = 5;
 
-/** The user's assignment edits; `checkIn: null` keeps the owner but stops scheduled check-ins. */
+export const TODO_DIGEST_CRON = "0 17 * * *";
+/** Immediate notifications one agent may send the user in a rolling day. */
+export const TODO_NOTIFY_LIMIT_PER_DAY = 5;
+export const TODO_MAX_OPEN_SUBTASKS = 10;
+export const TODO_MAX_DEPTH = 3;
+export const TODO_GRAPH_OWNER_PREFIX = "graph:";
+
+/**
+ * The user's assignment edits. `owner` is an agent id, or `graph:<id>` for a graph;
+ * `checkIn: null` keeps the owner but stops scheduled check-ins.
+ */
 export const todoAssignmentSchema = z.object({
   owner: z.string().min(1).max(200).nullable().optional(),
   checkIn: z.string().trim().min(1).max(200).nullable().optional(),
+  snoozedUntil: z.iso.datetime({ offset: true }).nullable().optional(),
+  notify: z.enum(["immediate", "digest"]).optional(),
+  maxCheckIns: z.number().int().min(1).max(1000).nullable().optional(),
 });
 
 export type TodoAssignment = z.infer<typeof todoAssignmentSchema>;
@@ -135,7 +165,10 @@ export interface AmbientTodoAccess {
   todoForThread(threadId: string): Todo | undefined;
   recordProgress(threadId: string, update: { note: string } & Pick<TodoPatch, "completed" | "steps">): Todo;
   notifyUser(threadId: string, message: string): Promise<void>;
-  reassign(threadId: string, toAgentId: string, note: string): Todo;
+  /** `toAgentId` may be `graph:<id>`: a graph is a final destination. */
+  reassign(threadId: string, toAgentId: string, note: string): Promise<Todo>;
+  snooze(threadId: string, until: string, note: string): Todo;
+  requestTodo(threadId: string, toAgentId: string, title: string, note: string): Promise<Todo>;
 }
 
 /** The runtime's view of the Todo list; the orchestrator's Todo tools call only this. */

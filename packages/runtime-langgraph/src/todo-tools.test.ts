@@ -20,6 +20,7 @@ function memoryTodos(): TodoAccess & { all: Todo[] } {
         completed: false,
         threadIds: input.threadIds ?? [],
         history: [],
+        notify: "immediate",
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
       };

@@ -1,6 +1,9 @@
 import type { TodoEvent } from "@pizza-bot/core";
 import {
+  AlarmClock,
   CircleAlert,
+  CirclePause,
+  ListTree,
   CircleCheck,
   Forward,
   History,
@@ -27,16 +30,21 @@ const ICONS: Record<TodoEvent["kind"], LucideIcon> = {
   notified: Mail,
   asked: MessageCircleQuestion,
   failed: CircleAlert,
+  snoozed: AlarmClock,
+  subtask: ListTree,
+  paused: CirclePause,
 };
 
 export function TodoTimeline({
   history,
   nameOf,
   onOpenThread,
+  onOpenTodo,
 }: {
   history: readonly TodoEvent[];
   nameOf: (agentId: string) => string;
   onOpenThread: (entry: TimelineEntry & { threadId: string }) => void;
+  onOpenTodo?: (todoId: string) => void;
 }) {
   if (history.length === 0) return null;
   const entries = todoTimeline(history, nameOf);
@@ -53,7 +61,15 @@ export function TodoTimeline({
             <li key={entry.id} className={`todo-timeline-entry kind-${entry.kind}`}>
               <Icon size={14} aria-hidden="true" className="todo-timeline-icon" />
               <span className="todo-timeline-text">
-                {entry.threadId ? (
+                {entry.todoId && onOpenTodo ? (
+                  <button
+                    type="button"
+                    className="todo-timeline-link"
+                    onClick={() => onOpenTodo(entry.todoId!)}
+                  >
+                    {entry.text}
+                  </button>
+                ) : entry.threadId ? (
                   <button
                     type="button"
                     className="todo-timeline-link"

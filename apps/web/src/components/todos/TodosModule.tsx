@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import type { Todo, TodoAssignment, TodoCreateInput, TodoPatch } from "@pizza-bot/core";
 import { errorMessage, type AgentCatalogEntryInfo } from "@/api-client";
 import {
+  AlarmClock,
   Bot,
   CalendarDays,
   Circle,
@@ -11,6 +12,7 @@ import {
   MessageSquare,
   Plus,
   Star,
+  Workflow,
 } from "lucide-react";
 import { ModuleHeader } from "../ModuleHeader.js";
 import { useAppToast } from "../AppToast.js";
@@ -30,13 +32,15 @@ import {
   type TodoView,
 } from "../../lib/todo-views.js";
 import { L } from "../../lexicon.js";
-import { todosAwaitingUser } from "../../lib/todo-ownership.js";
-import { TodoDetail, type WorkThreadHint } from "./TodoDetail.js";
+import { activeSnooze, graphIdOf, ownerValue, todosAwaitingUser, whenLabel } from "../../lib/todo-ownership.js";
+import { TodoDetail, ownerDisplayName, type WorkThreadHint } from "./TodoDetail.js";
+import type { TodoGraphOption } from "./TodoAssignment.js";
 
 export interface TodosModuleProps {
   todos: Todo[];
   threadTitles: ReadonlyMap<string, string>;
   agents?: readonly AgentCatalogEntryInfo[];
+  graphs?: readonly TodoGraphOption[];
   automationsEnabled?: boolean;
   /** Threads currently paused on the user; marks the Todos whose work thread is among them. */
   awaitingThreadIds?: ReadonlySet<string>;
@@ -52,6 +56,7 @@ export interface TodosModuleProps {
 }
 
 const NO_AGENTS: readonly AgentCatalogEntryInfo[] = [];
+const NO_GRAPHS: readonly TodoGraphOption[] = [];
 const NO_THREADS: ReadonlySet<string> = new Set();
 
 const VIEW_LABELS: Record<TodoView, string> = {
@@ -81,6 +86,7 @@ export function TodosModule({
   todos,
   threadTitles,
   agents = NO_AGENTS,
+  graphs = NO_GRAPHS,
   automationsEnabled = true,
   awaitingThreadIds = NO_THREADS,
   focusId,
@@ -104,7 +110,8 @@ export function TodosModule({
   const counts = useMemo(() => todoViewCounts(todos, today), [todos, today]);
   const selected = todos.find((todo) => todo.id === selectedId) ?? null;
   const waiting = useMemo(() => todosAwaitingUser(todos, awaitingThreadIds), [todos, awaitingThreadIds]);
-  const agentName = (agentId: string) => agents.find((agent) => agent.id === agentId)?.name ?? agentId;
+  const ownerName = (id: string) => ownerDisplayName(id, agents, graphs);
+  const titleOf = (id: string) => todos.find((todo) => todo.id === id)?.title;
 
   const listNavigation = useSelectableListNavigation({
     itemIds: rows.map((todo) => todo.id),
@@ -197,7 +204,10 @@ export function TodosModule({
                 tabIndex={0}
                 ref={listNavigation.setListElement}
               >
-                {rows.map((todo) => (
+                {rows.map((todo) => {
+                  const owner = ownerValue(todo);
+                  const parentTitle = todo.parentTodoId ? titleOf(todo.parentTodoId) : undefined;
+                  return (
                   <li
                     key={todo.id}
                     id={listNavigation.rowId(todo.id)}
@@ -210,7 +220,8 @@ export function TodosModule({
                       todo={todo}
                       today={today}
                       active={todo.id === selectedId}
-                      {...(todo.owner ? { ownerName: agentName(todo.owner) } : {})}
+                      {...(owner ? { ownerName: ownerName(owner), ownerIsGraph: graphIdOf(owner) !== undefined } : {})}
+                      {...(parentTitle ? { parentTitle } : {})}
                       waiting={waiting.has(todo.id)}
                       onToggleComplete={() => void update(todo.id, { completed: !todo.completed })}
                       onToggleImportant={() =>
@@ -220,7 +231,8 @@ export function TodosModule({
                       }
                     />
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -234,7 +246,10 @@ export function TodosModule({
               today={today}
               threadTitles={threadTitles}
               agents={agents}
+              graphs={graphs}
+              todos={todos}
               automationsEnabled={automationsEnabled}
+              onSelectTodo={setSelectedId}
               onUpdate={(patch) => update(selected.id, patch)}
               onCheckIn={async () => {
                 await onCheckIn?.(selected.id);
@@ -270,6 +285,8 @@ function TodoRow({
   today,
   active,
   ownerName,
+  ownerIsGraph = false,
+  parentTitle,
   waiting,
   onToggleComplete,
   onToggleImportant,
@@ -278,17 +295,21 @@ function TodoRow({
   today: string;
   active: boolean;
   ownerName?: string;
+  ownerIsGraph?: boolean;
+  parentTitle?: string;
   waiting: boolean;
   onToggleComplete: () => void;
   onToggleImportant: () => void;
 }) {
   const progress = stepProgress(todo);
   const important = todo.importance === "high";
+  const snoozed = activeSnooze(todo.snoozedUntil);
   const hasMeta =
     todo.dueDate !== undefined ||
     progress !== undefined ||
     todo.threadIds.length > 0 ||
     ownerName !== undefined ||
+    snoozed !== undefined ||
     waiting;
   return (
     <div className={`resource-row todo-row${active ? " active" : ""}${todo.completed ? " completed" : ""}`}>
@@ -307,12 +328,19 @@ function TodoRow({
       </button>
       <span className="resource-row-main">
         <span className="resource-row-name todo-row-title">{todo.title}</span>
+        {parentTitle && <span className="todo-row-parent">↳ {parentTitle}</span>}
         {hasMeta && (
           <span className="todo-row-meta">
             {ownerName && (
               <span className="todo-owner" title={`${L.todoAssignedTo} ${ownerName}`}>
-                <Bot size={11} aria-hidden="true" />
+                {ownerIsGraph ? <Workflow size={11} aria-hidden="true" /> : <Bot size={11} aria-hidden="true" />}
                 {ownerName}
+              </span>
+            )}
+            {snoozed && (
+              <span className="todo-snoozed" title={`${L.todoSnoozedUntil} ${whenLabel(snoozed)}`}>
+                <AlarmClock size={11} aria-hidden="true" />
+                {whenLabel(snoozed)}
               </span>
             )}
             {waiting && (

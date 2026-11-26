@@ -2,6 +2,7 @@ import {
   BUILTIN_EVAL_TOOL_DESCRIPTION,
   BUILTIN_EVAL_TOOL_REF,
   BUILTIN_TOOL_REFS,
+  TODO_DIGEST_CRON,
   ModelRegistry,
   ModelUnavailableError,
   projectAgentReadiness,
@@ -98,6 +99,7 @@ import {
   resolveMcpConfig,
 } from "./plugins-dir.js";
 import { randomUUID } from "node:crypto";
+import { CronJob } from "cron";
 import { lstat, mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { ProtocolRunManager } from "./protocol-run-manager.js";
@@ -141,6 +143,16 @@ function interruptIdsOf(state: ThreadState): string[] {
       ),
     ]),
   ];
+}
+
+/** The question an `ask_user` pause carries, wherever the approval payload nests it. */
+function askUserQuestion(interrupts: ReadonlyArray<{ value: unknown }> | undefined): string | undefined {
+  for (const pending of interrupts ?? []) {
+    const value = pending.value as { actionRequests?: Array<{ name?: string; args?: { question?: unknown } }> };
+    const request = value?.actionRequests?.find((candidate) => candidate.name === "ask_user");
+    if (typeof request?.args?.question === "string") return request.args.question;
+  }
+  return undefined;
 }
 
 function terminalActivityOutcome(
@@ -380,6 +392,7 @@ export class AgentHost {
   readonly folderStore: FolderStore;
   readonly todoStore: TodoStore;
   readonly todoService: TodoService;
+  private digestJob: CronJob | undefined;
   readonly search: SearchStore;
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
@@ -474,6 +487,12 @@ export class AgentHost {
             const status = this.agentStatus(state.id);
             return status ? [{ id: state.id, ...status }] : [];
           }),
+      listGraphs: async () =>
+        (await this.graphRegistry.list()).graphs.map((spec) => ({
+          id: spec.id,
+          name: spec.name,
+          ...(spec.description ? { description: spec.description } : {}),
+        })),
       postToThread: async (threadId, text) => {
         const graph = await this.threadGraph(threadId);
         await graph.updateStateAsFinished(threadId, {
@@ -514,9 +533,16 @@ export class AgentHost {
             interruptIds = await this.readThreadInterruptIds(threadId);
             this.threadStore.ensure({ threadId });
             this.threadStore.update(threadId, { unread: true, awaitingAction: true });
-            if (this.threadStore.get(threadId)?.background) this.todoService.recordPause(threadId);
+            if (this.threadStore.get(threadId)?.background) {
+              const state = await (await this.threadGraph(threadId)).getState(threadId);
+              await this.todoService.recordPause(threadId, askUserQuestion(state.interrupts));
+            }
             await this.runMaintenance.reindexThread(threadId);
             return;
+          }
+          if (status === "success") {
+            const thread = this.threadStore.get(threadId);
+            if (thread?.background && thread.graphId) await this.settleGraphCheckIn(threadId, thread.graphId);
           }
           if (status === "error" || status === "timeout") {
             if (this.threadStore.get(threadId)?.background) {
@@ -860,7 +886,25 @@ export class AgentHost {
 
   async startAutomations(): Promise<void> {
     await this.whenInitialMcpSettled();
-    if (!this.closing) this.triggerService.start();
+    if (this.closing) return;
+    this.triggerService.start();
+    await this.todoService.refreshGraphs().catch(() => undefined);
+    this.digestJob ??= CronJob.from({
+      cronTime: TODO_DIGEST_CRON,
+      onTick: () => {
+        if (this.settings.get().enableAutomations) void this.todoService.flushDigests();
+      },
+      start: true,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+  }
+
+  /** A graph that owns a Todo settles it from the `todoOutcome` state key its spec names. */
+  private async settleGraphCheckIn(threadId: string, graphId: string): Promise<void> {
+    const { spec, graph } = await this.compiledGraph(graphId);
+    if (!spec.todoOutcome) return;
+    const state = await graph.getState(threadId);
+    this.todoService.recordGraphOutcome(threadId, (state.values as Record<string, unknown>)[spec.todoOutcome]);
   }
 
   private async whenInitialMcpSettled(): Promise<void> {
@@ -2194,6 +2238,7 @@ export class AgentHost {
     for (const timer of this.mcpRecoveryTimers.values()) clearTimeout(timer);
     this.mcpRecoveryTimers.clear();
     this.triggerService.stop();
+    void this.digestJob?.stop();
     // Warmup may still be opening persistence or spawning MCP children.
     await this.warmup.catch(() => {});
     // Refuse new runs, abort in-flight ones, and drain them; run-end side effects

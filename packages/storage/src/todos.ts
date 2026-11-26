@@ -1,12 +1,14 @@
 /** Durable Todos and their thread links, in the shared app.sqlite handle. */
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
+import { TODO_GRAPH_OWNER_PREFIX } from "@pizza-bot/core";
 import type {
   Todo,
   TodoAccess,
   TodoCreateInput,
   TodoEvent,
   TodoImportance,
+  TodoNotifyMode,
   TodoPatch,
   TodoStep,
   TodoStepInput,
@@ -23,6 +25,10 @@ interface TodoRow {
   completed_at: string | null;
   owner: string | null;
   background_thread_id: string | null;
+  snoozed_until: string | null;
+  notify_mode: string;
+  max_check_ins: number | null;
+  parent_todo_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -37,9 +43,16 @@ interface EventRow {
   note: string | null;
   thread_id: string | null;
   reason: string | null;
+  ref_todo_id: string | null;
 }
 
 export type NewTodoEvent = Omit<TodoEvent, "id" | "at">;
+
+export interface DigestEntry {
+  todoId: string;
+  message: string;
+  at: string;
+}
 
 /** The Todo as stored; the host adds `checkIn` from its trigger. */
 export type StoredTodo = Omit<Todo, "checkIn">;
@@ -93,9 +106,31 @@ export class TodoStore implements TodoAccess {
     if (!columns.some((column) => column.name === "owner")) {
       this.db.exec("ALTER TABLE todos ADD COLUMN owner TEXT");
     }
-    if (!columns.some((column) => column.name === "background_thread_id")) {
-      this.db.exec("ALTER TABLE todos ADD COLUMN background_thread_id TEXT");
+    const eventColumns = this.db.prepare<[], { name: string }>("PRAGMA table_info(todo_events)").all();
+    if (!eventColumns.some((column) => column.name === "ref_todo_id")) {
+      this.db.exec("ALTER TABLE todo_events ADD COLUMN ref_todo_id TEXT");
     }
+    for (const [name, type] of [
+      ["background_thread_id", "TEXT"],
+      ["snoozed_until", "TEXT"],
+      ["notify_mode", "TEXT NOT NULL DEFAULT 'immediate'"],
+      ["max_check_ins", "INTEGER"],
+      ["parent_todo_id", "TEXT"],
+    ] as const) {
+      if (!columns.some((column) => column.name === name)) {
+        this.db.exec(`ALTER TABLE todos ADD COLUMN ${name} ${type}`);
+      }
+    }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos (parent_todo_id);
+      CREATE TABLE IF NOT EXISTS todo_digest (
+        entry_id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        todo_id  TEXT NOT NULL,
+        message  TEXT NOT NULL,
+        at       TEXT NOT NULL
+      );
+    `);
   }
 
   /** Incomplete first, newest first within each group. */
@@ -126,7 +161,7 @@ export class TodoStore implements TodoAccess {
     return row ? this.get(row.todo_id) : undefined;
   }
 
-  create(input: TodoCreateInput): StoredTodo {
+  create(input: TodoCreateInput, options: { parentTodoId?: string } = {}): StoredTodo {
     const now = this.now();
     const id = randomUUID();
     const row: TodoRow = {
@@ -140,6 +175,10 @@ export class TodoStore implements TodoAccess {
       completed_at: null,
       owner: null,
       background_thread_id: null,
+      snoozed_until: null,
+      notify_mode: "immediate",
+      max_check_ins: null,
+      parent_todo_id: options.parentTodoId ?? null,
       created_at: now,
       updated_at: now,
     };
@@ -147,9 +186,9 @@ export class TodoStore implements TodoAccess {
       this.db
         .prepare(
           `INSERT INTO todos (todo_id, title, notes, due_date, importance, steps_json,
-             completed, completed_at, created_at, updated_at)
+             completed, completed_at, parent_todo_id, created_at, updated_at)
            VALUES (@todo_id, @title, @notes, @due_date, @importance, @steps_json,
-             @completed, @completed_at, @created_at, @updated_at)`,
+             @completed, @completed_at, @parent_todo_id, @created_at, @updated_at)`,
         )
         .run(row);
       for (const threadId of new Set(input.threadIds ?? [])) this.insertLink(id, threadId, now);
@@ -180,8 +219,12 @@ export class TodoStore implements TodoAccess {
       ),
       completed: completed ? 1 : 0,
       completed_at: completedAt,
-      owner: current.owner ?? null,
+      owner: ownerColumn(current),
       background_thread_id: current.backgroundThreadId ?? null,
+      snoozed_until: current.snoozedUntil ?? null,
+      notify_mode: current.notify,
+      max_check_ins: current.budget?.maxCheckIns ?? null,
+      parent_todo_id: current.parentTodoId ?? null,
       created_at: current.createdAt,
       updated_at: now,
     };
@@ -213,12 +256,12 @@ export class TodoStore implements TodoAccess {
   ): StoredTodo | undefined {
     const current = this.get(id);
     if (!current) return undefined;
-    if ((current.owner ?? null) === owner) return current;
+    if (ownerColumn(current) === owner) return current;
     const now = this.now();
     this.db.transaction(() => {
       this.db
         .prepare(
-          "UPDATE todos SET owner = ?, background_thread_id = NULL, updated_at = ? WHERE todo_id = ?",
+          "UPDATE todos SET owner = ?, background_thread_id = NULL, snoozed_until = NULL, updated_at = ? WHERE todo_id = ?",
         )
         .run(owner, now, id);
       this.insertEvent(
@@ -231,6 +274,76 @@ export class TodoStore implements TodoAccess {
     })();
     this.emit();
     return this.get(id);
+  }
+
+  /** Records the snooze on the timeline; `until: null` lifts it. */
+  setSnooze(id: string, until: string | null, event: { actor: string; note?: string }): StoredTodo | undefined {
+    if (!this.get(id)) return undefined;
+    const now = this.now();
+    this.db.transaction(() => {
+      this.db.prepare("UPDATE todos SET snoozed_until = ?, updated_at = ? WHERE todo_id = ?").run(until, now, id);
+      this.insertEvent(id, {
+        kind: "snoozed",
+        actor: event.actor,
+        note: until ? `until ${until}${event.note ? `: ${event.note}` : ""}` : "snooze lifted",
+      }, now);
+    })();
+    this.emit();
+    return this.get(id);
+  }
+
+  setPreferences(
+    id: string,
+    preferences: { notify?: TodoNotifyMode; maxCheckIns?: number | null },
+  ): StoredTodo | undefined {
+    const current = this.get(id);
+    if (!current) return undefined;
+    this.db
+      .prepare("UPDATE todos SET notify_mode = ?, max_check_ins = ?, updated_at = ? WHERE todo_id = ?")
+      .run(
+        preferences.notify ?? current.notify,
+        preferences.maxCheckIns === undefined ? (current.budget?.maxCheckIns ?? null) : preferences.maxCheckIns,
+        this.now(),
+        id,
+      );
+    this.emit();
+    return this.get(id);
+  }
+
+  children(id: string): StoredTodo[] {
+    return this.db
+      .prepare<[string], { todo_id: string }>(
+        "SELECT todo_id FROM todos WHERE parent_todo_id = ? ORDER BY created_at, todo_id",
+      )
+      .all(id)
+      .map((row) => this.get(row.todo_id)!)
+      .filter(Boolean);
+  }
+
+  enqueueDigest(agentId: string, todoId: string, message: string): void {
+    this.db
+      .prepare("INSERT INTO todo_digest (entry_id, agent_id, todo_id, message, at) VALUES (?, ?, ?, ?, ?)")
+      .run(randomUUID(), agentId, todoId, message, this.now());
+  }
+
+  /** Removes and returns every queued digest entry, grouped by agent, oldest first. */
+  takeDigests(): Map<string, DigestEntry[]> {
+    return this.db.transaction(() => {
+      const rows = this.db
+        .prepare<[], { agent_id: string; todo_id: string; message: string; at: string }>(
+          "SELECT agent_id, todo_id, message, at FROM todo_digest ORDER BY at, rowid",
+        )
+        .all();
+      this.db.prepare("DELETE FROM todo_digest").run();
+      const byAgent = new Map<string, DigestEntry[]>();
+      for (const row of rows) {
+        const entry = { todoId: row.todo_id, message: row.message, at: row.at };
+        const list = byAgent.get(row.agent_id);
+        if (list) list.push(entry);
+        else byAgent.set(row.agent_id, [entry]);
+      }
+      return byAgent;
+    })();
   }
 
   setBackgroundThread(id: string, threadId: string): void {
@@ -254,6 +367,8 @@ export class TodoStore implements TodoAccess {
     const deleted = this.db.transaction(() => {
       this.db.prepare("DELETE FROM todo_threads WHERE todo_id = ?").run(id);
       this.db.prepare("DELETE FROM todo_events WHERE todo_id = ?").run(id);
+      this.db.prepare("DELETE FROM todo_digest WHERE todo_id = ?").run(id);
+      this.db.prepare("UPDATE todos SET parent_todo_id = NULL WHERE parent_todo_id = ?").run(id);
       return this.db.prepare("DELETE FROM todos WHERE todo_id = ?").run(id).changes > 0;
     })();
     if (deleted) this.emit();
@@ -310,8 +425,8 @@ export class TodoStore implements TodoAccess {
     const created: TodoEvent = { id: randomUUID(), at: now, ...event };
     this.db
       .prepare(
-        `INSERT INTO todo_events (event_id, todo_id, at, kind, actor, agent_id, note, thread_id, reason)
-         VALUES (@event_id, @todo_id, @at, @kind, @actor, @agent_id, @note, @thread_id, @reason)`,
+        `INSERT INTO todo_events (event_id, todo_id, at, kind, actor, agent_id, note, thread_id, reason, ref_todo_id)
+         VALUES (@event_id, @todo_id, @at, @kind, @actor, @agent_id, @note, @thread_id, @reason, @ref_todo_id)`,
       )
       .run({
         event_id: created.id,
@@ -323,6 +438,7 @@ export class TodoStore implements TodoAccess {
         note: created.note ?? null,
         thread_id: created.threadId ?? null,
         reason: created.reason ?? null,
+        ref_todo_id: created.todoId ?? null,
       });
     return created;
   }
@@ -401,7 +517,24 @@ function toEvent(row: EventRow): TodoEvent {
     ...(row.note ? { note: row.note } : {}),
     ...(row.thread_id ? { threadId: row.thread_id } : {}),
     ...(row.reason ? { reason: row.reason as NonNullable<TodoEvent["reason"]> } : {}),
+    ...(row.ref_todo_id ? { todoId: row.ref_todo_id } : {}),
   };
+}
+
+/** Graph owners share the `owner` column as `graph:<id>`. */
+function ownerColumn(todo: StoredTodo): string | null {
+  if (todo.ownerGraph) return `${TODO_GRAPH_OWNER_PREFIX}${todo.ownerGraph}`;
+  return todo.owner ?? null;
+}
+
+/** Check-ins since the user last assigned the Todo. */
+function checkInsSinceAssigned(history: readonly TodoEvent[]): number {
+  let used = 0;
+  for (const event of [...history].reverse()) {
+    if (event.kind === "assigned" && event.actor === "user") break;
+    if (event.kind === "check-in") used++;
+  }
+  return used;
 }
 
 function toTodo(row: TodoRow, threadIds: string[], history: TodoEvent[]): StoredTodo {
@@ -415,8 +548,18 @@ function toTodo(row: TodoRow, threadIds: string[], history: TodoEvent[]): Stored
     completed: row.completed === 1,
     ...(row.completed_at ? { completedAt: row.completed_at } : {}),
     threadIds,
-    ...(row.owner ? { owner: row.owner } : {}),
+    ...(row.owner && row.owner.startsWith(TODO_GRAPH_OWNER_PREFIX)
+      ? { ownerGraph: row.owner.slice(TODO_GRAPH_OWNER_PREFIX.length) }
+      : row.owner
+        ? { owner: row.owner }
+        : {}),
     ...(row.background_thread_id ? { backgroundThreadId: row.background_thread_id } : {}),
+    ...(row.snoozed_until ? { snoozedUntil: row.snoozed_until } : {}),
+    notify: row.notify_mode === "digest" ? "digest" : "immediate",
+    ...(row.max_check_ins !== null
+      ? { budget: { maxCheckIns: row.max_check_ins, used: checkInsSinceAssigned(history) } }
+      : {}),
+    ...(row.parent_todo_id ? { parentTodoId: row.parent_todo_id } : {}),
     history,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

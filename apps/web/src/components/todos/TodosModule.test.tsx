@@ -16,6 +16,7 @@ function todo(id: string, fields: Partial<Todo> = {}): Todo {
     title: id,
     notes: "",
     importance: "normal",
+    notify: "immediate",
     steps: [],
     completed: false,
     threadIds: [],
@@ -225,6 +226,105 @@ describe("agent-owned todos", () => {
     );
     expect(html).toContain('title="Assigned to Researcher"');
     expect(html.match(/Waiting for you/g)).toHaveLength(1);
+  });
+});
+
+describe("todo refinements", () => {
+  const researcher = {
+    id: "researcher",
+    name: "Researcher",
+    description: "Finds sources.",
+    source: "user",
+    declaredTools: [],
+    skills: [],
+    interruptOn: {},
+    enabled: true,
+    status: "ready",
+  } as unknown as AgentCatalogEntryInfo;
+  const booker = { ...researcher, id: "booker", name: "Booker" } as AgentCatalogEntryInfo;
+  const graphs = [{ id: "triage", name: "Triage" }];
+  const later = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  function detail(subject: Todo, todos: Todo[] = [subject]): string {
+    return wrap(
+      <TodoDetail
+        todo={subject}
+        today={TODAY}
+        threadTitles={new Map()}
+        agents={[researcher, booker]}
+        graphs={graphs}
+        todos={todos}
+        automationsEnabled
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onUnlinkThread={vi.fn()}
+        onCheckIn={vi.fn()}
+        onOpenThread={vi.fn()}
+        onSelectTodo={vi.fn()}
+      />,
+    );
+  }
+
+  it("offers workflows in the owner picker and selects a graph owner", () => {
+    const html = detail(todo("Triage inbox", { ownerGraph: "triage", backgroundThreadId: "run-1" }));
+    expect(html).toContain('<optgroup label="Workflows">');
+    expect(html).toMatch(/<option value="graph:triage" selected="">Triage<\/option>/);
+    expect(html).toContain("Open work thread");
+    expect(html).not.toContain("Each update");
+  });
+
+  it("shows the snooze, the updates mode, and the budget for an agent owner", () => {
+    const html = detail(
+      todo("Compare flights", {
+        owner: "researcher",
+        snoozedUntil: later,
+        notify: "digest",
+        budget: { maxCheckIns: 5, used: 2 },
+      }),
+    );
+    expect(html).toContain("Snoozed until");
+    expect(html).toContain("Unsnooze");
+    expect(html).toMatch(/<option value="digest" selected="">Daily digest \(5 pm\)<\/option>/);
+    expect(html).toContain('value="5"');
+    expect(html).toContain("2 of 5 used");
+  });
+
+  it("offers snooze presets when not snoozed, and nothing for the user's own todo", () => {
+    expect(detail(todo("Owned", { owner: "researcher" }))).toContain("Next Monday, 9 am");
+    const mine = detail(todo("Mine"));
+    expect(mine).not.toContain("Snooze");
+    expect(mine).not.toContain("Limit check-ins");
+  });
+
+  it("links a subtask to its parent and lists a parent's subtasks", () => {
+    const parent = todo("Plan trip", { owner: "researcher" });
+    const child = todo("Book hotel", { owner: "booker", parentTodoId: parent.id, completed: true });
+    expect(detail(child, [parent, child])).toMatch(/Part of.*Plan trip/);
+    const html = detail(parent, [parent, child]);
+    expect(html).toContain("Subtasks");
+    expect(html).toContain('class="todo-subtask completed"');
+    expect(html).toMatch(/Book hotel.*Booker/);
+  });
+
+  it("marks rows with a workflow owner, a snooze, and a parent", () => {
+    const parent = todo("Plan trip", { owner: "researcher" });
+    const html = wrap(
+      <TodosModule
+        todos={[
+          parent,
+          todo("Book hotel", { owner: "booker", parentTodoId: parent.id, snoozedUntil: later }),
+          todo("Triage inbox", { ownerGraph: "triage" }),
+        ]}
+        threadTitles={new Map()}
+        today={TODAY}
+        agents={[researcher, booker]}
+        graphs={graphs}
+        {...handlers}
+      />,
+    );
+    expect(html).toContain("↳ Plan trip");
+    expect(html).toContain('title="Assigned to Triage"');
+    expect(html).toContain('class="todo-snoozed"');
   });
 });
 
