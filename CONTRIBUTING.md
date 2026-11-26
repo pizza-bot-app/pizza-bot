@@ -176,9 +176,9 @@ Two workflows, split by what GitHub is willing to hand a run:
 
 That split is forced rather than chosen. GitHub withholds secrets and the OIDC
 token from a run triggered by a fork's pull request, so the automatic review
-cannot authenticate to Bedrock there and skips it instead of failing at the
-credentials step. `agent-review` fails on a fork rather than skipping, because a
-skipped required check reports success; see
+cannot authenticate to Bedrock there. `agent-review` fails at its
+same-repository step rather than skipping, because a skipped required check
+reports success; see
 [Pull requests from forks](#pull-requests-from-forks) for how those land. Comment
 and review events fire in this repository's context and keep full access, so
 `@claude` can still read and comment on an outside contributor's branch.
