@@ -362,6 +362,18 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
   }
 
   async reassign(threadId: string, toAgentId: string, note: string): Promise<Todo> {
+    this.checkHandoff(threadId, toAgentId);
+    if (toAgentId.startsWith(TODO_GRAPH_OWNER_PREFIX)) {
+      await this.requireGraph(toAgentId.slice(TODO_GRAPH_OWNER_PREFIX.length), { settlesTodos: true });
+    }
+    // A parallel tool call of the same turn may have handed the Todo on during the await.
+    const todo = this.checkHandoff(threadId, toAgentId);
+    const updated = this.deps.todos.setOwner(todo.id, toAgentId, { actor: todo.owner, note })!;
+    this.wake(todo.id, "handoff");
+    return this.withCheckIn(this.deps.todos.get(updated.id)!);
+  }
+
+  private checkHandoff(threadId: string, toAgentId: string): AgentOwned {
     const todo = this.ownedBy(threadId);
     if (toAgentId === todo.owner) throw new TodoRefusal("You already own this Todo.");
     const handoffs = handoffsSinceUserAssigned(todo.history);
@@ -370,24 +382,18 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
         `This Todo has been handed off ${handoffs.length} times since the user assigned it; ask the user how to proceed instead.`,
       );
     }
-    if (toAgentId.startsWith(TODO_GRAPH_OWNER_PREFIX)) {
-      await this.requireGraph(toAgentId.slice(TODO_GRAPH_OWNER_PREFIX.length), { settlesTodos: true });
-    } else {
-      const target = this.deps.agentStatus(toAgentId);
-      if (!target) {
-        throw new TodoRefusal(`There is no agent or workflow "${toAgentId}". ${this.handoffTargets(todo.owner)}`);
-      }
-      if (!target.ready) {
-        throw new TodoRefusal(`${target.name} is unavailable${target.detail ? ` (${target.detail})` : ""}; ask the user instead.`);
-      }
-      if (handoffs.some((event) => event.actor === toAgentId)) {
-        throw new TodoRefusal(`${target.name} already handed this Todo on; ask the user instead of handing it back.`);
-      }
+    if (toAgentId.startsWith(TODO_GRAPH_OWNER_PREFIX)) return todo;
+    const target = this.deps.agentStatus(toAgentId);
+    if (!target) {
+      throw new TodoRefusal(`There is no agent or workflow "${toAgentId}". ${this.handoffTargets(todo.owner)}`);
     }
-
-    const updated = this.deps.todos.setOwner(todo.id, toAgentId, { actor: todo.owner, note })!;
-    this.wake(todo.id, "handoff");
-    return this.withCheckIn(this.deps.todos.get(updated.id)!);
+    if (!target.ready) {
+      throw new TodoRefusal(`${target.name} is unavailable${target.detail ? ` (${target.detail})` : ""}; ask the user instead.`);
+    }
+    if (handoffs.some((event) => event.actor === toAgentId)) {
+      throw new TodoRefusal(`${target.name} already handed this Todo on; ask the user instead of handing it back.`);
+    }
+    return todo;
   }
 
   snooze(threadId: string, until: string, note: string): Todo {

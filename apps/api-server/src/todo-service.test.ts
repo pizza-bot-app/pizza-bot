@@ -637,6 +637,17 @@ describe("TodoService review fixes", () => {
     );
   });
 
+  it("lets only one of a turn's parallel handoffs through", async () => {
+    const h = harness();
+    const { todo, threadId } = await ownedTodo(h);
+    const results = await Promise.allSettled([
+      h.service.reassign(threadId, "graph:triage", "Route it."),
+      h.service.reassign(threadId, "booker", "You book travel."),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(h.service.get(todo.id)!.history.filter((event) => event.kind === "assigned" && event.actor === "researcher")).toHaveLength(1);
+  });
+
   it("leaves a check-in running when its own agent hands the Todo on", async () => {
     const h = harness();
     const { todo, threadId } = await ownedTodo(h);
