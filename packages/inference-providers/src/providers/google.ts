@@ -147,7 +147,7 @@ export class GoogleLangChainModelProvider implements ModelProvider {
   /** Auto-detect reports which platform it settled on; the field is otherwise silent about it. */
   get authSchema(): readonly ProviderAuthMethod[] {
     const detected = this.detectedPlatform;
-    if (!detected || this.platform !== "auto") return AUTH_SCHEMA;
+    if (!detected || this.requestedPlatform() !== "auto") return AUTH_SCHEMA;
     return AUTH_SCHEMA.map((method) => ({
       ...method,
       fields: method.fields.map((field) =>
@@ -261,6 +261,8 @@ export class GoogleLangChainModelProvider implements ModelProvider {
       assertVertexSegment("project ID", vertexProject);
       assertVertexSegment("location", this.location);
     }
+    const normalizeError = (error: unknown): unknown =>
+      platform === "gcp" && !vertexProject ? withExpressRegionHint(error) : error;
     class ThoughtSignatureSafeChatGoogle extends ChatGoogle {
       constructor(fields: ConstructorParameters<typeof ChatGoogle>[0]) {
         super(fields);
@@ -286,11 +288,15 @@ export class GoogleLangChainModelProvider implements ModelProvider {
         options: this["ParsedCallOptions"],
         runManager?: CallbackManagerForLLMRun,
       ): Promise<ChatResult> {
-        return super._generate(
-          prepareGoogleMessages(messages),
-          options,
-          runManager,
-        );
+        try {
+          return await super._generate(
+            prepareGoogleMessages(messages),
+            options,
+            runManager,
+          );
+        } catch (error) {
+          throw normalizeError(error);
+        }
       }
 
       override async *_streamResponseChunks(
@@ -298,11 +304,15 @@ export class GoogleLangChainModelProvider implements ModelProvider {
         options: this["ParsedCallOptions"],
         runManager?: CallbackManagerForLLMRun,
       ): AsyncGenerator<ChatGenerationChunk> {
-        yield* super._streamResponseChunks(
-          prepareGoogleMessages(messages),
-          options,
-          runManager,
-        );
+        try {
+          yield* super._streamResponseChunks(
+            prepareGoogleMessages(messages),
+            options,
+            runManager,
+          );
+        } catch (error) {
+          throw normalizeError(error);
+        }
       }
 
       override async *_streamChatModelEvents(
@@ -310,13 +320,17 @@ export class GoogleLangChainModelProvider implements ModelProvider {
         options: this["ParsedCallOptions"],
         runManager?: CallbackManagerForLLMRun,
       ): AsyncGenerator<ChatModelStreamEvent> {
-        yield* convertGoogleChunksToEvents(
-          super._streamResponseChunks(
-            prepareGoogleMessages(messages),
-            options,
-            runManager,
-          ),
-        );
+        try {
+          yield* convertGoogleChunksToEvents(
+            super._streamResponseChunks(
+              prepareGoogleMessages(messages),
+              options,
+              runManager,
+            ),
+          );
+        } catch (error) {
+          throw normalizeError(error);
+        }
       }
     }
 
@@ -329,8 +343,14 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     });
   }
 
+  /** A project ID only applies to Vertex AI, so setting one under auto-detect selects it. */
+  private requestedPlatform(): GooglePlatformSetting {
+    return this.platform === "auto" && this.project ? "gcp" : this.platform;
+  }
+
   private async platformForBuild(apiKey: string): Promise<GooglePlatform> {
-    if (this.platform !== "auto") return this.platform;
+    const requested = this.requestedPlatform();
+    if (requested !== "auto") return requested;
     if (this.detectedPlatform) return this.detectedPlatform;
     if (this.models) return "gai";
     const result = await this.discover(apiKey);
@@ -348,14 +368,15 @@ export class GoogleLangChainModelProvider implements ModelProvider {
   }
 
   private async discover(apiKey: string): Promise<DiscoveryResult | undefined> {
-    if (this.platform !== "gcp") {
+    const requested = this.requestedPlatform();
+    if (requested !== "gcp") {
       const models = await this.discoverAiModels(apiKey);
       // An explicit choice is honored as given; only auto-detect needs the evidence.
-      if (models && this.platform === "gai") return { platform: "gai", models };
+      if (models && requested === "gai") return { platform: "gai", models };
       if (models && (await this.aiStudioCanGenerate(apiKey, models))) {
         return { platform: "gai", models };
       }
-      if (this.platform === "gai") return undefined;
+      if (requested === "gai") return undefined;
     }
 
     const models = await this.discoverModelsDev("google-vertex");
@@ -569,6 +590,23 @@ function probeModelId(models: readonly ModelDescriptor[]): string | undefined {
     if (match) return match.id;
   }
   return models[0]?.id;
+}
+
+/**
+ * Vertex AI Express resolves to us-central1, so a model served only on `global` or a
+ * multi-region reads as missing; the fix is a project-qualified endpoint.
+ */
+function withExpressRegionHint(error: unknown): unknown {
+  if (!(error instanceof Error) || !/publisher model .* was not found/i.test(error.message)) {
+    return error;
+  }
+  return Object.assign(
+    new Error(
+      `${error.message} Vertex AI Express serves only us-central1. To use a model offered on the global or multi-region endpoints, set a Vertex AI project ID for the Google provider in Settings.`,
+      { cause: error },
+    ),
+    { code: "MODEL_UNAVAILABLE" as const },
+  );
 }
 
 function validPlatform(value: string | undefined): GooglePlatformSetting | undefined {

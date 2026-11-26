@@ -353,6 +353,87 @@ describe("Google Vertex AI routing", () => {
   });
 });
 
+describe("Google Vertex AI Express region hint", () => {
+  const notFound = {
+    error: {
+      code: 404,
+      status: "NOT_FOUND",
+      message: "Publisher model `projects/1/locations/us-central1/publishers/google/models/gemini-4-neon` was not found or your project does not have access to it.",
+    },
+  };
+
+  async function failure(
+    options: { project?: string },
+    mode: "invoke" | "stream",
+  ): Promise<Error & { code?: string }> {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => Response.json(notFound, { status: 404 })));
+    try {
+      const provider = new GoogleLangChainModelProvider({
+        apiKey: "test-key",
+        platform: "gcp",
+        ...options,
+        models: [{ id: "gemini-4-neon", provider: "google", displayName: "Gemini 4 Neon" }],
+      });
+      const model = await provider.buildModel("gemini-4-neon");
+      if (mode === "invoke") {
+        await model.invoke("hello");
+      } else {
+        for await (const chunk of await model.stream("hello")) void chunk;
+      }
+    } catch (error) {
+      return error as Error & { code?: string };
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    throw new Error("expected the model call to fail");
+  }
+
+  it.each(["invoke", "stream"] as const)(
+    "points an Express model-not-found failure at the project setting (%s)",
+    async (mode) => {
+      const error = await failure({}, mode);
+      expect(error.message).toMatch(/was not found.*set a Vertex AI project ID/s);
+      expect(error.code).toBe("MODEL_UNAVAILABLE");
+    },
+  );
+
+  it("leaves the failure alone once a project is set", async () => {
+    const error = await failure({ project: "my-project" }, "invoke");
+    expect(error.message).not.toMatch(/Vertex AI project ID/);
+    expect(error.code).toBeUndefined();
+  });
+});
+
+describe("Google platform selection with a project", () => {
+  it("selects Vertex AI under auto-detect without asking Google AI Studio", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(Response.json({
+      candidates: [{ content: { role: "model", parts: [{ text: "hi" }] }, finishReason: "STOP" }],
+    }));
+    vi.stubGlobal("fetch", fetchFn);
+    try {
+      const aiStudio = vi.fn();
+      const provider = new GoogleLangChainModelProvider({
+        apiKey: "test-key",
+        platform: "auto",
+        project: "my-project",
+        fetch: aiStudio,
+        modelsDevFetch: vi.fn().mockResolvedValue(new Response("", { status: 503 })),
+      });
+      await provider.listModels();
+      const model = await provider.buildModel("gemini-4-neon");
+      await model.invoke("hello");
+
+      expect(aiStudio).not.toHaveBeenCalled();
+      const request = fetchFn.mock.calls[0]?.[0] as Request | string | URL;
+      expect(request instanceof Request ? request.url : String(request)).toMatch(
+        /\/projects\/my-project\/locations\/global\//,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("Google Gemini error translation", () => {
   it("does not blame credentials when the API is blocked for the key", () => {
     const blocked = Object.assign(
