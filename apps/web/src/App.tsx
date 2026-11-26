@@ -29,6 +29,7 @@ import { GraphRunPane } from "./components/graphs/GraphRunPane.js";
 import { TodosModule } from "./components/todos/TodosModule.js";
 import { FlagThreadButton } from "./components/todos/FlagThreadButton.js";
 import { flaggedThreadIds, openTodoForThread } from "./lib/todo-views.js";
+import { recipientOptions, threadAgent } from "./lib/thread-agent.js";
 import { subscribeSidebarRefresh } from "./sidebar-refresh.js";
 import {
   SettingsModule,
@@ -183,10 +184,28 @@ export function App() {
   const [selectedThreadModels, setSelectedThreadModels] = useState<Map<string, string>>(
     () => new Map(),
   );
+  // A thread's agent is fixed at creation, so entries are only ever added.
+  const [threadAgentIds, setThreadAgentIds] = useState<Map<string, string>>(() => new Map());
+  const noteAgentThreads = useCallback((rows: Array<Pick<ThreadInfo, "threadId" | "agentId">>) => {
+    setThreadAgentIds((prev) => {
+      const added = rows.filter((row) => row.agentId && !prev.has(row.threadId));
+      if (added.length === 0) return prev;
+      const next = new Map(prev);
+      for (const row of added) next.set(row.threadId, row.agentId!);
+      return next;
+    });
+  }, []);
+  // A new conversation's folder and recipient wait here until its first message creates it.
+  const [threadDrafts, setThreadDrafts] = useState<Map<string, { folderId?: string; agentId?: string }>>(
+    () => new Map(),
+  );
+  const threadDraftsRef = useRef(threadDrafts);
+  threadDraftsRef.current = threadDrafts;
 
   const seedThreadMetadata = useCallback((rows: ThreadInfo[]) => {
     setThreadCount(rows.length);
     noteGraphThreads(rows);
+    noteAgentThreads(rows);
     setThreadTitles((prev) => {
       let changed = false;
       const next = new Map(prev);
@@ -221,7 +240,7 @@ export function App() {
         setActiveThreadId(threadId);
       }
     }
-  }, [noteGraphThreads]);
+  }, [noteAgentThreads, noteGraphThreads]);
 
   // The thread-change stream also reports Todo edits, including the orchestrator's.
   const onThreadsLoaded = useCallback(
@@ -323,20 +342,55 @@ export function App() {
     }
   }, [view, features.enableAutomations, features.enableMemories]);
 
-  const onNewChat = useCallback(async (folderId?: string) => {
+  const onNewChat = useCallback((folderId?: string) => {
     shouldFocusComposerRef.current = true;
     setSearchTarget(null);
     setView("inbox");
     const threadId = freshThreadId();
-    if (folderId) {
+    if (folderId) setThreadDrafts((prev) => new Map(prev).set(threadId, { folderId }));
+    openThread(threadId, false);
+  }, [openThread]);
+
+  const setDraftRecipient = useCallback((threadId: string, agentId: string | undefined) => {
+    setThreadDrafts((prev) => {
+      const { agentId: _previous, ...rest } = prev.get(threadId) ?? {};
+      return new Map(prev).set(threadId, agentId ? { ...rest, agentId } : rest);
+    });
+  }, []);
+
+  /** Creates a drafted thread with its folder and recipient; only a recipient failure blocks the send. */
+  const createDraftedThread = useCallback(
+    async (threadId: string) => {
+      const draft = threadDraftsRef.current.get(threadId);
+      if (!draft?.folderId && !draft?.agentId) return;
       try {
-        await client.createThread(threadId, folderId);
+        await client.createThread(threadId, draft.folderId, draft.agentId);
       } catch (error) {
+        if (draft.agentId) throw error;
         console.error("create thread in folder failed", error);
       }
-    }
-    openThread(threadId, false);
-  }, [client, openThread]);
+      if (draft.agentId) noteAgentThreads([{ threadId, agentId: draft.agentId }]);
+      setThreadDrafts((prev) => {
+        if (!prev.has(threadId)) return prev;
+        const next = new Map(prev);
+        next.delete(threadId);
+        return next;
+      });
+    },
+    [client, noteAgentThreads],
+  );
+
+  const onMessageAgent = useCallback(
+    async (agentId: string) => {
+      const home = await client.openAgentHome(agentId);
+      noteAgentThreads([home]);
+      setThreadTitles((prev) =>
+        prev.get(home.threadId) === home.title ? prev : new Map(prev).set(home.threadId, home.title),
+      );
+      openNotifiedThread(home.threadId);
+    },
+    [client, noteAgentThreads, openNotifiedThread],
+  );
 
   const onOpenSearchHit = useCallback(
     (hit: SearchHit) => {
@@ -448,6 +502,22 @@ export function App() {
   const activeModel = selectableModels.models.find((model) => model.id === activeModelId);
 
   const activeGraphId = activeThreadId ? threadGraphIds.get(activeThreadId) : undefined;
+  const activeDraft = activeThreadId ? threadDrafts.get(activeThreadId) : undefined;
+  const activeAgentId = activeThreadId
+    ? (threadAgentIds.get(activeThreadId) ?? activeDraft?.agentId)
+    : undefined;
+  const catalogAgents = agentsAdmin.agents.agents;
+  const activeAgent = useMemo(
+    () => threadAgent(activeAgentId, catalogAgents, agent),
+    [activeAgentId, agent, catalogAgents],
+  );
+  const recipients = useMemo(
+    () => recipientOptions(catalogAgents, agent.name),
+    [agent.name, catalogAgents],
+  );
+  const activePersisted =
+    activeThreadId !== null &&
+    (threadTitles.has(activeThreadId) || threadAgentIds.has(activeThreadId));
   const active = useThreadSliceReadOnly(activeGraphId ? null : activeThreadId);
   const railVisible = showRail && !activeGraphId;
   const delegations = active.delegations;
@@ -532,6 +602,7 @@ export function App() {
                 onGetDefinition={agentsAdmin.getDefinition}
                 onGenerate={agentsAdmin.generate}
                 onOpenPlugin={openPlugin}
+                onMessage={onMessageAgent}
               />
             </div>
           ) : view === "skills" ? (
@@ -682,7 +753,20 @@ export function App() {
                             threadId={activeThreadId}
                             hydrateOnMount={openedThreads.has(activeThreadId)}
                             onFork={onFork}
-                            agent={agent}
+                            agent={activeAgent}
+                            {...(!activePersisted
+                              ? {
+                                  recipient: {
+                                    options: recipients,
+                                    ...(activeDraft?.agentId ? { value: activeDraft.agentId } : {}),
+                                    onChange: (agentId: string | undefined) =>
+                                      setDraftRecipient(activeThreadId, agentId),
+                                  },
+                                  beforeFirstSend: () => createDraftedThread(activeThreadId),
+                                }
+                              : activeAgentId
+                                ? { recipient: {} }
+                                : {})}
                             onRename={(title) => onRename(activeThreadId, title)}
                             models={selectableModels}
                             initialModel={activeModelId}

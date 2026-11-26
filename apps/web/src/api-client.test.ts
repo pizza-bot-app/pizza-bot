@@ -256,6 +256,45 @@ describe("ApiClient", () => {
     });
   });
 
+  it("creates a thread addressed to an agent, with or without a folder", async () => {
+    const bodies: unknown[] = [];
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(init!.body as string));
+        return new Response(JSON.stringify({ thread_id: "t", status: "idle" }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    await client.createThread("t1", undefined, "researcher");
+    await client.createThread("t2", "projects", "researcher");
+    await client.createThread("t3");
+    expect(bodies).toEqual([
+      { thread_id: "t1", metadata: { agent_id: "researcher" } },
+      { thread_id: "t2", metadata: { folder_id: "projects", agent_id: "researcher" } },
+      { thread_id: "t3" },
+    ]);
+  });
+
+  it("opens an agent's home thread", async () => {
+    const captured: { url?: string; method?: string } = {};
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (url: string, init?: RequestInit) => {
+        captured.url = url;
+        captured.method = init?.method;
+        return new Response(
+          JSON.stringify({ threadId: "home-1", title: "Research", agentId: "re/search", agentHome: true }),
+          { status: 201 },
+        );
+      }) as unknown as typeof fetch,
+    });
+
+    const home = await client.openAgentHome("re/search");
+    expect(captured).toEqual({ url: "http://x/agents/re%2Fsearch/home", method: "POST" });
+    expect(home).toMatchObject({ threadId: "home-1", agentId: "re/search", agentHome: true });
+  });
+
   it("moves a thread back to Unfiled with an explicit null folder", async () => {
     const captured: { url?: string; method?: string; body?: unknown } = {};
     const client = new ApiClient({

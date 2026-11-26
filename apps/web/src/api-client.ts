@@ -169,13 +169,24 @@ export class ApiClient {
     return this.json("list threads", "/threads/list");
   }
 
-  async createThread(threadId: string, folderId?: string): Promise<void> {
+  async createThread(threadId: string, folderId?: string, agentId?: string): Promise<void> {
+    const metadata = {
+      ...(folderId ? { folder_id: folderId } : {}),
+      ...(agentId ? { agent_id: agentId } : {}),
+    };
     await this.send("create thread", "/threads", {
       method: "POST",
       body: {
         thread_id: threadId,
-        ...(folderId ? { metadata: { folder_id: folderId } } : {}),
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       },
+    });
+  }
+
+  /** The agent's pinned home thread, created on first use. */
+  async openAgentHome(agentId: string): Promise<ThreadInfo> {
+    return this.json("open agent conversation", `/agents/${encodeURIComponent(agentId)}/home`, {
+      method: "POST",
     });
   }
 
@@ -839,6 +850,10 @@ export interface ThreadInfo {
   modelId?: string;
   /** Set for a graph run; the thread renders as a graph, not a conversation. */
   graphId?: string;
+  /** The agent this thread talks to; absent means Pizza Bot. Fixed at creation. */
+  agentId?: string;
+  /** The agent's pinned home thread. */
+  agentHome?: boolean;
   lastMessage?: string;
   lastMessageRole?: string;
 }

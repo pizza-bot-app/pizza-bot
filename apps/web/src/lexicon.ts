@@ -106,6 +106,13 @@ export const L = {
   flagThread: "Add to Todos",
   flaggedThread: "In Todos",
 
+  recipientLabel: "To",
+  recipientPickerLabel: "Send this conversation to",
+  agentUnavailable: "unavailable",
+  agentMissingDescription: "This agent is no longer in your catalog, so it can't reply.",
+  agentHomeThread: "Home conversation",
+  messageAgent: "Message",
+
   cronSchedule: "Scheduled",
   webhookSchedule: "Webhook",
 

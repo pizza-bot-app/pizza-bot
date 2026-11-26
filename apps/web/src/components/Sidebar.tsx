@@ -18,7 +18,9 @@ import {
   Check,
   SlidersHorizontal,
   Flag,
+  House,
 } from "lucide-react";
+import { useAgentName } from "./agent-names.js";
 import type { ApiClient, FolderInfo, ThreadInfo, SearchHit } from "@/api-client";
 import { useKnownThreadIds, useRunningThreadIds } from "../use-thread-slice.js";
 import { datePeriod, PERIOD_ORDER, relativeTime, type DatePeriod } from "../lib/conversation.js";
@@ -95,6 +97,7 @@ export function Sidebar({
   const notify = useAppToast();
   const localKnown = useKnownThreadIds();
   const localRunning = useRunningThreadIds();
+  const agentName = useAgentName();
   const [threads, setThreads] = useState<ThreadInfo[]>([]);
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [query, setQuery] = useState("");
@@ -741,8 +744,23 @@ export function Sidebar({
                                       {running ? "now" : relativeTime(t.lastActivityAt)}
                                     </span>
                                   </span>
-                                  {t.lastMessage && (
-                                    <span className="thread-preview">{t.lastMessage}</span>
+                                  {(t.agentId || t.lastMessage) && (
+                                    <span className="thread-line2">
+                                      {t.agentId && (
+                                        <span
+                                          className="thread-agent"
+                                          title={t.agentHome ? L.agentHomeThread : undefined}
+                                        >
+                                          {t.agentHome && (
+                                            <House size={11} role="img" aria-label={L.agentHomeThread} />
+                                          )}
+                                          {agentName(t.agentId)}
+                                        </span>
+                                      )}
+                                      {t.lastMessage && (
+                                        <span className="thread-preview">{t.lastMessage}</span>
+                                      )}
+                                    </span>
                                   )}
                                 </span>
                                 {needsAction && (

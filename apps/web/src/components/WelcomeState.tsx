@@ -1,12 +1,12 @@
-import type { AgentInfo } from "@/api-client";
 import { ArrowRight } from "lucide-react";
+import type { ThreadAgent } from "../lib/thread-agent.js";
 import { Avatar } from "./Avatar.js";
 
 export function WelcomeState({
   agent,
   onPrefill,
 }: {
-  agent?: AgentInfo;
+  agent?: ThreadAgent;
   onPrefill: (prompt: string) => void;
 }) {
   const name = agent?.name ?? "Pizza Bot";
@@ -21,6 +21,9 @@ export function WelcomeState({
         <Avatar label={name} avatar={agent?.avatar} size={56} />
         <h2 className="welcome-title">Chat with {name}</h2>
         <p className="welcome-desc">{description}</p>
+        {agent?.unavailable && agent.unavailable !== description && (
+          <p className="welcome-unavailable" role="status">{agent.unavailable}</p>
+        )}
       </div>
 
       {prompts.length > 0 && (

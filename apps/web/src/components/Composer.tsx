@@ -35,6 +35,7 @@ export function Composer({
   prefillToken,
   composerRef,
   history,
+  recipientName = "Pizza Bot",
 }: {
   threadId: string;
   streaming?: boolean;
@@ -52,6 +53,7 @@ export function Composer({
   prefillToken?: number;
   composerRef?: React.RefObject<HTMLTextAreaElement | null>;
   history?: PromptHistoryCycler;
+  recipientName?: string;
 }) {
   const initialDraft = useRef(composerDraftStore.get(threadId)).current;
   const [text, setText] = useState(initialDraft.text);
@@ -322,7 +324,7 @@ export function Composer({
               ? "Queue until approval is resolved…"
               : streaming
               ? "Steer… Enter to queue, ⌘/Ctrl+Enter to send now"
-              : "Message Pizza Bot…"
+              : `Message ${recipientName}…`
           }
           rows={1}
         />

@@ -1782,7 +1782,7 @@ button.sidebar-folder-row:hover,
 .resource-editor-delete { color: var(--danger, #e5484d); }
 .resource-editor-delete:hover:not(:disabled) { border-color: var(--danger, #e5484d); }
 
-.resource-card-header-action { margin-left: auto; flex: 0 0 auto; }
+.resource-card-header-action { margin-left: auto; flex: 0 0 auto; display: flex; gap: 8px; }
 .resource-plugin-link { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .resource-plugin-link code { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
 .resource-plugin-link:disabled { color: var(--dim); cursor: default; text-decoration: none; }
@@ -2369,3 +2369,26 @@ select:focus-visible,
 .todo-thread-open:hover { border-color: var(--brand); }
 .todo-notes { resize: vertical; min-height: 96px; }
 .todo-detail-foot { display: flex; align-items: center; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+.recipient-field {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0 auto; padding: 0 4px 6px; width: 100%; max-width: var(--composer-max, 860px);
+  font-size: 12.5px; color: var(--dim);
+}
+.recipient-label { font-weight: 600; }
+.recipient-name { color: var(--text); font-weight: 600; }
+.recipient-select {
+  height: 26px; padding: 0 8px; max-width: 100%; min-width: 0;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel-2); color: var(--text); font-size: 12.5px; font-weight: 600;
+}
+.welcome-unavailable { margin: 4px 0 0; font-size: 13px; color: var(--warning, #f5a623); }
+
+.thread-line2 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.thread-agent {
+  display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; max-width: 50%;
+  padding: 0 6px; height: 18px; border-radius: 999px;
+  background: color-mix(in oklch, var(--brand) 12%, transparent); color: var(--brand);
+  font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.thread-line2 .thread-preview { flex: 1 1 auto; min-width: 0; }
