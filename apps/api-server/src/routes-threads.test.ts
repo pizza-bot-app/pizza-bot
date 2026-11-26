@@ -343,6 +343,21 @@ describe("threadRoutes: list + search", () => {
     expect(await res.json()).toEqual([]);
   });
 
+  it("fills the search limit with conversations when work threads match too", async () => {
+    const { host } = fakeHost([]);
+    for (const id of ["work-1", "work-2", "work-3", "conversation"]) {
+      const background = id !== "conversation";
+      host.threadStore.create({ threadId: id, ...(background ? { background, agentId: "researcher" } : {}) });
+      host.search.reindexThread(id, [
+        { getType: () => "human", content: background ? "passport passport passport" : "renew my passport soon", id: `m-${id}` },
+      ]);
+    }
+
+    const res = await threadRoutes(host).request("/threads/search?q=passport&limit=2");
+
+    expect(((await res.json()) as Array<{ threadId: string }>).map((hit) => hit.threadId)).toEqual(["conversation"]);
+  });
+
   it("clamps search limits to the inclusive range from 1 through 200", async () => {
     const { host } = fakeHost([]);
     host.threadStore.create({ threadId: "search-limit", title: "Search limit" });

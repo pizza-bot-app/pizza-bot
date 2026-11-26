@@ -202,6 +202,13 @@ export class ThreadStore {
     return rows.map(toThread);
   }
 
+  backgroundIds(): string[] {
+    return this.db
+      .prepare<[], { thread_id: string }>("SELECT thread_id FROM threads WHERE background = 1")
+      .all()
+      .map((row) => row.thread_id);
+  }
+
   listByGraph(graphId: string): ThreadRecord[] {
     const rows = this.db
       .prepare<[string], ThreadRow>("SELECT * FROM threads WHERE graph_id = ? ORDER BY last_activity_at DESC")

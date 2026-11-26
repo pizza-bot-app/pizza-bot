@@ -240,7 +240,7 @@ export function threadRoutes(host: AgentHost): Hono {
       ? Math.min(Math.max(Math.trunc(requested), 1), SEARCH_LIMIT_MAX)
       : SEARCH_LIMIT_DEFAULT;
     // Todo check-in transcripts are an agent's work log, not conversations.
-    return c.json(host.search.search(q, limit).filter((hit) => !host.threadStore.get(hit.threadId)?.background));
+    return c.json(host.search.search(q, limit, host.threadStore.backgroundIds()));
   });
 
   app.patch("/threads/:thread_id", async (c) => {

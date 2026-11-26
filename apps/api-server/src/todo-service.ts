@@ -754,13 +754,13 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
 const RECORD_START = "\u0000record-start";
 const RECORD_END = "\u0000record-end";
 
-/** Neutralizes record delimiters written inside the record, so its text cannot close the block. */
+/** Respells the delimiter's name in record text, so no variant of the tag can close the block. */
 function escapeRecord(lines: string[]): string[] {
   const start = lines.indexOf(RECORD_START);
   const end = lines.indexOf(RECORD_END);
   return lines.flatMap((line, index) => {
     if (index === start || index === end) return [];
-    return index > start && index < end ? [line.replace(/<(\/?)todo-record>/gi, "<$1todo record>")] : [line];
+    return index > start && index < end ? [line.replace(/todo[\p{Pd}_]record/giu, "todo record")] : [line];
   });
 }
 
