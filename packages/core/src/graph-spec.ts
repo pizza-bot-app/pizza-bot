@@ -5,6 +5,7 @@ export const GRAPH_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 // `start`/`end` are edge markers, `input` holds the run input, and a `messages`
 // key would be decoded as a chat transcript by the protocol state projection.
+// Object.prototype names are refused too: state channels are keyed by plain objects.
 const RESERVED_KEYS = new Set(["input", "start", "end", "messages"]);
 
 export const GRAPH_START = "start";
@@ -13,7 +14,7 @@ export const GRAPH_END = "end";
 const key = z
   .string()
   .regex(KEY_PATTERN, "must start with a letter and use only letters, digits, and _")
-  .refine((value) => !RESERVED_KEYS.has(value), "is reserved");
+  .refine((value) => !RESERVED_KEYS.has(value) && !(value in Object.prototype), "is reserved");
 
 const conditionSchema = z.object({
   path: z.string().min(1),
