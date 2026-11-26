@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { errorMessage } from "@/api-client";
 import type { McpServerDoc, McpServerEntryWire } from "@/api-client";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { AlertCircle, ChevronLeft, Eye, EyeOff, FileJson, Plus, Trash2 } from "lucide-react";
@@ -132,10 +133,10 @@ export function McpServerEditor({
       await onSave(id, built);
       notify({ title: isNew ? "MCP server created" : "MCP server saved", tone: "success" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e) ?? "Save failed");
       notify({
         title: "Could not save MCP server",
-        description: e instanceof Error ? e.message : undefined,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {

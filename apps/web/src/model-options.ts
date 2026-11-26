@@ -17,10 +17,18 @@ export function groupModelsByProvider(models: ModelOption[]): ModelGroup[] {
   return Array.from(groups, ([provider, group]) => ({ provider, models: group }));
 }
 
+const PROVIDER_LABELS: Record<string, string> = {
+  bedrock: "Amazon Bedrock",
+  openai: "Open AI",
+  openrouter: "OpenRouter",
+  uberllm: "UberLLM",
+  cheaperinference: "Cheaper Inference",
+  litellm: "LiteLLM",
+};
+
 export function providerLabel(provider: string): string {
-  if (provider.toLowerCase() === "openai") return "Open AI";
-  if (provider.toLowerCase() === "openrouter") return "OpenRouter";
-  if (provider.toLowerCase() === "bedrock") return "Amazon Bedrock";
+  const known = PROVIDER_LABELS[provider.toLowerCase()];
+  if (known) return known;
   return provider
     .split(/[-_]/)
     .filter(Boolean)
