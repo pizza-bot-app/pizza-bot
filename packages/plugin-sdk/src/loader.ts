@@ -139,6 +139,11 @@ export class FsPluginLoader implements PluginLoader {
       staged.registerSkill(name, canonicalRoot, idFor(path), path);
     }
 
+    for (const path of await this.collectPaths(canonicalRoot, manifest.agents)) {
+      if (extname(path) !== ".md") continue;
+      staged.registerAgent(name, canonicalRoot, idFor(path), path);
+    }
+
     for (const [server, entry] of await this.collectMcpServers(
       canonicalRoot,
       manifest.mcpServers,

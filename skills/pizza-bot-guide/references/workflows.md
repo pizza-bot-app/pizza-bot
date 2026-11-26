@@ -13,14 +13,14 @@ api-server remains running.
 ## Delegation
 
 Pizza Bot answers directly for ordinary work and delegates specialized tasks to
-enabled, ready skills. Each skill runs as a tool-scoped subagent with its own
-instructions. A skill that depends on MCP tools becomes ready after those tools
-are enabled and connected.
+enabled, ready agents. Each agent runs as a subagent with its own instructions,
+model, tools, and skills. An agent that depends on MCP tools becomes ready after
+those tools are enabled and connected.
 
 ## Approvals
 
-Skills can require human approval before consequential tools run. An approval
-can allow approve, edit, or reject decisions according to the skill's policy.
+Agents can require human approval before consequential tools run. An approval
+can allow approve, edit, or reject decisions according to the agent's policy.
 The paused run is checkpointed so the decision can be made later.
 
 ## Scheduled and triggered work

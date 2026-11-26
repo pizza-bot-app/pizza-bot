@@ -10,7 +10,7 @@ import type {
   ModelCatalogStatus,
   ProviderAuthMethod,
   ProviderFieldOption,
-  SkillInterruptOn,
+  InterruptOnPolicy,
   CreateLocalFolderInput,
   LocalFolder,
   LocalFolderBrowseResult,
@@ -298,6 +298,38 @@ export class ApiClient {
   /** Drafts a skill from a natural-language description. */
   async generateSkill(prompt: string): Promise<SkillDraft> {
     return this.json("generate skill", "/skills/generate", { method: "POST", body: { prompt } });
+  }
+
+  async listAgents(): Promise<AgentCatalogInfo> {
+    return this.json("list agents", "/agents");
+  }
+
+  async getAgent(id: string): Promise<AgentDefinition | undefined> {
+    return this.optional("get agent", `/agents/${encodeURIComponent(id)}`);
+  }
+
+  async createAgent(definition: AgentDefinition): Promise<AgentDefinition> {
+    return this.json("create agent", "/agents", { method: "POST", body: definition });
+  }
+
+  async updateAgent(id: string, definition: AgentDefinition): Promise<AgentDefinition> {
+    return this.json("update agent", `/agents/${encodeURIComponent(id)}`, { method: "PATCH", body: definition });
+  }
+
+  async setAgentEnabled(id: string, enabled: boolean): Promise<AgentCatalogEntryInfo> {
+    return this.json("update agent enablement", `/agents/${encodeURIComponent(id)}/enabled`, {
+      method: "PUT",
+      body: { enabled },
+    });
+  }
+
+  async deleteAgent(id: string): Promise<boolean> {
+    return deletedFlag(await this.json("delete agent", `/agents/${encodeURIComponent(id)}`, { method: "DELETE" }));
+  }
+
+  /** Drafts an agent, with tools chosen from the connected catalog. */
+  async generateAgent(prompt: string): Promise<AgentDraft> {
+    return this.json("generate agent", "/agents/generate", { method: "POST", body: { prompt } });
   }
 
   async listMcpServers(): Promise<McpServerRow[]> {
@@ -856,15 +888,9 @@ export interface SkillCatalogEntryInfo {
   /** The skill folder is a symlink; it is read-only here and edited at `linkTarget`. */
   linked?: boolean;
   linkTarget?: string;
-  declaredTools: string[];
   enabled: boolean;
-  status: "disabled" | "loading" | "ready" | "unavailable";
-  statusDetail?: string;
-  mcpDependencies: Array<{
-    id: string;
-    enabled: boolean;
-    status: McpServerRow["status"] | "missing";
-  }>;
+  /** Ids of the agents that mount this skill; an unclaimed skill is Pizza Bot's own. */
+  usedBy?: string[];
 }
 
 export interface SkillCatalogInfo {
@@ -880,9 +906,8 @@ export interface SkillSiblingFile {
 }
 
 /**
- * Name, description, body, and declared tools compose `SKILL.md`; `files`
- * contains sibling resources. Editing a built-in or plugin bundle creates a
- * user override.
+ * Name, description, and body compose `SKILL.md`; `files` contains sibling
+ * resources. Editing a built-in or plugin bundle creates a user override.
  */
 export interface SkillBundle {
   id: string;
@@ -893,19 +918,62 @@ export interface SkillBundle {
   source: "plugin" | "builtin" | "user";
   overrides?: "plugin" | "builtin";
   pluginName?: string;
-  /** Tool refs (`mcp:<server>:<tool>` / wildcard / `builtin:eval`) the skill declares. */
-  declaredTools: string[];
-  /** Declared tool calls that pause for a human decision before execution. */
-  interruptOn: SkillInterruptOn;
 }
 
-/** A gen-AI skill draft: every editable field, pre-filtered to real tool refs. */
 export interface SkillDraft {
   name: string;
   description: string;
   body: string;
+}
+
+export interface AgentCatalogEntryInfo {
+  id: string;
+  name: string;
+  description: string;
+  source: "plugin" | "builtin" | "user";
+  overrides?: "plugin" | "builtin";
+  pluginName?: string;
+  /** Provider-qualified model id; absent inherits the conversation model. */
+  model?: string;
   declaredTools: string[];
-  interruptOn: SkillInterruptOn;
+  skills: string[];
+  interruptOn: InterruptOnPolicy;
+  enabled: boolean;
+  status: "disabled" | "loading" | "ready" | "unavailable";
+  statusDetail?: string;
+  mcpDependencies: Array<{
+    id: string;
+    enabled: boolean;
+    status: McpServerRow["status"] | "missing";
+  }>;
+}
+
+export interface AgentCatalogInfo {
+  agents: AgentCatalogEntryInfo[];
+}
+
+/** The editable definition: frontmatter fields plus the system prompt body. */
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  description: string;
+  systemPrompt: string;
+  model?: string;
+  declaredTools: string[];
+  skills: string[];
+  interruptOn: InterruptOnPolicy;
+  source: "plugin" | "builtin" | "user";
+  overrides?: "plugin" | "builtin";
+  pluginName?: string;
+}
+
+/** A gen-AI agent draft, pre-filtered to real tool refs. */
+export interface AgentDraft {
+  name: string;
+  description: string;
+  body: string;
+  declaredTools: string[];
+  interruptOn: InterruptOnPolicy;
 }
 
 export type McpServerEntryWire =
@@ -933,7 +1001,7 @@ export interface McpServerRow {
   toolCount: number;
   crashedAt?: string;
   detail?: string;
-  dependentSkills: Array<{
+  dependentAgents: Array<{
     id: string;
     name: string;
     source: "plugin" | "builtin" | "user";
@@ -962,7 +1030,7 @@ export interface PluginInfo {
   /** The plugin folder is a symlink; removing it drops only the link. */
   linked?: boolean;
   linkTarget?: string;
-  contributions: { skills: number; mcpServers: number };
+  contributions: { agents: number; skills: number; mcpServers: number };
   materialization?: {
     state: "synced" | "stale" | "error";
     sourceRoots: string[];

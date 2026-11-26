@@ -6,6 +6,7 @@ export interface DataRootLayout {
   pluginsDir: string;
   pluginMaterializationsDir: string;
   skillsDir: string;
+  agentsDir: string;
   memoriesDir: string;
   mcpConfig: string;
   checkpointsDb: string;
@@ -21,6 +22,7 @@ export function resolveLayout(root: string): DataRootLayout {
     pluginsDir: path.join(root, "plugins"),
     pluginMaterializationsDir: path.join(root, "plugin-materializations"),
     skillsDir: path.join(root, "skills"),
+    agentsDir: path.join(root, "agents"),
     memoriesDir: path.join(root, "memories"),
     mcpConfig: path.join(root, ".mcp.json"),
     checkpointsDb: path.join(root, "checkpoints.sqlite"),

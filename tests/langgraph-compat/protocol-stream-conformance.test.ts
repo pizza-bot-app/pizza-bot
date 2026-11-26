@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
 import { BUILTIN_EVAL_TOOL_REF, PIZZA_BOT_AGENT } from "@pizza-bot/core";
-import type { RunInput, RunOptions, SkillCatalog, SkillInterruptOn } from "@pizza-bot/core";
+import type { AgentCatalog, InterruptOnPolicy, RunInput, RunOptions } from "@pizza-bot/core";
 import type { ProtocolEvent } from "@langchain/langgraph";
 import { MemorySaver } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
@@ -41,27 +41,16 @@ async function collectProtocol(model: ScriptedModel): Promise<ProtocolEvent[]> {
 
 const channelOf = (e: ProtocolEvent) => e.method;
 
-function skillCatalog(
+function agentCatalog(
   id: string,
   description: string,
-  body: string,
+  systemPrompt: string,
   declaredTools: string[],
-  interruptOn: SkillInterruptOn = {},
-): SkillCatalog {
+  interruptOn: InterruptOnPolicy = {},
+): AgentCatalog {
   return new Map([[
     id,
-    {
-      id,
-      name: id,
-      description,
-      source: "user",
-      declaredTools,
-      interruptOn,
-      files: [{
-        path: `/skills/${id}/SKILL.md`,
-        content: `---\nname: ${id}\ndescription: ${description}\n---\n\n${body}\n`,
-      }],
-    },
+    { id, name: id, description, systemPrompt, source: "user", declaredTools, skills: [], interruptOn },
   ]]);
 }
 
@@ -211,7 +200,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       ]),
       tools: { "mcp:test:boom": boomTool },
       catalog: { test: ["boom"] },
-      skills: skillCatalog(
+      agents: agentCatalog(
         "specialist",
         "Handles delegated checks.",
         "Complete the delegated check.",
@@ -258,7 +247,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       description: "send mail",
       schema: z.object({}),
     });
-    const skills = skillCatalog(
+    const agents = agentCatalog(
       "specialist",
       "Handles delegated sends.",
       "Send the mail.",
@@ -285,7 +274,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       ]),
       tools: { "mcp:mailer:send": sendTool },
       catalog: { mailer: ["send"] },
-      skills,
+      agents,
       checkpointer: new MemorySaver(),
     });
 
@@ -356,7 +345,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       model,
       tools: { "mcp:filesystem-mcp-server:read_file": externalReadFile },
       catalog: { "filesystem-mcp-server": ["read_file"] },
-      skills: skillCatalog(
+      agents: agentCatalog(
         "specialist",
         "Handles delegated checks.",
         "Complete the delegated check.",
@@ -397,7 +386,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
     // `ptc` names tools by string, and an MCP server whose own tool is also called
     // read_file binds as filesystem-mcp-server__read_file. If upstream ever resolved
     // those names loosely, generated code could reach an MCP tool and bypass the HITL
-    // approval a skill declares through `interruptOn`.
+    // approval an agent declares through `interruptOn`.
     const externalReadFile = tool(() => "external file", {
       name: "filesystem-mcp-server__read_file",
       description: "read an external file",
@@ -429,7 +418,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       model,
       tools: { "mcp:filesystem-mcp-server:read_file": externalReadFile },
       catalog: { "filesystem-mcp-server": ["read_file"] },
-      skills: skillCatalog(
+      agents: agentCatalog(
         "specialist",
         "Handles delegated checks.",
         "Complete the delegated check.",
@@ -537,7 +526,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
     ]);
     const agent = await createPizzaBotAgent(PIZZA_BOT_AGENT.systemPrompt, {
       model,
-      skills: skillCatalog("specialist", "Answers facts.", "Answer the fact.", []),
+      agents: agentCatalog("specialist", "Answers facts.", "Answer the fact.", []),
     });
 
     const events: ProtocolEvent[] = [];
@@ -591,7 +580,7 @@ describe("createPizzaBotAgent().streamProtocol() yields SDK-decodable ProtocolEv
       ]),
       tools: { "mcp:mailer:send": sendTool },
       catalog: { mailer: ["send"] },
-      skills: skillCatalog(
+      agents: agentCatalog(
         "specialist",
         "Sends mail.",
         "Send the mail.",

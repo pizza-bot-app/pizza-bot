@@ -1,9 +1,17 @@
 # Extensions
 
+## Agents
+
+Agents are specialists Pizza Bot delegates to. Each has its own instructions,
+an optional model, the tools it may use, the skills it reads, and which tools
+ask for approval first. Create and edit them from the Agents screen; an agent
+becomes callable once its MCP tools are enabled and connected.
+
 ## Skills
 
-Skills give Pizza Bot specialized instructions and a limited tool surface. The
-Skills library shows where each skill came from:
+Skills are playbooks an agent reads when a task calls for one. A skill an
+agent lists belongs to that agent; other skills are available to Pizza Bot
+itself. The Skills library shows where each skill came from:
 
 - **Built-in** skills are part of Pizza Bot and work without an installed
   plugin.
@@ -23,7 +31,7 @@ the file.
 
 ## Plugins
 
-Plugins package MCP servers and skills together. Install ZIP bundles from the
+Plugins package MCP servers, agents, and skills together. Install ZIP bundles from the
 Plugins screen. Plugin commands run with the user's operating-system
 permissions, so install only sources you trust.
 

@@ -102,15 +102,15 @@ try {
 
   await waitForHealthy(baseUrl, origin);
 
-  const shippedSkill = await fetch(`${baseUrl}/skills/browser-automation`, {
+  const shippedAgent = await fetch(`${baseUrl}/agents/browser-automation`, {
     headers: authHeaders,
   });
-  assert.equal(shippedSkill.status, 200);
-  const shippedSkillBody = await shippedSkill.json();
+  assert.equal(shippedAgent.status, 200);
+  const shippedAgentBody = await shippedAgent.json();
   assert.deepEqual(
     {
-      source: shippedSkillBody.source,
-      pluginName: shippedSkillBody.pluginName,
+      source: shippedAgentBody.source,
+      pluginName: shippedAgentBody.pluginName,
     },
     { source: "plugin", pluginName: "playwright-mcp" },
   );
@@ -132,27 +132,21 @@ try {
     assert.match(playwright.detail ?? "", /PIZZA_PLAYWRIGHT_BROWSER_PATH/);
   }
 
-  const skills = await fetch(`${baseUrl}/skills`, { headers: authHeaders });
-  assert.equal(skills.status, 200);
-  const skillRows = (await skills.json()).skills;
-  const browserAutomation = skillRows.find(
-    (skill) => skill.id === "browser-automation",
+  const agents = await fetch(`${baseUrl}/agents`, { headers: authHeaders });
+  assert.equal(agents.status, 200);
+  const agentRows = (await agents.json()).agents;
+  const browserAutomation = agentRows.find(
+    (agent) => agent.id === "browser-automation",
   );
   assert.equal(
     browserAutomation?.status,
     expectPlaywrightUnavailable ? "unavailable" : "ready",
-    `unexpected browser skill state: ${browserAutomation?.statusDetail ?? "not found"}`,
+    `unexpected browser agent state: ${browserAutomation?.statusDetail ?? "not found"}`,
   );
-  assert.deepEqual(
-    skillRows
-      .filter((skill) => skill.pluginName === "google-workspace")
-      .map(({ id, status }) => ({ id, status }))
-      .sort((a, b) => a.id.localeCompare(b.id)),
-    [
-      { id: "calendar", status: "disabled" },
-      { id: "email", status: "disabled" },
-    ],
-    "google-workspace skills must ship disabled",
+  assert.equal(
+    agentRows.find((agent) => agent.id === "google-workspace")?.status,
+    "disabled",
+    "the google-workspace agent must ship disabled",
   );
 
   const mcpServers = await fetch(`${baseUrl}/mcp-servers`, { headers: authHeaders });

@@ -52,6 +52,7 @@ import {
 } from "./ApprovalArguments.js";
 import { approvalEditState } from "./approval-edit.js";
 import { useAttachmentSrc } from "../attachment-src.js";
+import { useAgentName } from "./agent-names.js";
 
 function subagentTypeOf(input: unknown): string | undefined {
   if (input && typeof input === "object" && "subagent_type" in input) {
@@ -276,7 +277,9 @@ function ToolPartView({
   }, [targeted]);
 
   const toolType = part.type as Extract<ToolPart, { type: `tool-${string}` }>["type"];
-  const delegate = toolType === "tool-task" ? subagentTypeOf(part.input) : undefined;
+  const agentName = useAgentName();
+  const delegateId = toolType === "tool-task" ? subagentTypeOf(part.input) : undefined;
+  const delegate = delegateId ? agentName(delegateId) : undefined;
   return (
     <div
       className="w-full"

@@ -16,7 +16,7 @@ function server(
     status,
     toolCount: 0,
     detail: "connection timed out after 20000ms",
-    dependentSkills: [],
+    dependentAgents: [],
   };
 }
 

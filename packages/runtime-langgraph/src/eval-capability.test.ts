@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SkillCatalog } from "@pizza-bot/core";
+import type { AgentCatalog, SkillCatalog } from "@pizza-bot/core";
 
 const mocks = vi.hoisted(() => ({
   createDeepAgent: vi.fn(),
@@ -37,25 +37,37 @@ vi.mock("langchain", async () => {
 
 import { createPizzaBotAgent } from "./index.js";
 
-function mailSkill(interrupt = false): SkillCatalog {
+function mailAgent(interrupt = false): AgentCatalog {
   return new Map([[
     "mailer",
     {
       id: "mailer",
       name: "Mailer",
       description: "Sends mail.",
+      systemPrompt: "Send carefully.",
       source: "user",
       declaredTools: ["mcp:outlook:send"],
+      skills: [],
       interruptOn: interrupt
         ? { "mcp:outlook:send": { allowedDecisions: ["approve", "edit", "reject"] } }
         : {},
-      files: [{
-        path: "/skills/mailer/SKILL.md",
-        content: "---\nname: Mailer\ndescription: Sends mail.\n---\n\nSend carefully.",
-      }],
     },
   ]]);
 }
+
+const guideSkill: SkillCatalog = new Map([[
+  "guide",
+  {
+    id: "guide",
+    name: "guide",
+    description: "Explains the product.",
+    source: "builtin",
+    files: [{
+      path: "/skills/guide/SKILL.md",
+      content: "---\nname: guide\ndescription: Explains the product.\n---\n\nRead the references.",
+    }],
+  },
+]]);
 
 interface RosterSpec {
   tools?: unknown[];
@@ -100,7 +112,7 @@ describe("Pizza Bot graph assembly", () => {
     mocks.toolCallLimitMiddleware.mockReturnValue({ name: "ToolCallLimitMiddleware" });
   });
 
-  it("keeps eval available without skills, with nothing to dispatch to", async () => {
+  it("keeps eval available without agents, with nothing to dispatch to", async () => {
     await createPizzaBotAgent("prompt", { model: { modelId: "test" } as never });
 
     const params = mocks.createDeepAgent.mock.calls[0]![0] as {
@@ -157,7 +169,7 @@ describe("Pizza Bot graph assembly", () => {
     await createPizzaBotAgent("prompt", {
       model: { modelId: "test" } as never,
       checkpointer: {},
-      skills: mailSkill(),
+      agents: mailAgent(),
       tools: { "mcp:outlook:send": { name: "outlook__send" } },
       catalog: { outlook: ["send"] },
       maxSubagentToolCalls: 73,
@@ -171,7 +183,7 @@ describe("Pizza Bot graph assembly", () => {
     await createPizzaBotAgent("prompt", {
       model: { modelId: "test" } as never,
       checkpointer: {},
-      skills: mailSkill(),
+      agents: mailAgent(),
       tools: { "mcp:outlook:send": { name: "outlook__send" } },
       catalog: { outlook: ["send"] },
       maxToolCalls: -1,
@@ -189,12 +201,12 @@ describe("Pizza Bot graph assembly", () => {
       .not.toContain("ToolCallLimitMiddleware");
   });
 
-  it("dispatches each skill as a declarative spec behind its declared tools and HITL policy", async () => {
+  it("dispatches each agent as a declarative spec behind its declared tools and HITL policy", async () => {
     const send = { name: "outlook__send" };
     await createPizzaBotAgent("prompt", {
       model: { modelId: "test" } as never,
       checkpointer: {},
-      skills: mailSkill(true),
+      agents: mailAgent(true),
       tools: { "mcp:outlook:send": send },
       catalog: { outlook: ["send"] },
     });
@@ -231,10 +243,27 @@ describe("Pizza Bot graph assembly", () => {
     );
   });
 
+  it("mounts native skills on the orchestrator only for its root skills", async () => {
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      skills: guideSkill,
+      rootSkills: ["guide", "not-installed"],
+    });
+    const mounted = mocks.createDeepAgent.mock.calls.at(-1)![0] as { skills?: string[] };
+    expect(mounted.skills).toEqual(["/skills/guide/"]);
+
+    await createPizzaBotAgent("prompt", {
+      model: { modelId: "test" } as never,
+      skills: guideSkill,
+    });
+    const unmounted = mocks.createDeepAgent.mock.calls.at(-1)![0] as { skills?: string[] };
+    expect(unmounted.skills).toBeUndefined();
+  });
+
   it("adds live local-folder context to the orchestrator and subagents", async () => {
     await createPizzaBotAgent("prompt", {
       model: { modelId: "test" } as never,
-      skills: mailSkill(),
+      agents: mailAgent(),
       tools: { "mcp:outlook:send": { name: "outlook__send" } },
       catalog: { outlook: ["send"] },
       localFolders: () => [],
@@ -259,11 +288,11 @@ describe("Pizza Bot graph assembly", () => {
     );
   });
 
-  it("requires durable checkpoints when a skill enables HITL", async () => {
+  it("requires durable checkpoints when an agent enables HITL", async () => {
     await expect(
       createPizzaBotAgent("prompt", {
         model: { modelId: "test" } as never,
-        skills: mailSkill(true),
+        agents: mailAgent(true),
       }),
     ).rejects.toThrow("checkpointer is required for HITL");
   });

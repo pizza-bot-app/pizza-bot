@@ -2,6 +2,7 @@ export type AppView =
   | "inbox"
   | "automations"
   | "memories"
+  | "agents"
   | "skills"
   | "mcp"
   | "plugins"
@@ -12,6 +13,7 @@ export type AppView =
 // makes no background admin requests.
 export function adminVisibility(view: AppView) {
   return {
+    agents: view === "agents",
     skills: view === "skills",
     mcp: view === "mcp",
     memories: view === "memories",

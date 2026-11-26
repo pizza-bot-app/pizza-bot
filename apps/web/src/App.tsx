@@ -16,9 +16,11 @@ import {
 } from "./use-thread-slice.js";
 import { protocolStreamStore } from "./protocol-stream-store.js";
 import { resolveApiBase, resolveApiHeaders } from "./api-config.js";
-import { useSkillsAdmin, useMcpServersAdmin, useMemoriesAdmin, useModels, usePluginsAdmin, useProvidersAdmin, useStatus, useTriggers } from "./use-app-data.js";
+import { useAgentsAdmin, useSkillsAdmin, useMcpServersAdmin, useMemoriesAdmin, useModels, usePluginsAdmin, useProvidersAdmin, useStatus, useTriggers } from "./use-app-data.js";
 import { PIZZA_BOT_AGENT } from "@pizza-bot/core";
 import { SkillsModule } from "./components/skills/SkillsModule.js";
+import { AgentsModule } from "./components/agents/AgentsModule.js";
+import { AgentNamesContext } from "./components/agent-names.js";
 import { McpServersModule } from "./components/mcp/McpServersModule.js";
 import { MemoriesModule } from "./components/memories/MemoriesModule.js";
 import { TriggerModule } from "./components/schedules/TriggerModule.js";
@@ -95,7 +97,17 @@ export function App() {
     }),
     [],
   );
-  const skillsAdmin = useSkillsAdmin(client, visibleAdmin.skills);
+  const skillsAdmin = useSkillsAdmin(client, visibleAdmin.skills || visibleAdmin.agents);
+  // Names are needed wherever delegations or "Used by" lists render.
+  const agentsAdmin = useAgentsAdmin(
+    client,
+    visibleAdmin.agents || visibleAdmin.skills || view === "inbox",
+    visibleAdmin.agents,
+  );
+  const agentNames = useMemo(
+    () => new Map(agentsAdmin.agents.agents.map((entry) => [entry.id, entry.name])),
+    [agentsAdmin.agents],
+  );
   const mcpAdmin = useMcpServersAdmin(client, 5_000, visibleAdmin.mcp);
   const memoriesAdmin = useMemoriesAdmin(client, 5_000, visibleAdmin.memories);
   const pluginsAdmin = usePluginsAdmin(client, visibleAdmin.plugins);
@@ -383,6 +395,7 @@ export function App() {
 
   return (
     <TooltipProvider>
+      <AgentNamesContext.Provider value={agentNames}>
       <div className="app has-sidebar">
         <div className="body">
           <AppNavigation
@@ -426,11 +439,26 @@ export function App() {
                 onGetContent={memoriesAdmin.getContent}
               />
             </div>
+          ) : view === "agents" ? (
+            <div className="module-hub">
+              <AgentsModule
+                agents={agentsAdmin.agents}
+                tools={agentsAdmin.tools}
+                models={selectableModels}
+                skills={skillsAdmin.skills}
+                onCreate={agentsAdmin.create}
+                onUpdate={agentsAdmin.update}
+                onSetEnabled={agentsAdmin.setEnabled}
+                onDelete={agentsAdmin.remove}
+                onGetDefinition={agentsAdmin.getDefinition}
+                onGenerate={agentsAdmin.generate}
+                onOpenPlugin={openPlugin}
+              />
+            </div>
           ) : view === "skills" ? (
             <div className="module-hub">
               <SkillsModule
                 skills={skillsAdmin.skills}
-                tools={skillsAdmin.tools}
                 onCreate={skillsAdmin.create}
                 onImport={skillsAdmin.importSkill}
                 onUpdate={skillsAdmin.update}
@@ -461,6 +489,7 @@ export function App() {
                 key={pluginFocus}
                 plugins={pluginsAdmin.plugins}
                 focusName={pluginFocus}
+                onOpenAgents={() => setView("agents")}
                 onOpenSkills={() => setView("skills")}
                 onOpenMcpServers={() => setView("mcp")}
                 onImport={pluginsAdmin.importPlugin}
@@ -644,6 +673,7 @@ export function App() {
           onOpenShortcuts={() => setHelpOpen(true)}
         />
       </div>
+      </AgentNamesContext.Provider>
     </TooltipProvider>
   );
 }

@@ -1,13 +1,14 @@
 /** Drives the real graph to pin DeepAgents' default synchronous delegation. */
 import { describe, expect, it } from "vitest";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { MemorySaver } from "@langchain/langgraph";
-import type { RunInput, RunOptions, SkillCatalog } from "@pizza-bot/core";
+import type { AgentCatalog, RunInput, RunOptions, SkillCatalog } from "@pizza-bot/core";
 import { createPizzaBotAgent } from "./index.js";
 
 class ToolCapturingModel extends BaseChatModel<Record<string, never>> {
   readonly boundToolSets: string[][] = [];
+  readonly systemPrompts: string[] = [];
   readonly boundToolDescriptions: Array<
     Array<{ name: string; description: string | undefined }>
   > = [];
@@ -22,45 +23,48 @@ class ToolCapturingModel extends BaseChatModel<Record<string, never>> {
     return this;
   }
 
-  async _generate(): Promise<{ generations: Array<{ message: AIMessage; text: string }> }> {
+  async _generate(
+    messages: BaseMessage[],
+  ): Promise<{ generations: Array<{ message: AIMessage; text: string }> }> {
+    const system = messages.find(SystemMessage.isInstance);
+    if (system) this.systemPrompts.push(system.text);
     const message = new AIMessage({ content: "done" });
     return { generations: [{ message, text: "done" }] };
   }
 }
 
-const workerSkill: SkillCatalog = new Map([[
-  "worker",
-  {
-    id: "worker",
-    name: "Worker",
-    description: "Handles delegated work.",
-    source: "user",
-    declaredTools: [],
-    interruptOn: {},
-    files: [{
-      path: "/skills/worker/SKILL.md",
-      content: "---\nname: worker\ndescription: Handles delegated work.\n---\n\nComplete the task.",
-    }],
-  },
-]]);
-
-const parallelWorkerSkills: SkillCatalog = new Map(
-  ["worker-a", "worker-b"].map((id) => [
+function agents(...ids: string[]): AgentCatalog {
+  return new Map(ids.map((id) => [
     id,
     {
       id,
       name: id,
-      description: `Handles ${id} work.`,
+      description: id === "worker" ? "Handles delegated work." : `Handles ${id} work.`,
+      systemPrompt: "Complete the task.",
       source: "user" as const,
       declaredTools: [],
+      skills: [],
       interruptOn: {},
-      files: [{
-        path: `/skills/${id}/SKILL.md`,
-        content: `---\nname: ${id}\ndescription: Handles ${id} work.\n---\n\nComplete the task.`,
-      }],
     },
-  ]),
-);
+  ]));
+}
+
+const worker = agents("worker");
+const parallelWorkers = agents("worker-a", "worker-b");
+
+const guideSkill: SkillCatalog = new Map([[
+  "guide",
+  {
+    id: "guide",
+    name: "guide",
+    description: "Explains the product.",
+    source: "builtin",
+    files: [{
+      path: "/skills/guide/SKILL.md",
+      content: "---\nname: guide\ndescription: Explains the product.\n---\n\nRead the references.",
+    }],
+  },
+]]);
 
 class ParallelDelegationModel extends BaseChatModel<Record<string, never>> {
   private call = 0;
@@ -103,9 +107,11 @@ class ParallelDelegationModel extends BaseChatModel<Record<string, never>> {
   }
 }
 
-async function captureModel(skills?: SkillCatalog): Promise<ToolCapturingModel> {
+async function captureModel(
+  deps: { agents?: AgentCatalog; skills?: SkillCatalog; rootSkills?: string[] } = {},
+): Promise<ToolCapturingModel> {
   const model = new ToolCapturingModel({});
-  const agent = await createPizzaBotAgent("Help the user.", { model, ...(skills ? { skills } : {}) });
+  const agent = await createPizzaBotAgent("Help the user.", { model, ...deps });
   const input: RunInput = {
     messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] }],
   };
@@ -116,36 +122,45 @@ async function captureModel(skills?: SkillCatalog): Promise<ToolCapturingModel> 
   return model;
 }
 
-async function boundTools(skills?: SkillCatalog): Promise<string[]> {
-  return (await captureModel(skills)).boundToolSets[0] ?? [];
+async function boundTools(agentCatalog?: AgentCatalog): Promise<string[]> {
+  return (await captureModel(agentCatalog ? { agents: agentCatalog } : {})).boundToolSets[0] ?? [];
 }
 
 describe("Pizza Bot delegation", () => {
-  it("withholds task without skills, since no worker could receive a dispatch", async () => {
+  it("withholds task without agents, since no worker could receive a dispatch", async () => {
     expect(await boundTools()).not.toContain("task");
   });
 
   it("keeps task available when a subagent exists", async () => {
-    expect(await boundTools(workerSkill)).toContain("task");
+    expect(await boundTools(worker)).toContain("task");
   });
 
-  it("routes subagents from task metadata without root skills middleware", async () => {
-    const model = await captureModel(workerSkill);
+  it("routes subagents from task metadata", async () => {
+    const model = await captureModel({ agents: worker });
     const task = model.boundToolDescriptions[0]?.find((tool) => tool.name === "task");
     expect(task?.description).toContain("- worker: Handles delegated work.");
   });
 
   it("offers only subagents, never DeepAgents' capability-free general-purpose one", async () => {
-    const model = await captureModel(workerSkill);
+    const model = await captureModel({ agents: worker });
     const task = model.boundToolDescriptions[0]?.find((tool) => tool.name === "task");
     expect(task?.description).not.toContain("general-purpose");
+  });
+
+  it("lists root skills in the orchestrator prompt only when mounted", async () => {
+    const mounted = await captureModel({ skills: guideSkill, rootSkills: ["guide"] });
+    expect(mounted.systemPrompts[0]).toContain("/skills/guide/SKILL.md");
+    expect(mounted.systemPrompts[0]).toContain("Explains the product.");
+
+    const unmounted = await captureModel({ skills: guideSkill });
+    expect(unmounted.systemPrompts[0]).not.toContain("Explains the product.");
   });
 
   it("keeps run-limit counters local when subagents run in parallel", async () => {
     const threadId = `parallel_delegation_${Math.random().toString(36).slice(2)}`;
     const agent = await createPizzaBotAgent("Help the user.", {
       model: new ParallelDelegationModel({}),
-      skills: parallelWorkerSkills,
+      agents: parallelWorkers,
       checkpointer: new MemorySaver(),
     });
 
