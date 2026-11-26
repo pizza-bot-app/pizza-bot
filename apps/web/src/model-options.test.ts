@@ -118,6 +118,10 @@ describe("model provider presentation", () => {
     expect(providerLabel("openai")).toBe("Open AI");
     expect(providerLabel("openrouter")).toBe("OpenRouter");
     expect(providerLabel("bedrock")).toBe("Amazon Bedrock");
+    expect(providerLabel("uberllm")).toBe("UberLLM");
+    expect(providerLabel("cheaperinference")).toBe("Cheaper Inference");
+    expect(providerLabel("litellm")).toBe("LiteLLM");
+    expect(providerLabel("requesty")).toBe("Requesty");
     expect(providerLabel("google-vertex_ai")).toBe("Google Vertex Ai");
   });
 });
