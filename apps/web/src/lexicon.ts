@@ -1,11 +1,13 @@
 export const L = {
   inboxSection: "Inbox",
   memoriesSection: "Memories",
+  agentsSection: "Agents",
   skillsSection: "Skills",
   mcpSection: "MCP Servers",
   schedulesSection: "Schedules",
   webhooksSection: "Webhooks",
   automationsSection: "Automations",
+  graphsSection: "Graphs",
   pluginsSection: "Plugins",
   settingsSection: "Settings",
   settingsCategoriesLabel: "Settings categories",
@@ -78,6 +80,8 @@ export const L = {
   providerSaving: "Saving…",
   providerRemove: "Remove",
 
+  agent: "Agent",
+  agents: "Agents",
   skill: "Skill",
   skills: "Skills",
   mcpServer: "MCP server",
@@ -100,6 +104,7 @@ export const L = {
   hasScheduleTitle: "Has a schedule",
   manageSchedules: "Manage in Schedules →",
 
+  noAgents: "No agents yet",
   noSkills: "No skills yet",
   noMcpServers: "No MCP servers yet",
   noMemories: "No memories yet",

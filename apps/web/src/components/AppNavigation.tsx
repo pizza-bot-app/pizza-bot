@@ -2,10 +2,12 @@ import { Fragment } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   BookOpen,
+  Bot,
   Brain,
   Cable,
   Inbox,
   MoreHorizontal,
+  Network,
   Pizza,
   Puzzle,
   ScrollText,
@@ -48,10 +50,22 @@ const automationsDestination: NavDestination = {
   icon: Workflow,
 };
 
+const graphsDestination: NavDestination = {
+  view: "graphs",
+  label: L.graphsSection,
+  icon: Network,
+};
+
 const memoriesDestination: NavDestination = {
   view: "memories",
   label: L.memoriesSection,
   icon: Brain,
+};
+
+const agentsDestination: NavDestination = {
+  view: "agents",
+  label: L.agentsSection,
+  icon: Bot,
 };
 
 const skillsDestination: NavDestination = {
@@ -142,19 +156,21 @@ export function AppNavigation({
 }: AppNavigationProps) {
   const desktopDestinations = [
     inboxDestination,
+    agentsDestination,
     skillsDestination,
     mcpDestination,
     ...(enableMemories ? [memoriesDestination] : []),
-    ...(enableAutomations ? [automationsDestination] : []),
+    ...(enableAutomations ? [automationsDestination, graphsDestination] : []),
   ];
   const mobileDestinations = [
     inboxDestination,
+    agentsDestination,
     skillsDestination,
-    mcpDestination,
   ];
   const mobileFeatureDestinations = [
+    mcpDestination,
     ...(enableMemories ? [memoriesDestination] : []),
-    ...(enableAutomations ? [automationsDestination] : []),
+    ...(enableAutomations ? [automationsDestination, graphsDestination] : []),
   ];
   const utilityDestinations = [
     pluginsDestination,

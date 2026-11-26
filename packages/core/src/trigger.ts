@@ -7,6 +7,8 @@ export interface TriggerDef {
   kind: TriggerKind;
   name?: string;
   prompt?: string;
+  /** Runs this graph instead of starting a conversation with `prompt`. */
+  graphId?: string;
   enabled: boolean;
   cron?: string;
   timezone?: string;
@@ -23,6 +25,8 @@ export type TriggerOccurrenceReason = "cron" | "cron-recovery" | "manual" | "web
 export type TriggerOccurrenceStatus =
   | "pending"
   | "running"
+  /** Paused for a person; not replayed on restart. */
+  | "waiting"
   | "succeeded"
   | "failed"
   | "dead";
@@ -36,6 +40,8 @@ export interface TriggerOccurrence {
   /** Crash-recovery budget: each (re)launch increments it; exhausting it kills the occurrence. */
   attempt: number;
   promptOverride?: string;
+  /** A webhook body for a graph trigger, delivered as `input.body`. */
+  inputOverride?: unknown;
   threadId?: string;
   runId?: string;
   runStatus?: RunStatus;

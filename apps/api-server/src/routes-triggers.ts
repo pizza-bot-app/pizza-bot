@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { CronTime } from "cron";
 import { z } from "zod";
-import type { TriggerDef } from "@pizza-bot/core";
+import { GRAPH_ID_PATTERN, type TriggerDef } from "@pizza-bot/core";
 import type { TriggerStore } from "@pizza-bot/storage";
 import type { TriggerService } from "./trigger-service.js";
 import { RESOURCE_ID_RE as ID_RE } from "./resource-crud.js";
@@ -14,6 +14,8 @@ const triggerFieldsSchema = z.object({
   enabled: z.boolean(),
   name: z.string().max(80).optional(),
   prompt: z.string().optional(),
+  // An empty string clears the graph target, returning the trigger to its prompt.
+  graphId: z.union([z.string().regex(GRAPH_ID_PATTERN), z.literal("")]).optional(),
   cron: z.string().trim().min(1).optional(),
   timezone: z.string().trim().min(1).optional(),
   webhookSecret: z.string().min(16).optional(),
@@ -24,6 +26,14 @@ const triggerCreateSchema = triggerFieldsSchema.extend({
 });
 
 const triggerPatchSchema = triggerFieldsSchema.partial().strict();
+
+async function unknownGraph(
+  graphId: string | undefined,
+  graphExists: ((graphId: string) => Promise<boolean>) | undefined,
+): Promise<string | undefined> {
+  if (!graphId || !graphExists) return undefined;
+  return (await graphExists(graphId)) ? undefined : `graph ${graphId} does not exist`;
+}
 
 function presentedSecret(auth: string | undefined, header: string | undefined): string | undefined {
   if (header) return header;
@@ -37,7 +47,7 @@ function validateTrigger(
 ): string | undefined {
   if (def.kind === "cron") {
     if (!def.cron) return "cron is required for cron triggers";
-    if (!def.prompt?.trim()) return "prompt is required for cron triggers";
+    if (!def.graphId && !def.prompt?.trim()) return "prompt is required for cron triggers";
     try {
       new CronTime(def.cron, def.timezone ?? defaultTimezone);
     } catch (error) {
@@ -57,7 +67,11 @@ function validateTrigger(
   return undefined;
 }
 
-export function triggerRoutes(store: TriggerStore, service?: TriggerService): Hono {
+export function triggerRoutes(
+  store: TriggerStore,
+  service?: TriggerService,
+  graphExists?: (graphId: string) => Promise<boolean>,
+): Hono {
   const app = new Hono();
   const defaultTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -80,11 +94,13 @@ export function triggerRoutes(store: TriggerStore, service?: TriggerService): Ho
       enabled: data.enabled,
       ...(data.name !== undefined ? { name: data.name } : {}),
       ...(data.prompt !== undefined ? { prompt: data.prompt } : {}),
+      ...(data.graphId ? { graphId: data.graphId } : {}),
       ...(data.cron !== undefined ? { cron: data.cron } : {}),
       ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
       ...(data.webhookSecret !== undefined ? { webhookSecret: data.webhookSecret } : {}),
     };
-    const invalid = validateTrigger(def, defaultTimezone);
+    const invalid =
+      validateTrigger(def, defaultTimezone) ?? (await unknownGraph(def.graphId, graphExists));
     if (invalid) return c.json({ error: "invalid", detail: invalid }, 400);
     const created = store.create(def);
     service?.reload?.();
@@ -110,12 +126,16 @@ export function triggerRoutes(store: TriggerStore, service?: TriggerService): Ho
       ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
       ...(data.name !== undefined ? { name: data.name } : {}),
       ...(data.prompt !== undefined ? { prompt: data.prompt } : {}),
+      ...(data.graphId !== undefined ? { graphId: data.graphId } : {}),
       ...(data.cron !== undefined ? { cron: data.cron } : {}),
       ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
       ...(data.webhookSecret !== undefined ? { webhookSecret: data.webhookSecret } : {}),
     };
     const merged: TriggerDef = { ...existing, ...patch, id, createdAt: existing.createdAt };
-    const invalid = validateTrigger(merged, defaultTimezone);
+    if (merged.graphId === "") delete merged.graphId;
+    const invalid =
+      validateTrigger(merged, defaultTimezone) ??
+      (data.graphId ? await unknownGraph(data.graphId, graphExists) : undefined);
     if (invalid) return c.json({ error: "invalid", detail: invalid }, 400);
     const updated = store.update(id, patch);
     if (!updated) return c.json({ error: "not_found" }, 404);

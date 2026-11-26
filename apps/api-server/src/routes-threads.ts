@@ -291,6 +291,9 @@ export function threadRoutes(host: AgentHost): Hono {
     }
 
     const source = host.threadStore.get(sourceThreadId);
+    if (source?.graphId) {
+      return c.json({ error: "graph runs cannot be forked into a conversation" }, 409);
+    }
     const state = await host.agent.getState(sourceThreadId);
     const history = ((state.values as { messages?: ForkMessage[] } | undefined)?.messages ?? []);
     if (history.length === 0) {

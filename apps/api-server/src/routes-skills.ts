@@ -9,13 +9,9 @@ import {
   normalizeSkillFile,
   skillMimeType,
   splitSkillMd,
-  interruptConfigSchema,
-  interruptToolRefSchema,
-  toolRefSchema,
   type SkillCatalogEntry,
-  type SkillInterruptOn,
 } from "@pizza-bot/core";
-import { CapabilityDependencyError, type AgentHost } from "./agent-host.js";
+import type { AgentHost } from "./agent-host.js";
 import { fileResourceRoutes, type ParseResult } from "./resource-crud.js";
 import {
   MAX_SKILL_UPLOAD_BYTES,
@@ -37,8 +33,6 @@ interface SkillFields {
   description: string;
   body: string;
   files: ParsedSiblingFile[];
-  declaredTools: string[];
-  interruptOn: SkillInterruptOn;
 }
 
 interface SiblingFile {
@@ -62,8 +56,6 @@ export interface SkillBundleWire {
   source: SkillCatalogEntry["source"];
   overrides?: NonNullable<SkillCatalogEntry["overrides"]>;
   pluginName?: string;
-  declaredTools: string[];
-  interruptOn: SkillInterruptOn;
 }
 
 function toWire(entry: SkillCatalogEntry): SkillBundleWire {
@@ -97,8 +89,6 @@ function toWire(entry: SkillCatalogEntry): SkillBundleWire {
     source: entry.source,
     ...(entry.overrides ? { overrides: entry.overrides } : {}),
     ...(entry.pluginName ? { pluginName: entry.pluginName } : {}),
-    declaredTools: entry.declaredTools,
-    interruptOn: entry.interruptOn,
   };
 }
 
@@ -119,8 +109,6 @@ function parsedToWire(id: string, fields: SkillFields): SkillBundleWire {
         : { path: file.path, content: file.content },
     ),
     source: "user",
-    declaredTools: fields.declaredTools,
-    interruptOn: fields.interruptOn,
   };
 }
 
@@ -131,38 +119,6 @@ function parseBody(raw: unknown): ParseResult<SkillFields> {
   const body = typeof b.body === "string" ? b.body : "";
   if (!name) return { ok: false, detail: "name is required" };
   if (!description) return { ok: false, detail: "description is required" };
-
-  const declaredTools: string[] = [];
-  const seenTools = new Set<string>();
-  const rawTools = Array.isArray(b.declaredTools) ? b.declaredTools : [];
-  for (const t of rawTools) {
-    if (typeof t !== "string") continue;
-    const ref = t.trim();
-    if (!ref || seenTools.has(ref)) continue;
-    if (!toolRefSchema.safeParse(ref).success) return { ok: false, detail: `invalid tool ref "${ref}"` };
-    seenTools.add(ref);
-    declaredTools.push(ref);
-  }
-
-  const interruptOn: SkillInterruptOn = {};
-  const rawInterruptOn =
-    b.interruptOn && typeof b.interruptOn === "object" && !Array.isArray(b.interruptOn)
-      ? b.interruptOn as Record<string, unknown>
-      : {};
-  for (const [rawRef, config] of Object.entries(rawInterruptOn)) {
-    const ref = rawRef.trim();
-    if (!interruptToolRefSchema.safeParse(ref).success) {
-      return { ok: false, detail: `invalid interruptOn tool ref "${ref}"` };
-    }
-    if (!seenTools.has(ref)) {
-      return { ok: false, detail: `interruptOn tool "${ref}" is not declared by this skill` };
-    }
-    const parsed = interruptConfigSchema.safeParse(config);
-    if (!parsed.success) {
-      return { ok: false, detail: `invalid interruptOn config for "${ref}"` };
-    }
-    interruptOn[ref] = parsed.data;
-  }
 
   const files: ParsedSiblingFile[] = [];
   const seen = new Set<string>();
@@ -190,7 +146,7 @@ function parseBody(raw: unknown): ParseResult<SkillFields> {
       files.push({ path, content });
     }
   }
-  return { ok: true, name, description, body, files, declaredTools, interruptOn };
+  return { ok: true, name, description, body, files };
 }
 
 // Nested bundle paths must stay within the bundle: no absolute paths, backslashes,
@@ -218,14 +174,7 @@ async function writeSkill(
   await mkdir(dir, { recursive: true });
   await writeFile(
     join(dir, SKILL_MD),
-    composeSkillMd(
-      id,
-      fields.description,
-      fields.body,
-      fields.declaredTools,
-      fields.interruptOn,
-      fields.name,
-    ),
+    composeSkillMd(id, fields.description, fields.body, fields.name),
     "utf8",
   );
   for (const f of fields.files) {
@@ -287,8 +236,6 @@ function importedToWire(skill: ImportedSkill): SkillBundleWire {
     body: skill.body,
     files,
     source: "user",
-    declaredTools: skill.declaredTools,
-    interruptOn: skill.interruptOn,
   };
 }
 
@@ -369,18 +316,8 @@ export function skillRoutes(host: AgentHost): Hono {
     if (typeof body.enabled !== "boolean") {
       return c.json({ error: "invalid", detail: "enabled must be a boolean" }, 400);
     }
-    try {
-      const skill = await host.setSkillEnabled(c.req.param("id"), body.enabled);
-      return skill ? c.json(skill) : c.json({ error: "not_found" }, 404);
-    } catch (error) {
-      if (error instanceof CapabilityDependencyError) {
-        return c.json(
-          { error: error.code, detail: error.message, blockers: error.blockers },
-          409,
-        );
-      }
-      throw error;
-    }
+    const skill = await host.setSkillEnabled(c.req.param("id"), body.enabled);
+    return skill ? c.json(skill) : c.json({ error: "not_found" }, 404);
   });
 
   app.use("/skills/import", limitMultipartBody(MAX_SKILL_UPLOAD_BYTES));
@@ -423,6 +360,8 @@ export function skillRoutes(host: AgentHost): Hono {
     if (linkTarget) return c.json(linkedConflict(linkTarget), 409);
 
     await writeImportedSkill(skillsDir, skill);
+    // An exported Pizza Bot skill can still carry tool grants; they become an agent.
+    await host.adoptSkillToolGrants();
     await host.reloadSkills();
     const entry = await host.skillFor(skill.id);
     return c.json(entry ? toWire(entry) : importedToWire(skill), 201);

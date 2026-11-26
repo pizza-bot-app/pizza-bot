@@ -209,5 +209,8 @@ describe("ThreadStore: CRUD", () => {
     const store = openThreadStore(file);
     expect(store.get("legacy")?.title).toBe("Existing conversation");
     expect(store.update("legacy", { folderId: "projects" })?.folderId).toBe("projects");
+    expect(store.get("legacy")?.graphId).toBeUndefined();
+    expect(store.create({ threadId: "run", graphId: "triage" }).graphId).toBe("triage");
+    expect(store.update("run", { title: "Triage run" })?.graphId).toBe("triage");
   });
 });

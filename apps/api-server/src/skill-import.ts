@@ -1,11 +1,5 @@
 import { splitFrontmatter } from "@pizza-bot/plugin-sdk";
-import {
-  SKILL_MD,
-  parseDeclaredTools,
-  parseSkillInterruptOn,
-  splitSkillMd,
-  type SkillInterruptOn,
-} from "@pizza-bot/core";
+import { SKILL_MD, splitSkillMd } from "@pizza-bot/core";
 import { ArchiveError, readZipArchive, safeArchivePath, type ArchiveFile } from "./archive.js";
 
 export const MAX_SKILL_UPLOAD_BYTES = 20 * 1024 * 1024;
@@ -35,8 +29,6 @@ export interface ImportedSkill {
   description: string;
   body: string;
   files: ImportedSkillFile[];
-  declaredTools: string[];
-  interruptOn: SkillInterruptOn;
 }
 
 export async function parseSkillImport(
@@ -151,8 +143,6 @@ function parseSkillDefinition(
     files: files.sort((a, b) =>
       a.path === SKILL_MD ? -1 : b.path === SKILL_MD ? 1 : a.path.localeCompare(b.path)
     ),
-    declaredTools: parseDeclaredTools(frontmatter),
-    interruptOn: parseSkillInterruptOn(frontmatter),
   };
 }
 

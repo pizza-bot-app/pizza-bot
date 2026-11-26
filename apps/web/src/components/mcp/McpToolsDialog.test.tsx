@@ -12,7 +12,7 @@ function server(overrides: Partial<McpServerRow> = {}): McpServerRow {
     enabled: true,
     status: "connected",
     toolCount: 83,
-    dependentSkills: [],
+    dependentAgents: [],
     ...overrides,
   };
 }

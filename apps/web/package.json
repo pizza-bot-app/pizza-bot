@@ -21,6 +21,7 @@
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
+    "@xyflow/react": "^13.0.3",
     "ai": "^7.0.122",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

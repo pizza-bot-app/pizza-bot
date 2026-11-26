@@ -99,6 +99,19 @@ export interface ResumeCommand {
   }>;
 }
 
+/** Answers a graph `human` node's pause with a free-form value. */
+export interface InputResponseCommand {
+  interruptId: string;
+  response: unknown;
+}
+
+/** Payload a graph `human` node interrupts with. */
+export interface GraphHumanRequest {
+  type: "graph.human";
+  nodeId: string;
+  prompt: string;
+}
+
 /**
  * Named codes drive standard recovery actions. The open string branch permits
  * runtime-specific codes without blocking protocol decoding.

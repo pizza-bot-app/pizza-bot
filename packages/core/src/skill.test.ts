@@ -5,9 +5,6 @@ import {
   composeSkillMd,
   splitSkillMd,
   skillInfoOf,
-  skillMcpServerIds,
-  parseDeclaredTools,
-  parseSkillInterruptOn,
   SKILLS_ROOT,
   type SkillCatalog,
   type SkillCatalogEntry,
@@ -21,8 +18,6 @@ function entry(id: string, files: string[]): SkillCatalogEntry {
     source: "plugin",
     pluginName: "demo",
     files: files.map((rel) => ({ path: `${SKILLS_ROOT}/${id}/${rel}`, content: [`# ${rel}`] })),
-    declaredTools: [],
-    interruptOn: {},
   };
 }
 
@@ -123,21 +118,6 @@ describe("collectSkillPaths", () => {
   });
 });
 
-describe("skillMcpServerIds", () => {
-  it("deduplicates exact and wildcard references by server", () => {
-    expect(
-      skillMcpServerIds({
-        declaredTools: [
-          "mcp:mail:send",
-          "mcp:mail:*",
-          "builtin:eval",
-          "mcp:calendar:list",
-        ],
-      }),
-    ).toEqual(["mail", "calendar"]);
-  });
-});
-
 describe("splitSkillMd / composeSkillMd", () => {
   it.each(["", "\uFEFF"])("splits frontmatter from body with prefix %j", (prefix) => {
     const raw = `${prefix}---\nname: x\ndescription: does x\n---\n\n# Body\n\nstep 1\n`;
@@ -162,8 +142,6 @@ describe("splitSkillMd / composeSkillMd", () => {
       "web-researcher",
       "Use for web: searching and extraction.",
       "",
-      [],
-      {},
       "Web Researcher",
     );
     expect(md).toBe(
@@ -193,43 +171,6 @@ describe("splitSkillMd / composeSkillMd", () => {
   it("omits the trailing block for an empty body", () => {
     expect(composeSkillMd("n", "d", "")).toBe('---\nname: "n"\ndescription: "d"\n---\n');
   });
-
-  it("emits a `tools:` YAML list the loader's parseDeclaredTools reads back", () => {
-    const md = composeSkillMd("n", "d", "# body", [
-      "mcp:mcp-status:get_mcp_status",
-      "builtin:eval",
-    ]);
-    expect(md).toBe(
-      '---\nname: "n"\ndescription: "d"\ntools:\n' +
-        '  - "mcp:mcp-status:get_mcp_status"\n  - "builtin:eval"\n---\n\n# body\n',
-    );
-    // The catalog loader hands parseDeclaredTools the YAML-parsed mapping.
-    expect(
-      parseDeclaredTools({ tools: ["mcp:mcp-status:get_mcp_status", "builtin:eval"] }),
-    ).toEqual(["mcp:mcp-status:get_mcp_status", "builtin:eval"]);
-  });
-
-  it("omits the `tools:` block when no tools are declared", () => {
-    expect(composeSkillMd("n", "d", "x")).not.toContain("tools:");
-  });
-
-  it("emits skill-owned HITL policy in frontmatter", () => {
-    const md = composeSkillMd(
-      "Mailer",
-      "Sends mail",
-      "# Mail",
-      ["mcp:outlook:send_email"],
-      {
-        "mcp:outlook:send_email": {
-          allowedDecisions: ["approve", "edit", "reject"],
-        },
-      },
-    );
-    expect(md).toContain(
-      'interruptOn:\n  "mcp:outlook:send_email":\n    allowedDecisions:\n' +
-        "      - approve\n      - edit\n      - reject\n",
-    );
-  });
 });
 
 describe("skillInfoOf", () => {
@@ -241,8 +182,6 @@ describe("skillInfoOf", () => {
       description: "alpha description",
       source: "plugin",
       pluginName: "demo",
-      declaredTools: [],
-      interruptOn: {},
     });
     expect(info).not.toHaveProperty("files");
   });
@@ -250,62 +189,5 @@ describe("skillInfoOf", () => {
   it("preserves shipped provenance for user overrides", () => {
     expect(skillInfoOf({ ...entry("customized", []), source: "user", overrides: "builtin" }))
       .toMatchObject({ source: "user", overrides: "builtin" });
-  });
-});
-
-describe("parseDeclaredTools", () => {
-  it("reads a `tools:` list of refs", () => {
-    expect(parseDeclaredTools({ tools: ["mcp:outlook:send_email", "mcp:cal:create_event"] })).toEqual([
-      "mcp:outlook:send_email",
-      "mcp:cal:create_event",
-    ]);
-  });
-
-  it("splits a comma/whitespace `tools:` string and dedupes", () => {
-    expect(parseDeclaredTools({ tools: "a, b  a" })).toEqual(["a", "b"]);
-  });
-
-  it("falls back to `mcp:` and ignores non-string entries", () => {
-    expect(parseDeclaredTools({ mcp: ["x", 3, null, "y"] as unknown[] })).toEqual(["x", "y"]);
-  });
-
-  it("returns [] when neither key is present or the value is unusable", () => {
-    expect(parseDeclaredTools({})).toEqual([]);
-    expect(parseDeclaredTools({ tools: 42 })).toEqual([]);
-  });
-});
-
-describe("parseSkillInterruptOn", () => {
-  it("reads boolean and decision-list policies", () => {
-    expect(
-      parseSkillInterruptOn({
-        interruptOn: {
-          "mcp:outlook:send_email": {
-            allowedDecisions: ["approve", "edit", "reject"],
-          },
-          "mcp:calendar:create_event": true,
-        },
-      }),
-    ).toEqual({
-      "mcp:outlook:send_email": {
-        allowedDecisions: ["approve", "edit", "reject"],
-      },
-      "mcp:calendar:create_event": true,
-    });
-  });
-
-  it("drops malformed policies and unsupported decisions", () => {
-    expect(
-      parseSkillInterruptOn({
-        interruptOn: {
-          "mcp:test:valid": { allowedDecisions: ["approve", "unknown", "reject"] },
-          "mcp:test:empty": { allowedDecisions: ["unknown"] },
-          "mcp:test:malformed": "yes",
-          "builtin:eval": true,
-        },
-      }),
-    ).toEqual({
-      "mcp:test:valid": { allowedDecisions: ["approve", "reject"] },
-    });
   });
 });

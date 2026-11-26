@@ -10,11 +10,13 @@ import { loadDotEnv, resolveDataRoot } from "./load-env.js";
 import { AgentHost } from "./agent-host.js";
 import { langGraphRoutes } from "./routes-langgraph.js";
 import { triggerRoutes } from "./routes-triggers.js";
+import { graphRoutes } from "./routes-graphs.js";
 import {
   MAX_SKILL_JSON_BODY_BYTES,
   skillRoutes,
 } from "./routes-skills.js";
 import { mcpRoutes } from "./routes-mcp.js";
+import { agentRoutes } from "./routes-agents.js";
 import { memoryRoutes } from "./routes-memories.js";
 import { settingsRoutes } from "./routes-settings.js";
 import { lifecycleRoutes } from "./routes-lifecycle.js";
@@ -226,8 +228,13 @@ export function buildApp(
   app.route("/", folderRoutes(host));
   app.route("/", protocolRoutes(host));
   app.route("/", langGraphRoutes(host));
-  app.route("/", triggerRoutes(host.triggers, host.triggerService));
+  app.route("/", graphRoutes(host));
+  app.route(
+    "/",
+    triggerRoutes(host.triggers, host.triggerService, async (id) => (await host.graphRegistry.get(id)) !== undefined),
+  );
   app.route("/", skillRoutes(host));
+  app.route("/", agentRoutes(host));
   app.route("/", mcpRoutes(host));
   app.route("/", memoryRoutes(host));
   app.route("/", settingsRoutes(host));
