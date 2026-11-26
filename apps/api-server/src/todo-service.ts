@@ -48,6 +48,7 @@ export interface TodoServiceDeps {
   triggers: TriggerStore;
   scheduler: () => Pick<TriggerService, "runNow" | "nextRunAt" | "reload"> | undefined;
   isRunning: (threadId: string) => boolean;
+  cancelRun: (threadId: string) => void;
   automationsEnabled: () => boolean;
   /** Enabled agents only; absent means no such agent or it is disabled. */
   agentStatus: (agentId: string) => AgentStatus | undefined;
@@ -496,10 +497,16 @@ export class TodoService implements TodoAccess, AmbientTodoAccess {
     }
   }
 
-  /** A paused check-in thread of a Todo that changes hands or goes away would otherwise wait forever. */
+  /**
+   * Stops the check-in of a Todo the user takes back, hands elsewhere, or deletes: its
+   * other tools would keep acting for the old owner, and a paused one would wait forever.
+   */
   private closeWorkThread(todo: StoredTodo): void {
+    this.pendingWakes.delete(todo.id);
     const threadId = todo.backgroundThreadId;
-    if (!threadId || !this.deps.threads.get(threadId)?.awaitingAction) return;
+    if (!threadId) return;
+    if (this.deps.isRunning(threadId)) this.deps.cancelRun(threadId);
+    if (!this.deps.threads.get(threadId)?.awaitingAction) return;
     this.deps.triggers.killWaitingOccurrencesForThread(threadId, "the Todo changed hands", new Date(this.now()).toISOString());
     this.deps.threads.update(threadId, { awaitingAction: false });
   }

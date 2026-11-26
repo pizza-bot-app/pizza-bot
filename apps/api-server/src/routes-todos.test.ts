@@ -17,6 +17,7 @@ function testApp() {
     triggers: appDb.triggers,
     scheduler: () => undefined,
     isRunning: () => false,
+    cancelRun: () => {},
     automationsEnabled: () => true,
     agentStatus: (id) => (id === "researcher" ? { name: "Researcher", description: "Finds sources.", ready: true } : undefined),
     readyAgents: () => [],

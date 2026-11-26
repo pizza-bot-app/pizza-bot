@@ -478,6 +478,9 @@ export class AgentHost {
       triggers: this.triggers,
       scheduler: () => this.triggerService,
       isRunning: (threadId) => this.protocolRuns.isRunning(threadId),
+      cancelRun: (threadId) => {
+        this.protocolRuns.cancel(threadId);
+      },
       automationsEnabled: () => this.settings.get().enableAutomations,
       agentStatus: (agentId) => this.agentStatus(agentId),
       readyAgents: () =>
