@@ -9,6 +9,7 @@ export function protocolRunLauncher(runs: ProtocolRunManager): RunLauncher {
       const { runId } = runs.start(threadId, input, opts);
       return { runId, threadId, status: "running", startedAt: Date.now() };
     },
+    isRunning: (threadId: string) => runs.isRunning(threadId),
     subscribe(listener: (evt: RunScopedEvent) => void): Unsubscribe {
       return runs.onEnd(({ runId, threadId, status }) => {
         listener({ runId, threadId, event: { type: "run-end", runId, status } });
