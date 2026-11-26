@@ -181,8 +181,10 @@ credentials step. `agent-review` fails on a fork rather than skipping, because a
 skipped required check reports success; see
 [Pull requests from forks](#pull-requests-from-forks) for how those land. Comment
 and review events fire in this repository's context and keep full access, so
-`@claude` can still read and comment on an outside contributor's branch. Dependabot is skipped for a related reason — it gets its own
-secret store — and a lockfile bump is already `audit.yml`'s job.
+`@claude` can still read and comment on an outside contributor's branch.
+Dependabot pull requests fail `agent-review` the same way, because Dependabot gets
+its own secret store; `audit.yml` already covers a lockfile bump, so a maintainer
+admin-merges them once the CI checks pass.
 
 Both workflows pin `global.anthropic.claude-opus-5-5`. Pinning the full model ID
 matters: left unpinned, Claude Code derives a region-prefixed profile from
@@ -236,9 +238,10 @@ commits land on `main` under the contributor's own authorship. Because
    gh pr create --head review/pr-<n> --title "Review mirror of #<n>" --body "Runs agent-review for #<n>. Do not merge."
    ```
 4. Merge the contributor's pull request with a merge commit once its checks pass,
-   then close the mirror and delete `review/pr-<n>`. If `agent-review` does not
-   show on the contributor's pull request, merge it as an administrator after the
-   mirror's review passes.
+   then close the mirror and delete `review/pr-<n>`. The contributor's own
+   `agent-review` run fails at the same-repository step; if the mirror's passing
+   result does not replace it there, merge as an administrator once the mirror's
+   review passes.
 
 If a maintainer adds commits, push them to the contributor's branch first (with
 "Allow edits by maintainers" on), then mirror that head; rebasing keeps the
