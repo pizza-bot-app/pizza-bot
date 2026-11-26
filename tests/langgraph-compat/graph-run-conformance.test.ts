@@ -154,5 +154,16 @@ describe("compiled GraphSpec protocol stream (offline)", () => {
     expect(state.values).toMatchObject({ reply: "Delegation completed." });
     expect((state.values as { decision?: unknown }).decision).toBeUndefined();
     expect(state.next).toEqual(["ask"]);
+    // The finished agent's resolved approval must not resurface as pending.
+    const pending = state.tasks.flatMap((task) => task.interrupts ?? []);
+    expect(pending.map((it) => (it.value as { type?: string }).type)).toEqual(["graph.human"]);
+    await expect((async () => {
+      for await (const _ of graph.streamProtocol(
+        { command: { interruptId: approval!.id, decisions: [{ decision: "approve" }] } },
+        { threadId },
+      )) {
+        // drain
+      }
+    })()).rejects.toThrow(`No pending step has interrupt id ${approval!.id}`);
   });
 });
