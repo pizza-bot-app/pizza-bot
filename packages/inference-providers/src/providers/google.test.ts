@@ -274,6 +274,31 @@ describe("Google Gemini model discovery", () => {
       ],
     });
   });
+
+  it("names the project-qualified Vertex AI endpoint once a project is set", () => {
+    const provider = new GoogleLangChainModelProvider();
+    provider.configure({
+      method: "api-key",
+      values: { apiKey: "test-key", platform: "auto", project: "my-project" },
+    });
+    const platform = provider.authSchema[0]?.fields.find(
+      (field) => field.key === "platform",
+    );
+
+    expect(platform?.options).toEqual([
+      { value: "auto", label: "Auto-detect (using Vertex AI)" },
+      { value: "gai", label: "Google AI Studio" },
+      { value: "gcp", label: "Vertex AI" },
+    ]);
+  });
+
+  it("explains when the Vertex AI project and location are needed", () => {
+    const fields = new GoogleLangChainModelProvider().authSchema[0]?.fields ?? [];
+    const hintOf = (key: string) => fields.find((field) => field.key === key)?.hint;
+
+    expect(hintOf("project")).toMatch(/Gemini 4.*project ID or number/s);
+    expect(hintOf("location")).toMatch(/global/);
+  });
 });
 
 describe("Google Vertex AI routing", () => {

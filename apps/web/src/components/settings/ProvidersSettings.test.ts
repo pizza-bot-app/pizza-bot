@@ -1,8 +1,11 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ProviderConfigView, ProviderView } from "@/api-client";
 import type { ProviderAuthMethod } from "@pizza-bot/core";
 import {
   getProviderStatus,
+  FieldInput,
   secretKeysWithStoredValue,
   secretReferenceValidationError,
   unavailableLocalSecretValidationError,
@@ -227,5 +230,23 @@ describe("secretReferenceValidationError", () => {
 
   it("ignores non-secret fields", () => {
     expect(secretReferenceValidationError(method, { platform: "auto" }, false)).toBeUndefined();
+  });
+});
+
+describe("FieldInput", () => {
+  it("renders a field's hint beneath it", () => {
+    const html = renderToStaticMarkup(
+      createElement(FieldInput, {
+        field: { key: "project", label: "Project", type: "text", required: false, hint: "Needed for Gemini 4." },
+        options: [],
+        value: "",
+        hasStored: false,
+        unavailable: false,
+        localSecretStore: false,
+        onChange: () => undefined,
+      }),
+    );
+
+    expect(html).toContain('<span class="field-hint">Needed for Gemini 4.</span>');
   });
 });

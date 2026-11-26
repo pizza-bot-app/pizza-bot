@@ -613,7 +613,7 @@ function ProviderModelsField({
   );
 }
 
-function FieldInput({
+export function FieldInput({
   field,
   options,
   value,
@@ -674,6 +674,7 @@ function FieldInput({
           onChange={(e) => onChange(e.target.value)}
         />
       )}
+      {field.hint && <span className="field-hint">{field.hint}</span>}
       {field.type === "json" && <span className="field-hint">{L.jsonFieldHint}</span>}
       {field.type === "password" && (
         <span className={`field-hint${unavailable ? " error" : ""}`}>
