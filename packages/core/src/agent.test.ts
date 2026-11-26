@@ -37,8 +37,8 @@ describe("pizzaBotSystemPrompt", () => {
   });
 
   it("describes delegation only when the task tool is registered", () => {
-    expect(withSubagents).toContain("skill-scoped workers through the `task` tool");
-    expect(withSubagents).toContain("delegate directly without reading its SKILL.md first");
+    expect(withSubagents).toContain("exposed as workers through the `task` tool");
+    expect(withSubagents).toContain("the worker already has everything it needs");
     expect(withSubagents).toContain("task({ description, subagentType })");
     expect(withSubagents).toContain("same routing contract governs every `task()` dispatch");
     expect(withSubagents).toContain("only the direct tool uses snake_case `subagent_type`");

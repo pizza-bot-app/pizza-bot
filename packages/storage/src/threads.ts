@@ -20,6 +20,15 @@ export interface ThreadRecord {
   parentCheckpointId?: string;
   /** Model selected for this conversation; set on its first model turn. */
   modelId?: string;
+  /** Set at creation for a graph run; the thread's checkpoints belong to that graph. */
+  graphId?: string;
+  /** Set at creation when the thread talks to an agent instead of the assistant; never changes. */
+  agentId?: string;
+  /** The agent's pinned home thread; each agent has at most one. */
+  agentHome?: boolean;
+  /** A Todo owner's check-in thread: hidden from the Inbox unless it awaits the user. */
+  background?: boolean;
+  todoId?: string;
   lastMessage?: string;
   lastMessageRole?: string;
 }
@@ -35,6 +44,11 @@ interface ThreadRow {
   unread: number;
   awaiting_action: number;
   model_id: string | null;
+  graph_id: string | null;
+  agent_id: string | null;
+  agent_home: number;
+  background: number;
+  todo_id: string | null;
   created_at: string;
   last_activity_at: string;
   last_message: string | null;
@@ -50,6 +64,11 @@ export interface NewThreadInput {
   parentThreadId?: string;
   parentCheckpointId?: string;
   modelId?: string;
+  graphId?: string;
+  agentId?: string;
+  agentHome?: boolean;
+  background?: boolean;
+  todoId?: string;
   createdAt?: string;
 }
 
@@ -104,6 +123,24 @@ export class ThreadStore {
     if (!columns.some((column) => column.name === "folder_id")) {
       this.db.exec("ALTER TABLE threads ADD COLUMN folder_id TEXT");
     }
+    if (!columns.some((column) => column.name === "graph_id")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN graph_id TEXT");
+    }
+    if (!columns.some((column) => column.name === "agent_id")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN agent_id TEXT");
+    }
+    if (!columns.some((column) => column.name === "agent_home")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN agent_home INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!columns.some((column) => column.name === "background")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN background INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!columns.some((column) => column.name === "todo_id")) {
+      this.db.exec("ALTER TABLE threads ADD COLUMN todo_id TEXT");
+    }
+    this.db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_threads_agent_home ON threads (agent_id) WHERE agent_home = 1",
+    );
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_threads_folder ON threads (folder_id)");
   }
 
@@ -127,17 +164,22 @@ export class ThreadStore {
         ? { parentCheckpointId: input.parentCheckpointId }
         : {}),
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+      ...(input.graphId !== undefined ? { graphId: input.graphId } : {}),
+      ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+      ...(input.agentId !== undefined && input.agentHome ? { agentHome: true } : {}),
+      ...(input.background ? { background: true } : {}),
+      ...(input.todoId !== undefined ? { todoId: input.todoId } : {}),
     };
     this.db
       .prepare(
         `INSERT INTO threads
            (thread_id, title, folder_id, parent_thread_id, parent_checkpoint_id, source, pinned, unread,
-            awaiting_action, model_id, created_at, last_activity_at, last_message,
-            last_message_role)
+            awaiting_action, model_id, graph_id, agent_id, agent_home, background, todo_id, created_at,
+            last_activity_at, last_message, last_message_role)
          VALUES
            (@thread_id, @title, @folder_id, @parent_thread_id, @parent_checkpoint_id, @source, @pinned, @unread,
-            @awaiting_action, @model_id, @created_at, @last_activity_at, @last_message,
-            @last_message_role)`,
+            @awaiting_action, @model_id, @graph_id, @agent_id, @agent_home, @background, @todo_id, @created_at,
+            @last_activity_at, @last_message, @last_message_role)`,
       )
       .run(toRow(rec));
     this.emit({ type: "upsert", threadId: rec.threadId });
@@ -149,13 +191,45 @@ export class ThreadStore {
     return this.get(input.threadId) ?? this.create(input);
   }
 
+  /** The Inbox: background threads appear only while they await the user. */
   list(limit = 200): ThreadRecord[] {
     const rows = this.db
       .prepare<[number], ThreadRow>(
-        "SELECT * FROM threads ORDER BY pinned DESC, last_activity_at DESC LIMIT ?",
+        `SELECT * FROM threads WHERE background = 0 OR awaiting_action = 1
+         ORDER BY pinned DESC, last_activity_at DESC LIMIT ?`,
       )
       .all(limit);
     return rows.map(toThread);
+  }
+
+  backgroundIds(): string[] {
+    return this.db
+      .prepare<[], { thread_id: string }>("SELECT thread_id FROM threads WHERE background = 1")
+      .all()
+      .map((row) => row.thread_id);
+  }
+
+  listByGraph(graphId: string): ThreadRecord[] {
+    const rows = this.db
+      .prepare<[string], ThreadRow>("SELECT * FROM threads WHERE graph_id = ? ORDER BY last_activity_at DESC")
+      .all(graphId);
+    return rows.map(toThread);
+  }
+
+  listByTodo(todoId: string): ThreadRecord[] {
+    const rows = this.db
+      .prepare<[string], ThreadRow>(
+        "SELECT * FROM threads WHERE todo_id = ? AND background = 1 ORDER BY created_at DESC, rowid DESC",
+      )
+      .all(todoId);
+    return rows.map(toThread);
+  }
+
+  agentHome(agentId: string): ThreadRecord | undefined {
+    const row = this.db
+      .prepare<[string], ThreadRow>("SELECT * FROM threads WHERE agent_id = ? AND agent_home = 1")
+      .get(agentId);
+    return row ? toThread(row) : undefined;
   }
 
   get(threadId: string): ThreadRecord | undefined {
@@ -237,6 +311,11 @@ function toThread(row: ThreadRow): ThreadRecord {
   if (row.parent_thread_id !== null) rec.parentThreadId = row.parent_thread_id;
   if (row.parent_checkpoint_id !== null) rec.parentCheckpointId = row.parent_checkpoint_id;
   if (row.model_id !== null) rec.modelId = row.model_id;
+  if (row.graph_id !== null) rec.graphId = row.graph_id;
+  if (row.agent_id !== null) rec.agentId = row.agent_id;
+  if (row.agent_home === 1) rec.agentHome = true;
+  if (row.background === 1) rec.background = true;
+  if (row.todo_id !== null) rec.todoId = row.todo_id;
   if (row.last_message !== null) rec.lastMessage = row.last_message;
   if (row.last_message_role !== null) rec.lastMessageRole = row.last_message_role;
   return rec;
@@ -254,6 +333,11 @@ function toRow(rec: ThreadRecord): ThreadRow {
     unread: rec.unread ? 1 : 0,
     awaiting_action: rec.awaitingAction ? 1 : 0,
     model_id: rec.modelId ?? null,
+    graph_id: rec.graphId ?? null,
+    agent_id: rec.agentId ?? null,
+    agent_home: rec.agentHome ? 1 : 0,
+    background: rec.background ? 1 : 0,
+    todo_id: rec.todoId ?? null,
     created_at: rec.createdAt,
     last_activity_at: rec.lastActivityAt,
     last_message: rec.lastMessage ?? null,

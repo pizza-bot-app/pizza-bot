@@ -24,6 +24,13 @@ export function resolveSkillsDir(dataRoot: string): string {
   return resolveLayout(dataRoot).skillsDir;
 }
 
+/** User-authored agent definitions sit beside user skills. */
+export function resolveAgentsDir(dataRoot: string): string {
+  const override = process.env.PIZZA_AGENTS_DIR;
+  if (override && override.length > 0) return override;
+  return resolveLayout(dataRoot).agentsDir;
+}
+
 /** Built-in skills are shipped with the source tree or packaged application. */
 export function resolveBuiltinSkillsDir(): string {
   const override = process.env.PIZZA_BUILTIN_SKILLS_DIR;

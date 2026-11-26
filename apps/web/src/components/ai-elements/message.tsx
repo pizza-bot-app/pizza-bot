@@ -26,7 +26,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
+import { Streamdown, defaultRehypePlugins } from "streamdown";
 import { useStreamdownPlugins } from "./streamdown-plugins.js";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -320,10 +320,17 @@ export const MessageBranchPage = ({
   );
 };
 
-export type MessageResponseProps = ComponentProps<typeof Streamdown>;
+export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
+  /** Shows HTML as the text it is, e.g. a `<todo-record>` delimiter in a check-in prompt. */
+  literalHtml?: boolean;
+};
+
+const REHYPE_WITHOUT_RAW_HTML = Object.entries(defaultRehypePlugins)
+  .filter(([name]) => name !== "raw")
+  .map(([, plugin]) => plugin);
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => {
+  ({ className, literalHtml, ...props }: MessageResponseProps) => {
     const plugins = useStreamdownPlugins();
     return (
       <Streamdown
@@ -332,13 +339,15 @@ export const MessageResponse = memo(
           className
         )}
         plugins={plugins}
+        {...(literalHtml ? { rehypePlugins: REHYPE_WITHOUT_RAW_HTML } : {})}
         {...props}
       />
     );
   },
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
-    nextProps.isAnimating === prevProps.isAnimating
+    nextProps.isAnimating === prevProps.isAnimating &&
+    nextProps.literalHtml === prevProps.literalHtml
 );
 
 MessageResponse.displayName = "MessageResponse";

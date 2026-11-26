@@ -33,6 +33,7 @@ export interface PluginsResponse {
     linked: boolean;
     linkTarget?: string;
     contributions: {
+      agents: number;
       skills: number;
       mcpServers: number;
     };
@@ -154,6 +155,7 @@ export function pluginRoutes(host: AgentHost): Hono {
           removable: await host.pluginIsInstalled(report.name),
           ...(await pluginLink(report.root)),
           contributions: {
+            agents: count(loaded.registry.agents.values()),
             skills: count(loaded.registry.skills.values()),
             mcpServers: count(loaded.registry.mcpServers.values()),
           },

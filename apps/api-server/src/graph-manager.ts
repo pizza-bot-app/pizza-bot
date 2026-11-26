@@ -9,10 +9,12 @@ import {
   type ProviderInfo,
   type ResolvedProviderConfig,
   type RuntimeDeps,
-  type SkillAvailability,
+  type AgentAvailability,
+  type AgentCatalog,
+  type AmbientTodoAccess,
   type SkillCatalog,
 } from "@pizza-bot/core";
-import { createPizzaBotAgent, type LangGraphAgent } from "@pizza-bot/runtime-langgraph";
+import { createAgentRootAgent, createPizzaBotAgent, type LangGraphAgent } from "@pizza-bot/runtime-langgraph";
 import type { ToolCatalog } from "@pizza-bot/plugin-sdk";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
@@ -38,9 +40,11 @@ interface RuntimeSettingsSnapshot {
 
 export interface CapabilityReplacement {
   skills?: SkillCatalog;
+  rootSkills?: readonly string[];
+  agents?: AgentCatalog;
+  agentAvailability?: readonly AgentAvailability[];
   tools?: Record<string, unknown>;
   catalog?: ToolCatalog;
-  skillAvailability?: readonly SkillAvailability[];
 }
 
 /** Appends the global persona to a definition's base system prompt (additive only). */
@@ -49,15 +53,15 @@ function withPersona(systemPrompt: string, addendum: string): string {
   return trimmed ? `${systemPrompt}\n\n${trimmed}` : systemPrompt;
 }
 
-function withSkillAvailability(
+function withAgentAvailability(
   systemPrompt: string,
-  availability: readonly SkillAvailability[] | undefined,
+  availability: readonly AgentAvailability[] | undefined,
 ): string {
-  const unavailable = availability?.filter((skill) => skill.status !== "ready") ?? [];
+  const unavailable = availability?.filter((agent) => agent.status !== "ready") ?? [];
   if (unavailable.length === 0) return systemPrompt;
-  const statuses = unavailable.map((skill) => {
-    const state = skill.status === "loading" ? "still loading" : "unavailable";
-    return `- ${skill.name}: ${state}${skill.detail ? ` (${skill.detail})` : ""}`;
+  const statuses = unavailable.map((agent) => {
+    const state = agent.status === "loading" ? "still loading" : "unavailable";
+    return `- ${agent.name}: ${state}${agent.detail ? ` (${agent.detail})` : ""}`;
   });
   const notice = [
     "These specialists are not currently callable:",
@@ -77,7 +81,9 @@ export class GraphManager {
   private readonly getMaxSubagentToolCalls: () => number;
 
   private agentImpl?: LangGraphAgent;
+  private compiledAvailability: readonly AgentAvailability[] | undefined;
   private readonly cache = new Map<string, Promise<LangGraphAgent>>();
+  private readonly rootAgents = new Map<string, Promise<{ agent: LangGraphAgent; modelId: string }>>();
   private updates: Promise<void> = Promise.resolve();
   private appliedRuntimeSettings?: RuntimeSettingsSnapshot;
 
@@ -98,6 +104,44 @@ export class GraphManager {
 
   skills(): SkillCatalog | undefined {
     return this.dependencies.skills;
+  }
+
+  /** Readiness after pinned models resolved; an unresolvable pin makes its agent unavailable. */
+  agentAvailability(): readonly AgentAvailability[] {
+    return this.compiledAvailability ?? this.dependencies.agentAvailability ?? [];
+  }
+
+  /**
+   * Resolves each ready agent's pinned model. A pin that cannot resolve drops the
+   * agent instead of silently falling back to the conversation model.
+   */
+  private async withAgentModels(deps: RuntimeDeps): Promise<RuntimeDeps> {
+    const agents = deps.agents;
+    if (!agents?.size) return deps;
+    const ready: AgentCatalog = new Map();
+    const agentModels = new Map<string, BaseChatModel>();
+    const failures = new Map<string, string>();
+    await Promise.all([...agents].map(async ([id, agent]) => {
+      if (!agent.model) {
+        ready.set(id, agent);
+        return;
+      }
+      try {
+        agentModels.set(id, await this.models.resolveModel(agent.model));
+        ready.set(id, agent);
+      } catch (err) {
+        failures.set(id, err instanceof Error ? err.message : `Model "${agent.model}" is unavailable`);
+      }
+    }));
+    const agentAvailability = (deps.agentAvailability ?? []).map((state) => {
+      const detail = failures.get(state.id);
+      return detail ? { ...state, status: "unavailable" as const, detail } : state;
+    });
+    const resolved: RuntimeDeps = { ...deps, agentAvailability };
+    if (ready.size > 0) resolved.agents = new Map([...agents].filter(([id]) => ready.has(id)));
+    else delete resolved.agents;
+    if (agentModels.size > 0) resolved.agentModels = agentModels;
+    return resolved;
   }
 
   async buildDefaultModel(): Promise<BaseChatModel> {
@@ -233,6 +277,14 @@ export class GraphManager {
         if (replacement.skills.size > 0) dependencies.skills = replacement.skills;
         else delete dependencies.skills;
       }
+      if (replacement.rootSkills) {
+        if (replacement.rootSkills.length > 0) dependencies.rootSkills = replacement.rootSkills;
+        else delete dependencies.rootSkills;
+      }
+      if (replacement.agents) {
+        if (replacement.agents.size > 0) dependencies.agents = replacement.agents;
+        else delete dependencies.agents;
+      }
       if (replacement.tools) {
         if (Object.keys(replacement.tools).length > 0) dependencies.tools = replacement.tools;
         else delete dependencies.tools;
@@ -241,8 +293,8 @@ export class GraphManager {
         if (Object.keys(replacement.catalog).length > 0) dependencies.catalog = replacement.catalog;
         else delete dependencies.catalog;
       }
-      if (replacement.skillAvailability) {
-        dependencies.skillAvailability = replacement.skillAvailability;
+      if (replacement.agentAvailability) {
+        dependencies.agentAvailability = replacement.agentAvailability;
       }
       await this.rebuild(dependencies);
     });
@@ -258,10 +310,8 @@ export class GraphManager {
 
     const built = (async () => {
       const model = await this.models.resolveModel(resolvedModelId);
-      return createPizzaBotAgent(
-        this.systemPrompt(this.dependencies),
-        this.depsForModel(this.dependencies, model),
-      );
+      const deps = await this.withAgentModels(this.dependencies);
+      return createPizzaBotAgent(this.systemPrompt(deps), this.depsForModel(deps, model));
     })().catch((err) => {
       // Rejected promises must not poison the graph cache.
       this.cache.delete(resolvedModelId);
@@ -269,6 +319,56 @@ export class GraphManager {
     });
     this.cache.set(resolvedModelId, built);
     return built;
+  }
+
+  /**
+   * An agent definition compiled as a thread's top-level agent. Its pinned model
+   * wins over `modelId`; the returned `modelId` is the one it runs on. With
+   * `ambient` it is compiled for a background Todo check-in.
+   */
+  async rootAgentFor(
+    agentId: string,
+    modelId?: string,
+    ambient?: AmbientTodoAccess,
+  ): Promise<{ agent: LangGraphAgent; modelId: string }> {
+    await this.ensureSettings();
+    const definition = this.dependencies.agents?.get(agentId);
+    if (!definition) throw new Error(this.unavailableAgentMessage(agentId));
+    const resolvedModelId = definition.model ?? modelId ?? this.modelId;
+    const key = JSON.stringify([agentId, resolvedModelId, ambient !== undefined]);
+    const cached = this.rootAgents.get(key);
+    if (cached) return cached;
+
+    const built = (async () => {
+      const model = await this.models.resolveModel(resolvedModelId);
+      const deps = await this.withAgentModels(this.dependencies);
+      const agent = await createAgentRootAgent(
+        definition,
+        this.depsForModel(deps, model),
+        ambient ? { ambient } : {},
+      );
+      return { agent, modelId: resolvedModelId };
+    })().catch((err) => {
+      if (this.rootAgents.get(key) === built) this.rootAgents.delete(key);
+      throw err;
+    });
+    this.rootAgents.set(key, built);
+    return built;
+  }
+
+  /** Whether the agent is enabled and ready to run as a thread's top-level agent. */
+  hasRootAgent(agentId: string): boolean {
+    if (!this.dependencies.agents?.has(agentId)) return false;
+    // `dependencies` still lists an agent whose pinned model failed to resolve.
+    const state = this.agentAvailability().find((agent) => agent.id === agentId);
+    return !state || state.status === "ready";
+  }
+
+  private unavailableAgentMessage(agentId: string): string {
+    const state = this.agentAvailability().find((agent) => agent.id === agentId);
+    if (!state) return `Agent "${agentId}" does not exist or is disabled.`;
+    const reason = state.status === "loading" ? "is still loading" : "is unavailable";
+    return `Agent "${state.name}" ${reason}${state.detail ? `: ${state.detail}` : "."}`;
   }
 
   private async rebuild(dependencies = this.dependencies): Promise<void> {
@@ -280,16 +380,19 @@ export class GraphManager {
     dependencies = this.dependencies,
   ): Promise<void> {
     const runtimeSettings = this.readRuntimeSettings(dependencies);
+    const resolved = await this.withAgentModels(dependencies);
     const agent = await createPizzaBotAgent(
-      this.systemPrompt(dependencies),
-      this.depsForModel(dependencies, model),
+      this.systemPrompt(resolved),
+      this.depsForModel(resolved, model),
     );
 
     this.dependencies = dependencies;
+    this.compiledAvailability = resolved.agentAvailability;
     this.agentImpl = agent;
     this.appliedRuntimeSettings = runtimeSettings;
     this.cache.clear();
     this.cache.set(this.modelId, Promise.resolve(agent));
+    this.rootAgents.clear();
   }
 
   private readRuntimeSettings(dependencies: RuntimeDeps): RuntimeSettingsSnapshot {
@@ -317,12 +420,13 @@ export class GraphManager {
   private systemPrompt(dependencies: RuntimeDeps): string {
     const settings = this.readRuntimeSettings(dependencies);
     return withPersona(
-      withSkillAvailability(
+      withAgentAvailability(
         pizzaBotSystemPrompt({
           memories: settings.memoriesEnabled,
-          subagents: (dependencies.skills?.size ?? 0) > 0,
+          subagents: (dependencies.agents?.size ?? 0) > 0,
+          todos: dependencies.todos !== undefined,
         }),
-        dependencies.skillAvailability,
+        dependencies.agentAvailability,
       ),
       settings.addendum,
     );

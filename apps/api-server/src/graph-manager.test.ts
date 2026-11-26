@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ModelRegistry, type SkillCatalog, type SkillCatalogEntry } from "@pizza-bot/core";
+import {
+  ModelRegistry,
+  type AgentCatalogEntry,
+  type SkillCatalog,
+  type SkillCatalogEntry,
+} from "@pizza-bot/core";
 import { registerBuiltinProviders } from "@pizza-bot/inference-providers";
 import { GraphManager } from "./graph-manager.js";
 
@@ -14,8 +19,6 @@ function skillCatalog(...ids: string[]): SkillCatalog {
       name: id,
       description: `${id} description`,
       source: "user",
-      declaredTools: [],
-      interruptOn: {},
       files: [{
         path: `/skills/${id}/SKILL.md`,
         content: `---\nname: ${id}\ndescription: ${id} description\n---\n\n# ${id}`,
@@ -97,12 +100,12 @@ describe("GraphManager", () => {
     expect(registry.agent).not.toBe(first);
   });
 
-  it("rebuilds when skill availability context changes", async () => {
+  it("rebuilds when agent availability context changes", async () => {
     const registry = await createRegistry(skillCatalog("plain"));
     const first = registry.agent;
     await registry.replaceCapabilities({
       skills: new Map(),
-      skillAvailability: [{
+      agentAvailability: [{
         id: "obsidian",
         name: "Obsidian",
         status: "loading",
@@ -111,5 +114,71 @@ describe("GraphManager", () => {
     });
     expect(registry.agent).not.toBe(first);
     expect(registry.skills()).toBeUndefined();
+  });
+
+  describe("rootAgentFor", () => {
+    function agent(id: string, overrides: Partial<AgentCatalogEntry> = {}): AgentCatalogEntry {
+      return {
+        id,
+        name: id === "researcher" ? "Researcher" : id,
+        description: `${id} agent`,
+        systemPrompt: `You are ${id}.`,
+        source: "user",
+        declaredTools: [],
+        skills: [],
+        interruptOn: {},
+        ...overrides,
+      };
+    }
+
+    async function withAgents(...agents: AgentCatalogEntry[]) {
+      const models = new ModelRegistry();
+      await registerBuiltinProviders(models);
+      const registry = new GraphManager({
+        modelId: MODEL_ID,
+        models,
+        dependencies: {
+          agents: new Map(agents.map((entry) => [entry.id, entry])),
+          agentAvailability: [
+            ...agents.map((entry) => ({ id: entry.id, name: entry.name, status: "ready" as const })),
+            { id: "broken", name: "Broken", status: "unavailable" as const, detail: "mail is not configured" },
+          ],
+        },
+      });
+      await registry.initialize(await models.buildModel(MODEL_ID));
+      return registry;
+    }
+
+    it("runs the conversation's model unless the agent pins one", async () => {
+      const registry = await withAgents(agent("researcher"), agent("pinned", { model: OTHER_MODEL_ID }));
+      expect((await registry.rootAgentFor("researcher", OTHER_MODEL_ID)).modelId).toBe(OTHER_MODEL_ID);
+      expect((await registry.rootAgentFor("researcher")).modelId).toBe(MODEL_ID);
+      expect((await registry.rootAgentFor("pinned", MODEL_ID)).modelId).toBe(OTHER_MODEL_ID);
+    });
+
+    it("caches per agent and model and invalidates after capability replacement", async () => {
+      const registry = await withAgents(agent("researcher"));
+      const first = await registry.rootAgentFor("researcher");
+      expect(await registry.rootAgentFor("researcher")).toBe(first);
+      expect((await registry.rootAgentFor("researcher", OTHER_MODEL_ID)).agent).not.toBe(first.agent);
+
+      await registry.replaceCapabilities({ skills: new Map() });
+      expect((await registry.rootAgentFor("researcher")).agent).not.toBe(first.agent);
+    });
+
+    it("offers only a ready agent as a thread's top-level agent", async () => {
+      const registry = await withAgents(agent("researcher"), agent("orphaned", { model: "ghost:nope" }));
+      expect(registry.hasRootAgent("researcher")).toBe(true);
+      expect(registry.hasRootAgent("orphaned")).toBe(false);
+      expect(registry.hasRootAgent("broken")).toBe(false);
+    });
+
+    it("names why an agent cannot run", async () => {
+      const registry = await withAgents(agent("researcher"));
+      await expect(registry.rootAgentFor("broken")).rejects.toThrow(
+        'Agent "Broken" is unavailable: mail is not configured',
+      );
+      await expect(registry.rootAgentFor("ghost")).rejects.toThrow(/does not exist or is disabled/);
+    });
   });
 });

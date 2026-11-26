@@ -108,14 +108,14 @@ export class SearchStore {
     this.db.prepare("DELETE FROM messages_fts WHERE thread_id = ?").run(threadId);
   }
 
-  search(query: string, limit = 50): SearchHit[] {
+  search(query: string, limit = 50, excludeThreadIds: readonly string[] = []): SearchHit[] {
     const q = query.trim();
     if (q.length === 0) return [];
     const marker = randomUUID();
     const highlightStart = `\u0001${marker}:start\u0001`;
     const highlightEnd = `\u0002${marker}:end\u0002`;
     const rows = this.db
-      .prepare<[string, string, string, number], SearchRow>(
+      .prepare<[string, string, string, string, number], SearchRow>(
         `SELECT thread_id  AS threadId,
                 message_id AS messageId,
                 role       AS role,
@@ -123,10 +123,11 @@ export class SearchStore {
                 rank       AS rank
          FROM messages_fts
          WHERE messages_fts MATCH ?
+           AND thread_id NOT IN (SELECT value FROM json_each(?))
          ORDER BY rank
          LIMIT ?`,
       )
-      .all(highlightStart, highlightEnd, sanitizeQuery(q), limit);
+      .all(highlightStart, highlightEnd, sanitizeQuery(q), JSON.stringify(excludeThreadIds), limit);
     return rows.map(({ markedSnippet, ...row }) => {
       const highlights = parseHighlights(markedSnippet, highlightStart, highlightEnd);
       return {

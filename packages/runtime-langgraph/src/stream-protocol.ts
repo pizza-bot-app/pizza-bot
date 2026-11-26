@@ -1,11 +1,27 @@
 /** Streams unencoded LangGraph v3 ProtocolEvents for the SDK transport. */
 import { Command, type ProtocolEvent } from "@langchain/langgraph";
-import type { RunInput, RunOptions, ResumeCommand, MessagePart } from "@pizza-bot/core";
+import type {
+  InputResponseCommand,
+  RunInput,
+  RunOptions,
+  ResumeCommand,
+  MessagePart,
+} from "@pizza-bot/core";
 
-/** Map a message turn or HITL resume to LangGraph input. */
-export function toLangGraphInput(input: RunInput): { messages: unknown[] } | Command {
+/** Map a message turn, graph input, or resume to LangGraph input. */
+export function toLangGraphInput(
+  input: RunInput,
+  opts: { keyDecisions?: boolean } = {},
+): { messages: unknown[] } | { input: Record<string, unknown> } | Command {
+  if ("graphInput" in input) return { input: input.graphInput };
   if ("command" in input) {
-    return new Command({ resume: toResumePayload(input.command) });
+    const command = input.command;
+    // Keyed by interrupt id so one resume cannot also satisfy a different parallel pause.
+    if (isInputResponse(command)) {
+      return new Command({ resume: { [command.interruptId]: command.response } });
+    }
+    const decisions = toResumePayload(command);
+    return new Command({ resume: opts.keyDecisions ? { [command.interruptId]: decisions } : decisions });
   }
   return {
     messages: input.messages.map((m) => ({ role: m.role, content: toContent(m.parts) })),
@@ -58,6 +74,10 @@ function toContent(parts: MessagePart[]): string | Array<Record<string, unknown>
   return blocks;
 }
 
+function isInputResponse(cmd: ResumeCommand | InputResponseCommand): cmd is InputResponseCommand {
+  return "response" in cmd && !("decisions" in cmd);
+}
+
 function toResumePayload(cmd: ResumeCommand): { decisions: unknown[] } {
   return {
     decisions: cmd.decisions.map((d) => {
@@ -103,7 +123,7 @@ export interface ProtocolCapableGraph {
  */
 export async function* streamProtocolEvents(
   graph: ProtocolCapableGraph,
-  input: { messages: unknown[]; files?: unknown } | object,
+  input: { messages: unknown[]; files?: unknown } | object | null,
   opts: RunOptions,
 ): AsyncIterable<ProtocolEvent> {
   const options = {
@@ -121,7 +141,11 @@ export async function* streamProtocolEvents(
   if (opts.signal?.aborted) return;
   if (stream.interrupted) {
     // The manager replaces placeholder sequence numbers with its monotonic index.
+    // A nested pause is reported once per graph level it bubbles through.
+    const seen = new Set<string>();
     for (const it of stream.interrupts) {
+      if (seen.has(it.interruptId)) continue;
+      seen.add(it.interruptId);
       yield inputRequestedFrame(it.interruptId, it.payload);
     }
     yield interruptedLifecycleFrame();

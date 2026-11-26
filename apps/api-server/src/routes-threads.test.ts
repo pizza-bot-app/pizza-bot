@@ -111,12 +111,13 @@ afterEach(() => {
 function fakeHost(history: ForkMessage[], runningThreads: Set<string> = new Set()) {
   const app = openAppDatabase(tmpDb());
   openApps.push(app);
-  const { threadStore, search, threadActivity, folders: folderStore } = app;
+  const { threadStore, search, threadActivity, folders: folderStore, todos: todoStore } = app;
   let updated: { threadId: string; values: unknown } | undefined;
   const purgedCheckpoints: string[] = [];
   const host = {
     threadStore,
     folderStore,
+    todoStore,
     search,
     threadActivity,
     persistence: {
@@ -138,13 +139,16 @@ function fakeHost(history: ForkMessage[], runningThreads: Set<string> = new Set(
       async getState(threadId: string) {
         return { threadId, checkpointId: "chk_src", values: { messages: history }, next: [], createdAt: "t0" };
       },
-      async updateState(threadId: string, values: unknown) {
+      async updateStateAsFinished(threadId: string, values: unknown) {
         updated = { threadId, values };
         return { checkpointId: "chk_new", threadId };
       },
     },
   } as unknown as import("./agent-host.js").AgentHost;
   Object.assign(host, {
+    async threadGraph() {
+      return host.agent;
+    },
     async deleteThread(threadId: string) {
       await host.protocolRuns.discardThread(threadId);
       const deleted = threadStore.delete(threadId);
@@ -164,6 +168,19 @@ function fakeHost(history: ForkMessage[], runningThreads: Set<string> = new Set(
 }
 
 describe("threadRoutes: fork", () => {
+  it("keeps the source thread's agent on the fork", async () => {
+    const { host } = fakeHost([human("a", "find sources"), ai("b")]);
+    host.threadStore.create({ threadId: "src", title: "Sources", agentId: "researcher" });
+    const res = await threadRoutes(host).request("/threads/src/fork", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messageId: "b" }),
+    });
+    expect(res.status).toBe(201);
+    const fork = (await res.json()) as { threadId: string };
+    expect(host.threadStore.get(fork.threadId)?.agentId).toBe("researcher");
+  });
+
   it("forks at a message, seeds the new thread, and records parent pointers", async () => {
     const history = [human("a", "want pizza"), ai("b"), human("c", "extra cheese")];
     const { host, getUpdated } = fakeHost(history);
@@ -326,6 +343,21 @@ describe("threadRoutes: list + search", () => {
     expect(await res.json()).toEqual([]);
   });
 
+  it("fills the search limit with conversations when work threads match too", async () => {
+    const { host } = fakeHost([]);
+    for (const id of ["work-1", "work-2", "work-3", "conversation"]) {
+      const background = id !== "conversation";
+      host.threadStore.create({ threadId: id, ...(background ? { background, agentId: "researcher" } : {}) });
+      host.search.reindexThread(id, [
+        { getType: () => "human", content: background ? "passport passport passport" : "renew my passport soon", id: `m-${id}` },
+      ]);
+    }
+
+    const res = await threadRoutes(host).request("/threads/search?q=passport&limit=2");
+
+    expect(((await res.json()) as Array<{ threadId: string }>).map((hit) => hit.threadId)).toEqual(["conversation"]);
+  });
+
   it("clamps search limits to the inclusive range from 1 through 200", async () => {
     const { host } = fakeHost([]);
     host.threadStore.create({ threadId: "search-limit", title: "Search limit" });
@@ -366,6 +398,10 @@ describe("threadRoutes: events", () => {
     threadStore.create({ threadId: "t1" });
     const changed = await reader.read();
     expect(decoder.decode(changed.value)).toContain("event: changed");
+
+    host.todoStore.create({ title: "Follow up", threadIds: ["t1"] });
+    const todoChanged = await reader.read();
+    expect(decoder.decode(todoChanged.value)).toContain("event: changed");
 
     abort.abort();
     await reader.cancel();

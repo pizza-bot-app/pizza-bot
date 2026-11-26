@@ -59,6 +59,9 @@ describe("thread activity watcher", () => {
       notificationForThreadActivity(activity(4, "interrupted")),
     ).toMatchObject({ kind: "action-required" });
     expect(notificationForThreadActivity(activity(5, "cancelled"))).toBeUndefined();
+    expect(notificationForThreadActivity(activity(6, "message"))).toMatchObject({
+      kind: "message",
+    });
   });
 
   it("silently baselines, then emits every later actionable or finished run", async () => {

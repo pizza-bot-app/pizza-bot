@@ -17,7 +17,11 @@ import {
   Pencil,
   Check,
   SlidersHorizontal,
+  Flag,
+  House,
+  ListTodo,
 } from "lucide-react";
+import { useAgentName } from "./agent-names.js";
 import type { ApiClient, FolderInfo, ThreadInfo, SearchHit } from "@/api-client";
 import { useKnownThreadIds, useRunningThreadIds } from "../use-thread-slice.js";
 import { datePeriod, PERIOD_ORDER, relativeTime, type DatePeriod } from "../lib/conversation.js";
@@ -43,6 +47,8 @@ import { ConfirmationDialog } from "./ConfirmationDialog.js";
 import { useAppToast } from "./AppToast.js";
 import { SwipeToDelete } from "./SwipeToDelete.js";
 import { FolderNameDialog } from "./FolderNameDialog.js";
+import { L } from "../lexicon.js";
+import { inboxThreads, mergeThreadRows, type InboxFilter } from "../lib/inbox-views.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,12 +68,18 @@ export interface SidebarProps {
   onOpenSearchHit?: (hit: SearchHit) => void;
   onDeleted: (threadId: string) => void;
   onThreadsLoaded?: (rows: ThreadInfo[]) => void;
+  /** The server reported a metadata change (threads, folders, or Todos), not a routine reload. */
+  onMetadataChanged?: () => void;
   threadTitles?: ReadonlyMap<string, string>;
+  /** Threads linked to an incomplete Todo. */
+  flaggedThreadIds?: ReadonlySet<string>;
+  /** Work threads known locally, including ones the server no longer lists. */
+  backgroundThreadIds?: ReadonlySet<string>;
   listRef?: React.RefObject<HTMLDivElement | null>;
   onFocusComposer?: () => void;
 }
 
-type Filter = "all" | "unread" | "action" | "unfiled" | `folder:${string}`;
+type Filter = InboxFilter;
 
 type FolderEditor =
   | { mode: "create" }
@@ -83,13 +95,17 @@ export function Sidebar({
   onOpenSearchHit,
   onDeleted,
   onThreadsLoaded,
+  onMetadataChanged,
   threadTitles,
+  flaggedThreadIds,
+  backgroundThreadIds,
   listRef,
   onFocusComposer,
 }: SidebarProps) {
   const notify = useAppToast();
   const localKnown = useKnownThreadIds();
   const localRunning = useRunningThreadIds();
+  const agentName = useAgentName();
   const [threads, setThreads] = useState<ThreadInfo[]>([]);
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [query, setQuery] = useState("");
@@ -146,9 +162,16 @@ export function Sidebar({
     [refresh],
   );
 
+  const onMetadataChangedRef = useRef(onMetadataChanged);
+  onMetadataChangedRef.current = onMetadataChanged;
   useEffect(() => {
-    return subscribeSidebarRefresh(client, refresh, (message, error) =>
-      console.error(message, error),
+    return subscribeSidebarRefresh(
+      client,
+      () => {
+        onMetadataChangedRef.current?.();
+        return refresh();
+      },
+      (message, error) => console.error(message, error),
     );
   }, [client, refresh]);
 
@@ -300,69 +323,38 @@ export function Sidebar({
   );
 
   const rows = useMemo(() => {
-    const known = new Map<string, ThreadInfo>();
-    for (const t of threads) {
-      const title = threadTitles?.get(t.threadId);
-      known.set(t.threadId, title && title !== t.title ? { ...t, title } : t);
-    }
     const synthetic = new Set(openedThreads);
     for (const id of localKnown) synthetic.add(id);
     // A fresh chat can render before its store attachment effect runs.
     if (activeThreadId) synthetic.add(activeThreadId);
-    for (const id of synthetic) {
-      if (!known.has(id)) {
-        known.set(id, {
-          threadId: id,
-          title: threadTitles?.get(id) ?? "New conversation",
-          source: "user",
-          pinned: false,
-          unread: false,
-          awaitingAction: false,
-          createdAt: "",
-          lastActivityAt: "",
-        });
-      }
-    }
-    return [...known.values()];
-  }, [threads, openedThreads, localKnown, activeThreadId, threadTitles]);
+    return mergeThreadRows(threads, synthetic, threadTitles, backgroundThreadIds);
+  }, [threads, openedThreads, localKnown, activeThreadId, threadTitles, backgroundThreadIds]);
 
   const isUnread = useCallback(
     (t: ThreadInfo) => t.unread && t.threadId !== activeThreadId,
     [activeThreadId],
   );
 
-  const selectedFolderId = filter.startsWith("folder:")
-    ? filter.slice("folder:".length)
-    : undefined;
+  const visibleRows = inboxThreads(rows, filter, isUnread);
+  const listedRows = useMemo(() => rows.filter((t) => !t.background), [rows]);
 
-  const visibleRows =
-    filter === "unread"
-      ? rows.filter(isUnread)
-      : filter === "action"
-        ? rows.filter((t) => t.awaitingAction)
-        : filter === "unfiled"
-          ? rows.filter((t) => !t.folderId)
-          : selectedFolderId
-            ? rows.filter((t) => t.folderId === selectedFolderId)
-        : rows;
-
-  const unreadCount = useMemo(() => rows.filter(isUnread).length, [rows, isUnread]);
+  const unreadCount = useMemo(() => listedRows.filter(isUnread).length, [listedRows, isUnread]);
   const actionCount = useMemo(
     () => rows.filter((t) => t.awaitingAction).length,
     [rows],
   );
   const folderCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const thread of rows) {
+    for (const thread of listedRows) {
       if (thread.folderId) {
         counts.set(thread.folderId, (counts.get(thread.folderId) ?? 0) + 1);
       }
     }
     return counts;
-  }, [rows]);
+  }, [listedRows]);
   const unfiledCount = useMemo(
-    () => rows.filter((thread) => !thread.folderId).length,
-    [rows],
+    () => listedRows.filter((thread) => !thread.folderId).length,
+    [listedRows],
   );
   const toggleFolders = useCallback(() => {
     if (foldersVisible) setFilter("all");
@@ -493,7 +485,9 @@ export function Sidebar({
       <div className="sidebar-header">
         <button
           className="new-chat"
-          onClick={() => void onNewChat(selectedFolderId)}
+          onClick={() =>
+            void onNewChat(filter.startsWith("folder:") ? filter.slice("folder:".length) : undefined)
+          }
         >
           <Plus size={16} /> New
         </button>
@@ -724,12 +718,41 @@ export function Sidebar({
                                       <span className="thread-unread-dot" aria-label="Unread" />
                                     )}
                                     <span className="thread-title">{t.title}</span>
+                                    {flaggedThreadIds?.has(t.threadId) && (
+                                      <Flag
+                                        size={12}
+                                        className="thread-flag"
+                                        role="img"
+                                        aria-label={L.flaggedThread}
+                                      />
+                                    )}
                                     <span className="thread-time">
                                       {running ? "now" : relativeTime(t.lastActivityAt)}
                                     </span>
                                   </span>
-                                  {t.lastMessage && (
-                                    <span className="thread-preview">{t.lastMessage}</span>
+                                  {(t.agentId || t.lastMessage || t.background) && (
+                                    <span className="thread-line2">
+                                      {t.background && (
+                                        <span className="thread-todo-marker">
+                                          <ListTodo size={11} aria-hidden="true" />
+                                          {L.todoWorkThread}
+                                        </span>
+                                      )}
+                                      {t.agentId && (
+                                        <span
+                                          className="thread-agent"
+                                          title={t.agentHome ? L.agentHomeThread : undefined}
+                                        >
+                                          {t.agentHome && (
+                                            <House size={11} role="img" aria-label={L.agentHomeThread} />
+                                          )}
+                                          {agentName(t.agentId)}
+                                        </span>
+                                      )}
+                                      {t.lastMessage && (
+                                        <span className="thread-preview">{t.lastMessage}</span>
+                                      )}
+                                    </span>
                                   )}
                                 </span>
                                 {needsAction && (

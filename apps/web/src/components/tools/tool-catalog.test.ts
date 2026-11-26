@@ -54,6 +54,7 @@ describe("toolGroups", () => {
 describe("describeGrantedTool", () => {
   it("names the source of exact refs", () => {
     expect(describeGrantedTool("builtin:eval", catalog)).toEqual({ ref: "builtin:eval", name: "eval", source: "Built-in" });
+    expect(describeGrantedTool("builtin:task", catalog)).toEqual({ ref: "builtin:task", name: "task", source: "Built-in" });
     expect(describeGrantedTool("mcp:files:read_file", catalog)).toEqual({
       ref: "mcp:files:read_file",
       name: "read_file",

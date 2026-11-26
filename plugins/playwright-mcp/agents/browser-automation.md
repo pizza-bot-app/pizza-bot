@@ -1,6 +1,8 @@
 ---
 name: browser-automation
 description: Automate and inspect websites in a live Playwright browser. Use when the user asks to navigate a site, exercise a web workflow, fill or submit forms, verify UI behavior, inspect accessibility structure, capture screenshots, or diagnose browser console and network activity.
+metadata:
+  display-name: Browser Automation
 tools:
   - mcp:playwright:browser_click
   - mcp:playwright:browser_close

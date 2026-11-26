@@ -9,6 +9,8 @@ import {
   loadSkillCatalog,
   loadUserSkills,
   mergeSkillCatalogs,
+  migrateSkillToolGrants,
+  parseAgentMd,
 } from "@pizza-bot/plugin-sdk";
 import type { AgentHost } from "./agent-host.js";
 import { skillRoutes } from "./routes-skills.js";
@@ -19,7 +21,7 @@ import { multipartRequestLimit } from "./request-limits.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_FIXTURE = resolve(
   __dirname,
-  "../../../examples/plugins/mcp-status",
+  "../../../plugins/google-workspace",
 );
 const roots: string[] = [];
 
@@ -38,6 +40,7 @@ async function fixture(
     skillsDirectory: async () => skillsDir,
     skillFor,
     reloadSkills: async () => {},
+    adoptSkillToolGrants: async () => {},
     clearUserSkillPreference: () => {},
   } as unknown as AgentHost;
   return { app: skillRoutes(host), skillsDir };
@@ -65,6 +68,7 @@ async function realPluginFixture() {
         await loadUserSkills(skillsDir),
       );
     },
+    adoptSkillToolGrants: async () => {},
     clearUserSkillPreference: () => {},
   } as unknown as AgentHost;
   return { app: skillRoutes(host), skillsDir };
@@ -213,10 +217,53 @@ describe("skill routes", () => {
       id: "bom-review",
       description: "Review a change.",
       body,
-      declaredTools: ["mcp:mcp-status:get_mcp_status"],
-      interruptOn: { "mcp:mcp-status:get_mcp_status": true },
     });
     expect(await readFile(join(skillsDir, "bom-review", "SKILL.md"))).toEqual(Buffer.from(content));
+  });
+
+  it("moves an imported skill's tool grants into an agent that mounts it", async () => {
+    const skillsDir = await mkdtemp(join(tmpdir(), "pizza-skill-routes-"));
+    const agentsDir = await mkdtemp(join(tmpdir(), "pizza-agent-routes-"));
+    roots.push(skillsDir, agentsDir);
+    let catalog = new Map();
+    const host = {
+      skillsDirectory: async () => skillsDir,
+      skillFor: async (id: string) => catalog.get(id),
+      reloadSkills: async () => {
+        catalog = await loadUserSkills(skillsDir);
+      },
+      adoptSkillToolGrants: async () => {
+        await migrateSkillToolGrants(skillsDir, agentsDir);
+      },
+      clearUserSkillPreference: () => {},
+    } as unknown as AgentHost;
+    const form = new FormData();
+    form.set("file", new File([[
+      "---",
+      "name: mailer",
+      "description: Sends reviewed mail.",
+      "tools:",
+      "  - mcp:mail:send",
+      "interruptOn:",
+      "  mcp:mail:send: true",
+      "---",
+      "# Mailer",
+    ].join("\n")], "SKILL.md"));
+
+    const response = await skillRoutes(host).request("/skills/import", { method: "POST", body: form });
+
+    expect(response.status).toBe(201);
+    const skillMd = await readFile(join(skillsDir, "mailer", "SKILL.md"), "utf8");
+    expect(skillMd).not.toMatch(/^(tools|interruptOn):/m);
+    expect(skillMd).toMatch(/^description: Sends reviewed mail\.$/m);
+    const agent = parseAgentMd("mailer", await readFile(join(agentsDir, "mailer.md"), "utf8"), {
+      source: "user",
+    });
+    expect(agent).toMatchObject({
+      declaredTools: ["mcp:mail:send"],
+      skills: ["mailer"],
+      interruptOn: { "mcp:mail:send": true },
+    });
   });
 
   it("returns Markdown validation details", async () => {
@@ -259,8 +306,6 @@ describe("skill routes", () => {
       id: "imported-review",
       description: "Review changes: report actionable findings.",
       body: "# Review",
-      declaredTools: ["mcp:mcp-status:get_mcp_status"],
-      interruptOn: { "mcp:mcp-status:get_mcp_status": true },
     });
     expect(await readFile(join(skillsDir, "imported-review", "SKILL.md"), "utf8")).toBe(content);
     const loaded = await app.request("/skills/imported-review");
@@ -322,25 +367,6 @@ describe("skill routes", () => {
     expect(await readFile(join(skillsDir, "review", "references", "api.md"), "utf8")).toBe("# API");
   });
 
-  it("persists declared tools into the SKILL.md frontmatter", async () => {
-    const { app, skillsDir } = await fixture();
-    const response = await app.request("/skills", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        id: "review",
-        ...bundle,
-        declaredTools: ["mcp:mcp-status:get_mcp_status", "builtin:eval"],
-      }),
-    });
-
-    expect(response.status).toBe(201);
-    const md = await readFile(join(skillsDir, "review", "SKILL.md"), "utf8");
-    expect(md).toContain(
-      'tools:\n  - "mcp:mcp-status:get_mcp_status"\n  - "builtin:eval"',
-    );
-  });
-
   it("creates a user override when patching a built-in skill", async () => {
     const source = "builtin";
     const { app, skillsDir } = await fixture(async (id) =>
@@ -351,8 +377,6 @@ describe("skill routes", () => {
             description: "Shipped review.",
             source,
             files: [],
-            declaredTools: [],
-            interruptOn: {},
           }
         : undefined,
     );
@@ -379,30 +403,30 @@ describe("skill routes", () => {
   it("reloads a patched plugin skill as a user override with plugin provenance", async () => {
     const { app, skillsDir } = await realPluginFixture();
 
-    const response = await app.request("/skills/health-report", {
+    const response = await app.request("/skills/calendar", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        name: "Health Report",
-        description: "Customized health report.",
-        body: "# Customized Health Report",
+        name: "Calendar",
+        description: "Customized calendar.",
+        body: "# Customized Calendar",
       }),
     });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      id: "health-report",
-      description: "Customized health report.",
+      id: "calendar",
+      description: "Customized calendar.",
       source: "user",
       overrides: "plugin",
     });
     expect(
-      await readFile(join(skillsDir, "health-report", "SKILL.md"), "utf8"),
-    ).toContain('description: "Customized health report."');
+      await readFile(join(skillsDir, "calendar", "SKILL.md"), "utf8"),
+    ).toContain('description: "Customized calendar."');
 
-    const reloaded = await app.request("/skills/health-report");
+    const reloaded = await app.request("/skills/calendar");
     expect(await reloaded.json()).toMatchObject({
-      id: "health-report",
+      id: "calendar",
       source: "user",
       overrides: "plugin",
     });
@@ -446,8 +470,6 @@ describe("skill routes", () => {
               source: "user",
               overrides,
               files: [],
-              declaredTools: [],
-              interruptOn: {},
             }
           : undefined,
       );
@@ -481,67 +503,6 @@ describe("skill routes", () => {
     expect(md).toContain('name: "web-researcher"');
     expect(md).toContain('description: "Use for web: searching and extraction."');
     expect(md).toContain('metadata:\n  display-name: "Web Researcher"');
-  });
-
-  it("persists approval policy for a declared tool", async () => {
-    const { app, skillsDir } = await fixture();
-    const response = await app.request("/skills", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        id: "review",
-        ...bundle,
-        declaredTools: ["mcp:outlook:send_email"],
-        interruptOn: {
-          "mcp:outlook:send_email": {
-            allowedDecisions: ["approve", "edit", "reject"],
-          },
-        },
-      }),
-    });
-
-    expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({
-      interruptOn: {
-        "mcp:outlook:send_email": {
-          allowedDecisions: ["approve", "edit", "reject"],
-        },
-      },
-    });
-    const md = await readFile(join(skillsDir, "review", "SKILL.md"), "utf8");
-    expect(md).toContain('interruptOn:\n  "mcp:outlook:send_email":');
-  });
-
-  it("rejects approval policy for a tool the skill does not declare", async () => {
-    const { app } = await fixture();
-    const response = await app.request("/skills", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        id: "review",
-        ...bundle,
-        declaredTools: [],
-        interruptOn: { "mcp:outlook:send_email": true },
-      }),
-    });
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({
-      error: "invalid",
-      detail: expect.stringContaining("is not declared"),
-    });
-  });
-
-  it("rejects a malformed tool ref", async () => {
-    const { app } = await fixture();
-    const response = await app.request("/skills", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: "review", ...bundle, declaredTools: ["not-a-ref"] }),
-    });
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ error: "invalid" });
   });
 
   it("round-trips binary bundle files as base64 without changing bytes", async () => {

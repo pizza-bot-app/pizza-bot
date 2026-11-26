@@ -1,14 +1,14 @@
-import type { SkillCatalog, SkillCatalogEntry } from "./skill.js";
+import type { AgentCatalog, AgentCatalogEntry } from "./agent-definition.js";
 import { expandToolPattern, isWildcard, type ToolCatalog } from "./wildcard.js";
 
-export type SkillReadinessStatus = "loading" | "ready" | "unavailable";
+export type AgentReadinessStatus = "loading" | "ready" | "unavailable";
 
-export interface SkillReadiness {
-  status: SkillReadinessStatus;
+export interface AgentReadiness {
+  status: AgentReadinessStatus;
   detail?: string;
 }
 
-export interface SkillAvailability extends SkillReadiness {
+export interface AgentAvailability extends AgentReadiness {
   id: string;
   name: string;
 }
@@ -18,29 +18,35 @@ export interface McpDependencyState {
   detail?: string;
 }
 
-export interface SkillReadinessContext {
+export interface AgentReadinessContext {
   catalog: ToolCatalog;
   tools: ReadonlySet<string>;
   mcpServers: ReadonlyMap<string, McpDependencyState>;
   builtins: ReadonlySet<string>;
+  /** Enabled skill ids an agent may mount. */
+  skills: ReadonlySet<string>;
 }
 
-function unavailable(detail: string): SkillReadiness {
+function unavailable(detail: string): AgentReadiness {
   return { status: "unavailable", detail };
 }
 
-function loading(detail: string): SkillReadiness {
+function loading(detail: string): AgentReadiness {
   return { status: "loading", detail };
 }
 
-/** A skill is callable only when every declared dependency is usable. */
-export function evaluateSkillReadiness(
-  skill: SkillCatalogEntry,
-  context: SkillReadinessContext,
-): SkillReadiness {
+/** An agent is callable only when every declared tool and skill is usable. */
+export function evaluateAgentReadiness(
+  agent: Pick<AgentCatalogEntry, "declaredTools" | "skills">,
+  context: AgentReadinessContext,
+): AgentReadiness {
   let pending: string | undefined;
 
-  for (const ref of skill.declaredTools) {
+  for (const skill of agent.skills) {
+    if (!context.skills.has(skill)) return unavailable(`skill ${skill} is missing or disabled`);
+  }
+
+  for (const ref of agent.declaredTools) {
     if (ref.startsWith("builtin:")) {
       if (!context.builtins.has(ref)) return unavailable(`${ref} is unavailable`);
       continue;
@@ -80,19 +86,19 @@ export function evaluateSkillReadiness(
   return pending ? loading(pending) : { status: "ready" };
 }
 
-export function projectSkillReadiness(
-  skills: SkillCatalog,
-  context: SkillReadinessContext,
+export function projectAgentReadiness(
+  agents: AgentCatalog,
+  context: AgentReadinessContext,
 ): {
-  ready: SkillCatalog;
-  availability: SkillAvailability[];
+  ready: AgentCatalog;
+  availability: AgentAvailability[];
 } {
-  const ready: SkillCatalog = new Map();
-  const availability: SkillAvailability[] = [];
-  for (const [id, skill] of skills) {
-    const state = evaluateSkillReadiness(skill, context);
-    availability.push({ id, name: skill.name, ...state });
-    if (state.status === "ready") ready.set(id, skill);
+  const ready: AgentCatalog = new Map();
+  const availability: AgentAvailability[] = [];
+  for (const [id, agent] of agents) {
+    const state = evaluateAgentReadiness(agent, context);
+    availability.push({ id, name: agent.name, ...state });
+    if (state.status === "ready") ready.set(id, agent);
   }
   return { ready, availability };
 }

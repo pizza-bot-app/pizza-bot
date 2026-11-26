@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import {
+  Bot,
   BookOpen,
   Cable,
   LoaderCircle,
@@ -23,6 +24,7 @@ export interface PluginsModuleProps {
   onImport: (file: File) => Promise<{ name: string }>;
   onDelete: (name: string) => Promise<boolean>;
   onRefresh: (name: string) => Promise<void>;
+  onOpenAgents?: () => void;
   onOpenSkills?: () => void;
   onOpenMcpServers?: () => void;
 }
@@ -43,6 +45,7 @@ export function PluginsModule({
   onImport,
   onDelete,
   onRefresh,
+  onOpenAgents,
   onOpenSkills,
   onOpenMcpServers,
 }: PluginsModuleProps) {
@@ -93,6 +96,7 @@ export function PluginsModule({
             plugin={selected}
             onBack={backToList}
             onRefresh={onRefresh}
+            onOpenAgents={onOpenAgents}
             onOpenSkills={onOpenSkills}
             onOpenMcpServers={onOpenMcpServers}
             onRemove={() =>
@@ -121,6 +125,7 @@ function PluginView({
   onBack,
   onRefresh,
   onRemove,
+  onOpenAgents,
   onOpenSkills,
   onOpenMcpServers,
 }: {
@@ -128,6 +133,7 @@ function PluginView({
   onBack?: () => void;
   onRefresh: (name: string) => Promise<void>;
   onRemove: () => void;
+  onOpenAgents?: () => void;
   onOpenSkills?: () => void;
   onOpenMcpServers?: () => void;
 }) {
@@ -136,6 +142,7 @@ function PluginView({
   const label = plugin.displayName ?? plugin.name;
   const loaded = !plugin.status || plugin.status === "loaded";
   const contributions = [
+    { singular: "agent", plural: "agents", count: plugin.contributions.agents, icon: Bot, open: onOpenAgents },
     { singular: "skill", plural: "skills", count: plugin.contributions.skills, icon: BookOpen, open: onOpenSkills },
     {
       singular: "MCP server",

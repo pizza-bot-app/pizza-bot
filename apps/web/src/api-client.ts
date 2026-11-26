@@ -10,11 +10,16 @@ import type {
   ModelCatalogStatus,
   ProviderAuthMethod,
   ProviderFieldOption,
-  SkillInterruptOn,
+  InterruptOnPolicy,
   CreateLocalFolderInput,
   LocalFolder,
   LocalFolderBrowseResult,
   LocalFolderList,
+  GraphSpec,
+  Todo,
+  TodoAssignment,
+  TodoCreateInput,
+  TodoPatch,
 } from "@pizza-bot/core";
 import type { ThreadStateValues } from "@pizza-bot/core";
 import {
@@ -165,13 +170,24 @@ export class ApiClient {
     return this.json("list threads", "/threads/list");
   }
 
-  async createThread(threadId: string, folderId?: string): Promise<void> {
+  async createThread(threadId: string, folderId?: string, agentId?: string): Promise<void> {
+    const metadata = {
+      ...(folderId ? { folder_id: folderId } : {}),
+      ...(agentId ? { agent_id: agentId } : {}),
+    };
     await this.send("create thread", "/threads", {
       method: "POST",
       body: {
         thread_id: threadId,
-        ...(folderId ? { metadata: { folder_id: folderId } } : {}),
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       },
+    });
+  }
+
+  /** The agent's pinned home thread, created on first use. */
+  async openAgentHome(agentId: string): Promise<ThreadInfo> {
+    return this.json("open agent conversation", `/agents/${encodeURIComponent(agentId)}/home`, {
+      method: "POST",
     });
   }
 
@@ -199,6 +215,41 @@ export class ApiClient {
         method: "DELETE",
       }),
     );
+  }
+
+  async listTodos(): Promise<Todo[]> {
+    return this.json("list todos", "/todos");
+  }
+
+  async createTodo(input: TodoCreateInput): Promise<Todo> {
+    return this.json("create todo", "/todos", { method: "POST", body: input });
+  }
+
+  async updateTodo(todoId: string, patch: TodoPatch & TodoAssignment): Promise<Todo> {
+    return this.json("update todo", `/todos/${encodeURIComponent(todoId)}`, {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+
+  async deleteTodo(todoId: string): Promise<boolean> {
+    return deletedFlag(
+      await this.json("delete todo", `/todos/${encodeURIComponent(todoId)}`, {
+        method: "DELETE",
+      }),
+    );
+  }
+
+  async linkTodoThread(todoId: string, threadId: string): Promise<Todo> {
+    return this.json("link todo thread", todoThreadPath(todoId, threadId), { method: "PUT" });
+  }
+
+  async unlinkTodoThread(todoId: string, threadId: string): Promise<Todo> {
+    return this.json("unlink todo thread", todoThreadPath(todoId, threadId), { method: "DELETE" });
+  }
+
+  async checkInTodo(todoId: string): Promise<{ threadId: string; runId: string }> {
+    return this.json("check in", `/todos/${encodeURIComponent(todoId)}/check-in`, { method: "POST" });
   }
 
   async watchThreadChanges(
@@ -298,6 +349,38 @@ export class ApiClient {
   /** Drafts a skill from a natural-language description. */
   async generateSkill(prompt: string): Promise<SkillDraft> {
     return this.json("generate skill", "/skills/generate", { method: "POST", body: { prompt } });
+  }
+
+  async listAgents(): Promise<AgentCatalogInfo> {
+    return this.json("list agents", "/agents");
+  }
+
+  async getAgent(id: string): Promise<AgentDefinition | undefined> {
+    return this.optional("get agent", `/agents/${encodeURIComponent(id)}`);
+  }
+
+  async createAgent(definition: AgentDefinition): Promise<AgentDefinition> {
+    return this.json("create agent", "/agents", { method: "POST", body: definition });
+  }
+
+  async updateAgent(id: string, definition: AgentDefinition): Promise<AgentDefinition> {
+    return this.json("update agent", `/agents/${encodeURIComponent(id)}`, { method: "PATCH", body: definition });
+  }
+
+  async setAgentEnabled(id: string, enabled: boolean): Promise<AgentCatalogEntryInfo> {
+    return this.json("update agent enablement", `/agents/${encodeURIComponent(id)}/enabled`, {
+      method: "PUT",
+      body: { enabled },
+    });
+  }
+
+  async deleteAgent(id: string): Promise<boolean> {
+    return deletedFlag(await this.json("delete agent", `/agents/${encodeURIComponent(id)}`, { method: "DELETE" }));
+  }
+
+  /** Drafts an agent, with tools chosen from the connected catalog. */
+  async generateAgent(prompt: string): Promise<AgentDraft> {
+    return this.json("generate agent", "/agents/generate", { method: "POST", body: { prompt } });
   }
 
   async listMcpServers(): Promise<McpServerRow[]> {
@@ -443,6 +526,19 @@ export class ApiClient {
     return toRunIds(
       await this.json("run trigger", `/triggers/${encodeURIComponent(id)}/run`, { method: "POST", body: {} }),
     );
+  }
+
+  async listGraphs(): Promise<GraphListing> {
+    return this.json("list graphs", "/graphs");
+  }
+
+  /** Returns undefined for a missing or unparsable graph. */
+  async getGraph(id: string): Promise<GraphSpec | undefined> {
+    return this.optional("get graph", `/graphs/${encodeURIComponent(id)}`);
+  }
+
+  async listGraphRuns(id: string): Promise<ThreadInfo[]> {
+    return this.json("list graph runs", `/graphs/${encodeURIComponent(id)}/runs`);
   }
 
   /** Returns highlighted FTS hits. */
@@ -609,6 +705,10 @@ export class ApiClient {
   }
 }
 
+function todoThreadPath(todoId: string, threadId: string): string {
+  return `/todos/${encodeURIComponent(todoId)}/threads/${encodeURIComponent(threadId)}`;
+}
+
 async function fetchWithTimeout(
   doFetch: typeof fetch,
   url: string,
@@ -753,8 +853,22 @@ export interface ThreadInfo {
   parentThreadId?: string;
   parentCheckpointId?: string;
   modelId?: string;
+  /** Set for a graph run; the thread renders as a graph, not a conversation. */
+  graphId?: string;
+  /** The agent this thread talks to; absent means Pizza Bot. Fixed at creation. */
+  agentId?: string;
+  /** The agent's pinned home thread. */
+  agentHome?: boolean;
+  /** An agent's work thread for a Todo; listed only while it awaits the user. */
+  background?: true;
+  todoId?: string;
   lastMessage?: string;
   lastMessageRole?: string;
+}
+
+export interface GraphListing {
+  graphs: GraphSpec[];
+  invalid: Array<{ file: string; errors: string[] }>;
 }
 
 export interface FolderInfo {
@@ -856,15 +970,9 @@ export interface SkillCatalogEntryInfo {
   /** The skill folder is a symlink; it is read-only here and edited at `linkTarget`. */
   linked?: boolean;
   linkTarget?: string;
-  declaredTools: string[];
   enabled: boolean;
-  status: "disabled" | "loading" | "ready" | "unavailable";
-  statusDetail?: string;
-  mcpDependencies: Array<{
-    id: string;
-    enabled: boolean;
-    status: McpServerRow["status"] | "missing";
-  }>;
+  /** Ids of the agents that mount this skill; an unclaimed skill is Pizza Bot's own. */
+  usedBy?: string[];
 }
 
 export interface SkillCatalogInfo {
@@ -880,9 +988,8 @@ export interface SkillSiblingFile {
 }
 
 /**
- * Name, description, body, and declared tools compose `SKILL.md`; `files`
- * contains sibling resources. Editing a built-in or plugin bundle creates a
- * user override.
+ * Name, description, and body compose `SKILL.md`; `files` contains sibling
+ * resources. Editing a built-in or plugin bundle creates a user override.
  */
 export interface SkillBundle {
   id: string;
@@ -893,19 +1000,62 @@ export interface SkillBundle {
   source: "plugin" | "builtin" | "user";
   overrides?: "plugin" | "builtin";
   pluginName?: string;
-  /** Tool refs (`mcp:<server>:<tool>` / wildcard / `builtin:eval`) the skill declares. */
-  declaredTools: string[];
-  /** Declared tool calls that pause for a human decision before execution. */
-  interruptOn: SkillInterruptOn;
 }
 
-/** A gen-AI skill draft: every editable field, pre-filtered to real tool refs. */
 export interface SkillDraft {
   name: string;
   description: string;
   body: string;
+}
+
+export interface AgentCatalogEntryInfo {
+  id: string;
+  name: string;
+  description: string;
+  source: "plugin" | "builtin" | "user";
+  overrides?: "plugin" | "builtin";
+  pluginName?: string;
+  /** Provider-qualified model id; absent inherits the conversation model. */
+  model?: string;
   declaredTools: string[];
-  interruptOn: SkillInterruptOn;
+  skills: string[];
+  interruptOn: InterruptOnPolicy;
+  enabled: boolean;
+  status: "disabled" | "loading" | "ready" | "unavailable";
+  statusDetail?: string;
+  mcpDependencies: Array<{
+    id: string;
+    enabled: boolean;
+    status: McpServerRow["status"] | "missing";
+  }>;
+}
+
+export interface AgentCatalogInfo {
+  agents: AgentCatalogEntryInfo[];
+}
+
+/** The editable definition: frontmatter fields plus the system prompt body. */
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  description: string;
+  systemPrompt: string;
+  model?: string;
+  declaredTools: string[];
+  skills: string[];
+  interruptOn: InterruptOnPolicy;
+  source: "plugin" | "builtin" | "user";
+  overrides?: "plugin" | "builtin";
+  pluginName?: string;
+}
+
+/** A gen-AI agent draft, pre-filtered to real tool refs. */
+export interface AgentDraft {
+  name: string;
+  description: string;
+  body: string;
+  declaredTools: string[];
+  interruptOn: InterruptOnPolicy;
 }
 
 export type McpServerEntryWire =
@@ -933,7 +1083,7 @@ export interface McpServerRow {
   toolCount: number;
   crashedAt?: string;
   detail?: string;
-  dependentSkills: Array<{
+  dependentAgents: Array<{
     id: string;
     name: string;
     source: "plugin" | "builtin" | "user";
@@ -962,7 +1112,7 @@ export interface PluginInfo {
   /** The plugin folder is a symlink; removing it drops only the link. */
   linked?: boolean;
   linkTarget?: string;
-  contributions: { skills: number; mcpServers: number };
+  contributions: { agents: number; skills: number; mcpServers: number };
   materialization?: {
     state: "synced" | "stale" | "error";
     sourceRoots: string[];

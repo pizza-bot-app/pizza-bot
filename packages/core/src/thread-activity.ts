@@ -6,6 +6,7 @@ export const threadActivityOutcomeSchema = z.enum([
   "timeout",
   "interrupted",
   "cancelled",
+  "message",
 ]);
 export type ThreadActivityOutcome = z.infer<
   typeof threadActivityOutcomeSchema

@@ -2,10 +2,13 @@ import { Fragment } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   BookOpen,
+  Bot,
   Brain,
   Cable,
   Inbox,
+  ListTodo,
   MoreHorizontal,
+  Network,
   Pizza,
   Puzzle,
   ScrollText,
@@ -42,16 +45,34 @@ const inboxDestination: NavDestination = {
   icon: Inbox,
 };
 
+const todosDestination: NavDestination = {
+  view: "todos",
+  label: L.todosSection,
+  icon: ListTodo,
+};
+
 const automationsDestination: NavDestination = {
   view: "automations",
   label: L.automationsSection,
   icon: Workflow,
 };
 
+const graphsDestination: NavDestination = {
+  view: "graphs",
+  label: L.graphsSection,
+  icon: Network,
+};
+
 const memoriesDestination: NavDestination = {
   view: "memories",
   label: L.memoriesSection,
   icon: Brain,
+};
+
+const agentsDestination: NavDestination = {
+  view: "agents",
+  label: L.agentsSection,
+  icon: Bot,
 };
 
 const skillsDestination: NavDestination = {
@@ -142,19 +163,23 @@ export function AppNavigation({
 }: AppNavigationProps) {
   const desktopDestinations = [
     inboxDestination,
+    todosDestination,
+    agentsDestination,
     skillsDestination,
     mcpDestination,
     ...(enableMemories ? [memoriesDestination] : []),
-    ...(enableAutomations ? [automationsDestination] : []),
+    ...(enableAutomations ? [automationsDestination, graphsDestination] : []),
   ];
   const mobileDestinations = [
     inboxDestination,
+    todosDestination,
+    agentsDestination,
     skillsDestination,
-    mcpDestination,
   ];
   const mobileFeatureDestinations = [
+    mcpDestination,
     ...(enableMemories ? [memoriesDestination] : []),
-    ...(enableAutomations ? [automationsDestination] : []),
+    ...(enableAutomations ? [automationsDestination, graphsDestination] : []),
   ];
   const utilityDestinations = [
     pluginsDestination,

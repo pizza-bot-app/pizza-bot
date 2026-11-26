@@ -14,6 +14,8 @@ interface TriggerRow {
   kind: string;
   name: string | null;
   prompt: string | null;
+  graph_id: string | null;
+  todo_id: string | null;
   enabled: number;
   cron: string | null;
   timezone: string | null;
@@ -31,6 +33,7 @@ interface TriggerOccurrenceRow {
   status: string;
   attempt: number;
   prompt_override: string | null;
+  input_override: string | null;
   thread_id: string | null;
   run_id: string | null;
   run_status: string | null;
@@ -48,6 +51,7 @@ export interface CreateTriggerOccurrence {
   reason: TriggerOccurrenceReason;
   now: string;
   promptOverride?: string;
+  inputOverride?: unknown;
 }
 
 export class TriggerStore {
@@ -101,6 +105,18 @@ export class TriggerStore {
     if (!columns.some((column) => column.name === "name")) {
       this.db.exec("ALTER TABLE triggers ADD COLUMN name TEXT");
     }
+    if (!columns.some((column) => column.name === "graph_id")) {
+      this.db.exec("ALTER TABLE triggers ADD COLUMN graph_id TEXT");
+    }
+    if (!columns.some((column) => column.name === "todo_id")) {
+      this.db.exec("ALTER TABLE triggers ADD COLUMN todo_id TEXT");
+    }
+    const occurrenceColumns = this.db
+      .prepare<[], { name: string }>("PRAGMA table_info(trigger_occurrences)")
+      .all();
+    if (!occurrenceColumns.some((column) => column.name === "input_override")) {
+      this.db.exec("ALTER TABLE trigger_occurrences ADD COLUMN input_override TEXT");
+    }
   }
 
   /** The shared database handle is owned by `openAppDatabase`. */
@@ -111,8 +127,10 @@ export class TriggerStore {
     const row: TriggerRow = {
       id: def.id,
       kind: def.kind,
-      name: normalizeName(def.name),
+      name: blankToNull(def.name),
       prompt: def.prompt ?? null,
+      graph_id: blankToNull(def.graphId),
+      todo_id: blankToNull(def.todoId),
       enabled: def.enabled === false ? 0 : 1,
       cron: def.cron ?? null,
       timezone: def.timezone ?? null,
@@ -124,10 +142,10 @@ export class TriggerStore {
     this.db
       .prepare(
         `INSERT INTO triggers
-           (id, kind, name, prompt, enabled, cron, timezone, webhook_secret,
+           (id, kind, name, prompt, graph_id, todo_id, enabled, cron, timezone, webhook_secret,
             created_at, last_run_at, last_thread_id)
          VALUES
-           (@id, @kind, @name, @prompt, @enabled, @cron, @timezone, @webhook_secret,
+           (@id, @kind, @name, @prompt, @graph_id, @todo_id, @enabled, @cron, @timezone, @webhook_secret,
             @created_at, @last_run_at, @last_thread_id)`,
       )
       .run(row);
@@ -154,6 +172,14 @@ export class TriggerStore {
     return rows.map(toTrigger);
   }
 
+  /** The check-in schedule a Todo owns, if any. */
+  forTodo(todoId: string): TriggerDef | undefined {
+    const row = this.db
+      .prepare<[string], TriggerRow>("SELECT * FROM triggers WHERE todo_id = ? ORDER BY created_at LIMIT 1")
+      .get(todoId);
+    return row ? toTrigger(row) : undefined;
+  }
+
   get(id: string): TriggerDef | undefined {
     const row = this.db.prepare<[string], TriggerRow>("SELECT * FROM triggers WHERE id = ?").get(id);
     return row ? toTrigger(row) : undefined;
@@ -171,7 +197,7 @@ export class TriggerStore {
     this.db
       .prepare(
         `UPDATE triggers SET
-           kind = @kind, name = @name, prompt = @prompt, enabled = @enabled,
+           kind = @kind, name = @name, prompt = @prompt, graph_id = @graph_id, enabled = @enabled,
            cron = @cron, timezone = @timezone, webhook_secret = @webhook_secret,
            last_run_at = @last_run_at, last_thread_id = @last_thread_id
          WHERE id = @id`,
@@ -179,8 +205,9 @@ export class TriggerStore {
       .run({
         id,
         kind: merged.kind,
-        name: normalizeName(merged.name),
+        name: blankToNull(merged.name),
         prompt: merged.prompt ?? null,
+        graph_id: blankToNull(merged.graphId),
         enabled: merged.enabled === false ? 0 : 1,
         cron: merged.cron ?? null,
         timezone: merged.timezone ?? null,
@@ -217,10 +244,10 @@ export class TriggerStore {
       .prepare(
         `INSERT OR IGNORE INTO trigger_occurrences
            (id, trigger_id, scheduled_at, reason, status, attempt, prompt_override,
-            created_at, updated_at)
+            input_override, created_at, updated_at)
          VALUES
            (@id, @trigger_id, @scheduled_at, @reason, 'pending', 0, @prompt_override,
-            @created_at, @updated_at)`,
+            @input_override, @created_at, @updated_at)`,
       )
       .run({
         id: input.id,
@@ -228,6 +255,8 @@ export class TriggerStore {
         scheduled_at: input.scheduledAt,
         reason: input.reason,
         prompt_override: input.promptOverride ?? null,
+        input_override:
+          input.inputOverride !== undefined ? JSON.stringify(input.inputOverride) : null,
         created_at: input.now,
         updated_at: input.now,
       });
@@ -291,6 +320,29 @@ export class TriggerStore {
       )
       .all()
       .map(rowToOccurrence);
+  }
+
+  listWaitingOccurrences(): TriggerOccurrence[] {
+    return this.db
+      .prepare<[], TriggerOccurrenceRow>(
+        `SELECT * FROM trigger_occurrences
+         WHERE status = 'waiting'
+         ORDER BY scheduled_at ASC`,
+      )
+      .all()
+      .map(rowToOccurrence);
+  }
+
+  /** Move a `waiting` occurrence back to `running` so recovery can launch it. */
+  reopenWaitingOccurrence(id: string, now: string): boolean {
+    return (
+      this.db
+        .prepare(
+          `UPDATE trigger_occurrences SET status = 'running', updated_at = ?
+           WHERE id = ? AND status = 'waiting'`,
+        )
+        .run(now, id).changes === 1
+    );
   }
 
   /**
@@ -363,20 +415,34 @@ export class TriggerStore {
     }).immediate();
   }
 
-  completeOccurrenceByRunId(
+  /**
+   * Record a run ending. A paused run leaves its occurrence `waiting`, and the
+   * resumed run (a new run id on the same thread) closes it out.
+   */
+  completeOccurrenceRun(
     runId: string,
+    threadId: string,
     runStatus: RunStatus,
     now: string,
   ): TriggerOccurrence | undefined {
     return this.db.transaction(() => {
-      const occurrence = this.findOccurrenceByRunId(runId);
+      const waitingRow = this.db
+        .prepare<[string], TriggerOccurrenceRow>(
+          `SELECT * FROM trigger_occurrences
+           WHERE thread_id = ? AND status = 'waiting'
+           ORDER BY updated_at DESC LIMIT 1`,
+        )
+        .get(threadId);
+      const occurrence =
+        this.findOccurrenceByRunId(runId) ?? (waitingRow ? rowToOccurrence(waitingRow) : undefined);
       if (!occurrence) return undefined;
-      const status = runStatus === "success" ? "succeeded" : "failed";
+      const status =
+        runStatus === "success" ? "succeeded" : runStatus === "interrupted" ? "waiting" : "failed";
       this.db
         .prepare(
           `UPDATE trigger_occurrences
            SET status = ?, run_status = ?, updated_at = ?
-           WHERE id = ? AND status = 'running'`,
+           WHERE id = ? AND status IN ('running', 'waiting')`,
         )
         .run(status, runStatus, now, occurrence.id);
       return this.getOccurrence(occurrence.id);
@@ -393,6 +459,17 @@ export class TriggerStore {
       .run(error, now, id);
   }
 
+  /** Close the paused occurrences of a deleted thread; nothing could answer them. */
+  killWaitingOccurrencesForThread(threadId: string, error: string, now: string): void {
+    this.db
+      .prepare(
+        `UPDATE trigger_occurrences
+         SET status = 'dead', last_error = ?, updated_at = ?
+         WHERE thread_id = ? AND status = 'waiting'`,
+      )
+      .run(error, now, threadId);
+  }
+
   killOccurrence(id: string, error: string, now: string): void {
     this.db
       .prepare(
@@ -404,9 +481,9 @@ export class TriggerStore {
   }
 }
 
-/** A blank name clears it, so the UI falls back to describing the trigger. */
-function normalizeName(name: string | undefined): string | null {
-  const trimmed = name?.trim();
+/** A blank value clears the field, e.g. a name the UI then describes, or a graph target. */
+function blankToNull(value: string | undefined): string | null {
+  const trimmed = value?.trim();
   return trimmed ? trimmed : null;
 }
 
@@ -419,6 +496,8 @@ function toTrigger(row: TriggerRow): TriggerDef {
   };
   if (row.name !== null) def.name = row.name;
   if (row.prompt !== null) def.prompt = row.prompt;
+  if (row.graph_id !== null) def.graphId = row.graph_id;
+  if (row.todo_id !== null) def.todoId = row.todo_id;
   if (row.cron !== null) def.cron = row.cron;
   if (row.timezone !== null) def.timezone = row.timezone;
   if (row.webhook_secret !== null) def.hasWebhookSecret = true;
@@ -439,6 +518,7 @@ function rowToOccurrence(row: TriggerOccurrenceRow): TriggerOccurrence {
     updatedAt: row.updated_at,
   };
   if (row.prompt_override !== null) occurrence.promptOverride = row.prompt_override;
+  if (row.input_override !== null) occurrence.inputOverride = JSON.parse(row.input_override) as unknown;
   if (row.thread_id !== null) occurrence.threadId = row.thread_id;
   if (row.run_id !== null) occurrence.runId = row.run_id;
   if (row.run_status !== null) occurrence.runStatus = row.run_status as RunStatus;

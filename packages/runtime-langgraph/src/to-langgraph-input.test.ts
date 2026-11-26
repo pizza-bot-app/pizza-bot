@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { Command } from "@langchain/langgraph";
 import { toLangGraphInput, withoutResentTurn } from "./stream-protocol.js";
 import { attachmentUrl, type RunInput } from "@pizza-bot/core";
 
@@ -30,6 +31,16 @@ describe("toLangGraphInput", () => {
       { type: "text", text: "look" },
       { type: "file", url: attachmentUrl("a1"), mimeType: "image/png", name: "shot.png" },
     ]);
+  });
+
+  it("seeds graph input state", () => {
+    expect(toLangGraphInput({ graphInput: { body: { a: 1 } } })).toEqual({ input: { body: { a: 1 } } });
+  });
+
+  it("resumes a human-node response keyed by its interrupt id", () => {
+    const out = toLangGraphInput({ command: { interruptId: "i1", response: { ok: true } } });
+    expect(out).toBeInstanceOf(Command);
+    expect((out as Command).resume).toEqual({ i1: { ok: true } });
   });
 });
 

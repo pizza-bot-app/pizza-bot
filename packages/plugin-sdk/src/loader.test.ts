@@ -44,7 +44,7 @@ describe("FsPluginLoader", () => {
     const manifest = await loader.readManifest(MANIFEST);
     await loader.load(manifest, EXAMPLE_ROOT, reg);
 
-    expect(reg.skills.has("health-report")).toBe(true);
+    expect(reg.agents.has("health-report")).toBe(true);
 
     expect(reg.mcpServers.has("mcp-status")).toBe(true);
     expect(reg.mcpServers.get("mcp-status")?.qualifiedId).toBe(
@@ -67,7 +67,7 @@ describe("FsPluginLoader", () => {
       await loader.load(source.manifest, source.root, reg);
     }
     expect(sources.map(({ manifest }) => manifest.name)).toEqual(["mcp-status"]);
-    expect(reg.skills.has("health-report")).toBe(true);
+    expect(reg.agents.has("health-report")).toBe(true);
     expect(reg.mcpServers.has("mcp-status")).toBe(true);
   });
 
@@ -151,7 +151,7 @@ describe("FsPluginLoader", () => {
     ]);
     const reg = new ContributionRegistry();
     await loader.load(sources[0]!.manifest, sources[0]!.root, reg);
-    expect(reg.skills.has("health-report")).toBe(true);
+    expect(reg.agents.has("health-report")).toBe(true);
   });
 
   it("does not mutate the registry when a late contribution is invalid", async () => {

@@ -209,5 +209,58 @@ describe("ThreadStore: CRUD", () => {
     const store = openThreadStore(file);
     expect(store.get("legacy")?.title).toBe("Existing conversation");
     expect(store.update("legacy", { folderId: "projects" })?.folderId).toBe("projects");
+    expect(store.get("legacy")?.graphId).toBeUndefined();
+    expect(store.create({ threadId: "run", graphId: "triage" }).graphId).toBe("triage");
+    expect(store.update("run", { title: "Triage run" })?.graphId).toBe("triage");
+    expect(store.get("legacy")?.agentId).toBeUndefined();
+    expect(store.create({ threadId: "agent", agentId: "researcher" }).agentId).toBe("researcher");
   });
 });
+
+describe("ThreadStore: agent threads", () => {
+  it("keeps a thread's agent fixed across updates", () => {
+    const s = openThreadStore(tmpDb());
+    s.create({ threadId: "th1", agentId: "researcher" });
+    s.update("th1", { title: "Renamed", pinned: true });
+    expect(s.get("th1")).toMatchObject({ agentId: "researcher", title: "Renamed", pinned: true });
+    expect(s.get("th1")?.agentHome).toBeUndefined();
+  });
+
+  it("finds an agent's single home thread", () => {
+    const s = openThreadStore(tmpDb());
+    s.create({ threadId: "chat", agentId: "researcher" });
+    expect(s.agentHome("researcher")).toBeUndefined();
+    s.create({ threadId: "home", agentId: "researcher", agentHome: true, pinned: true });
+    expect(s.agentHome("researcher")).toMatchObject({ threadId: "home", agentHome: true, pinned: true });
+    expect(() => s.create({ threadId: "home2", agentId: "researcher", agentHome: true })).toThrow();
+    expect(s.agentHome("writer")).toBeUndefined();
+  });
+
+  it("ignores a home flag without an agent", () => {
+    const s = openThreadStore(tmpDb());
+    expect(s.create({ threadId: "th1", agentHome: true }).agentHome).toBeUndefined();
+    expect(s.get("th1")?.agentHome).toBeUndefined();
+  });
+});
+
+describe("ThreadStore: background threads", () => {
+  it("keeps a check-in thread out of the Inbox list until it awaits the user", () => {
+    const s = openThreadStore(tmpDb());
+    s.create({ threadId: "bg", agentId: "researcher", background: true, todoId: "todo-1" });
+    s.create({ threadId: "chat" });
+    expect(s.list().map((t) => t.threadId)).toEqual(["chat"]);
+    expect(s.get("bg")).toMatchObject({ background: true, todoId: "todo-1", agentId: "researcher" });
+
+    s.update("bg", { awaitingAction: true });
+    expect(s.list().map((t) => t.threadId).sort()).toEqual(["bg", "chat"]);
+  });
+
+  it("lists a Todo's work threads newest first", () => {
+    const s = openThreadStore(tmpDb());
+    s.create({ threadId: "first", graphId: "filer", background: true, todoId: "todo-1" });
+    s.create({ threadId: "other", graphId: "filer", background: true, todoId: "todo-2" });
+    s.create({ threadId: "second", agentId: "researcher", background: true, todoId: "todo-1" });
+    expect(s.listByTodo("todo-1").map((t) => t.threadId)).toEqual(["second", "first"]);
+  });
+});
+

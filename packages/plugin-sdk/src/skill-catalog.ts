@@ -5,8 +5,6 @@ import {
   PIZZA_BOT_AGENT,
   SKILLS_ROOT,
   isBinarySkillMimeType,
-  parseDeclaredTools,
-  parseSkillInterruptOn,
   skillMimeType,
   type SkillCatalog,
   type SkillCatalogEntry,
@@ -33,7 +31,7 @@ export async function loadSkillCatalog(
         source: "plugin" as const,
         pluginName: contribution.pluginName,
       };
-      const entry = await readSkillBundle(id, contribution.value, provenance);
+      const entry = await readSkillBundle(id, contribution.value, provenance, log);
       if (entry) {
         catalog.set(id, entry);
         log(`skill "${id}" (${entry.files.length} file(s)) from plugin "${contribution.pluginName}"`);
@@ -91,7 +89,7 @@ async function loadSkillsDirectory(
       continue;
     }
     try {
-      const bundle = await readSkillBundle(id, dir, { source });
+      const bundle = await readSkillBundle(id, dir, { source }, log);
       const skill = bundle && linkTarget ? { ...bundle, linked: true, linkTarget } : bundle;
       if (skill) {
         catalog.set(id, skill);
@@ -141,6 +139,7 @@ async function readSkillBundle(
   provenance:
     | { source: "plugin"; pluginName: string }
     | { source: "builtin" | "user" },
+  log: (msg: string) => void,
 ): Promise<SkillCatalogEntry | null> {
   if (id === PIZZA_BOT_AGENT.id) {
     throw new Error(
@@ -165,8 +164,9 @@ async function readSkillBundle(
   const description = typeof fm.description === "string" ? fm.description : "";
   if (!description) return null;
   const name = displayName(fm, id);
-  const declaredTools = parseDeclaredTools(fm);
-  const interruptOn = parseSkillInterruptOn(fm);
+  if ("tools" in fm || "mcp" in fm || "interruptOn" in fm) {
+    log(`skill "${id}": ignoring tools/interruptOn; tool grants belong to an agent that mounts the skill`);
+  }
 
   const ordered = [skillMd, ...members.filter((m) => m.rel !== SKILL_MD).sort((a, b) => a.rel.localeCompare(b.rel))];
   const files: SkillFile[] = [];
@@ -207,7 +207,7 @@ async function readSkillBundle(
     }
   }
 
-  const base = { id, name, description, files, declaredTools, interruptOn };
+  const base = { id, name, description, files };
   return provenance.source === "plugin"
     ? { ...base, source: "plugin", pluginName: provenance.pluginName }
     : { ...base, source: provenance.source };

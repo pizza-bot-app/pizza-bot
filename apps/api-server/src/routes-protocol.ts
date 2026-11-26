@@ -27,6 +27,18 @@ export function protocolRoutes(host: AgentHost): Hono {
       );
     }
     const cmd = body as ProtocolCommand;
+    // A Todo check-in thread is the agent's work log; the user talks to the agent in its home thread.
+    if (cmd.method === "run.start" && host.threadStore.get(threadId)?.background) {
+      return c.json(
+        {
+          type: "error",
+          id: cmd.id ?? null,
+          error: "work_thread",
+          message: "This is an agent's work on a Todo; message the agent in your conversation with them.",
+        },
+        409,
+      );
+    }
     try {
       const outcome = await dispatchProtocolCommand({
         runs,
@@ -34,8 +46,7 @@ export function protocolRoutes(host: AgentHost): Hono {
         command: cmd,
         stateReader: {
           getState: async (id) => {
-            await host.whenReady();
-            return host.agent.getState(id);
+            return (await host.threadGraph(id)).getState(id);
           },
         },
       });
@@ -141,7 +152,7 @@ export function protocolRoutes(host: AgentHost): Hono {
   app.get("/threads/:thread_id/state", async (c) => {
     await host.whenReady();
     const threadId = c.req.param("thread_id");
-    const state = await host.agent.getState(threadId);
+    const state = await (await host.threadGraph(threadId)).getState(threadId);
     return c.json(toProtocolState(state));
   });
 

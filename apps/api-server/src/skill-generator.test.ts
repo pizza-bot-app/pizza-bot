@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildAgentGeneratorPrompt,
   buildSkillGeneratorPrompt,
+  normalizeAgentDraft,
   normalizeSkillDraft,
   parseSkillDraftJson,
   requiresApproval,
@@ -33,8 +35,23 @@ describe("parseSkillDraftJson", () => {
 });
 
 describe("normalizeSkillDraft", () => {
+  it("returns a tool-free draft with sensible defaults", () => {
+    expect(normalizeSkillDraft({ tools: ["builtin:eval"] })).toEqual({
+      name: "New Skill",
+      description: "New Skill",
+      body: "",
+    });
+    expect(normalizeSkillDraft({ name: "S", description: "d", body: "b" })).toEqual({
+      name: "S",
+      description: "d",
+      body: "b",
+    });
+  });
+});
+
+describe("normalizeAgentDraft", () => {
   it("keeps only refs in the allowed set (plus builtin:eval) and dedupes", () => {
-    const draft = normalizeSkillDraft(
+    const draft = normalizeAgentDraft(
       {
         name: "S",
         description: "d",
@@ -53,10 +70,9 @@ describe("normalizeSkillDraft", () => {
   });
 
   it("falls back to sensible defaults for missing fields", () => {
-    const draft = normalizeSkillDraft({}, tools);
-    expect(draft).toEqual({
-      name: "New Skill",
-      description: "New Skill",
+    expect(normalizeAgentDraft({}, tools)).toEqual({
+      name: "New Agent",
+      description: "New Agent",
       body: "",
       declaredTools: [],
       interruptOn: {},
@@ -64,31 +80,29 @@ describe("normalizeSkillDraft", () => {
   });
 
   it("adds the standard approval policy only to selected side-effect tools", () => {
-    const draft = normalizeSkillDraft(
-      {
-        name: "Mail",
-        tools: [
-          "mcp:outlook:search_email",
-          "mcp:outlook:send_email",
-        ],
-      },
+    const draft = normalizeAgentDraft(
+      { name: "Mail", tools: ["mcp:outlook:search_email", "mcp:outlook:send_email"] },
       tools,
     );
-
     expect(draft.interruptOn).toEqual({
-      "mcp:outlook:send_email": {
-        allowedDecisions: ["approve", "edit", "reject"],
-      },
+      "mcp:outlook:send_email": { allowedDecisions: ["approve", "edit", "reject"] },
     });
   });
 });
 
 describe("buildSkillGeneratorPrompt", () => {
-  it("lists available tool descriptions and directs the model to pre-populate relevant tools", () => {
-    const prompt = buildSkillGeneratorPrompt(tools);
+  it("asks for a playbook without tool grants", () => {
+    const prompt = buildSkillGeneratorPrompt();
+    expect(prompt).toContain('"body"');
+    expect(prompt).not.toContain('"tools"');
+  });
+});
+
+describe("buildAgentGeneratorPrompt", () => {
+  it("lists available tool descriptions and directs the model not to omit relevant tools", () => {
+    const prompt = buildAgentGeneratorPrompt(tools);
     expect(prompt).toContain("- mcp:mcp-status:get_mcp_status: Get MCP server status.");
-    expect(prompt).toContain("do not omit a relevant tool");
-    expect(prompt).toContain("pre-populated in the skill editor");
+    expect(prompt).toContain("do not omit a tool the workflow needs");
   });
 });
 

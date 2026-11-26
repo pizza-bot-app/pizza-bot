@@ -12,7 +12,7 @@ interface NativeNotificationBase {
 
 export type NativeNotificationRequest =
   | (NativeNotificationBase & {
-      kind: "run-complete" | "action-required";
+      kind: "run-complete" | "action-required" | "message";
     })
   | (NativeNotificationBase & {
       kind: "run-failed";
@@ -107,6 +107,11 @@ export function nativeNotificationCopy(
       return {
         title: "Run finished",
         body: `${shortened} has finished.`,
+      };
+    case "message":
+      return {
+        title: "New message",
+        body: `${shortened} sent you a message.`,
       };
   }
 }

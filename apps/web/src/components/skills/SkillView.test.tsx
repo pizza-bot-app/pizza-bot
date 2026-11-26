@@ -1,40 +1,48 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { SkillCatalogEntryInfo } from "@/api-client";
+import { AgentNamesContext } from "../agent-names.js";
 import { SkillView } from "./SkillView.js";
 import { skillUnlinkAction } from "./skill-actions.js";
 
 const skill: SkillCatalogEntryInfo = {
-  id: "shared",
-  name: "Shared",
-  description: "Lives in another repo.",
-  source: "user",
-  declaredTools: [],
+  id: "calendar",
+  name: "Calendar",
+  description: "Schedules.",
+  source: "plugin",
   enabled: true,
-  status: "ready",
-  mcpDependencies: [],
 };
 
 function render(entry: SkillCatalogEntryInfo): string {
   const onUnlink = skillUnlinkAction(entry, vi.fn(), vi.fn());
   return renderToStaticMarkup(
-    <SkillView
-      skill={entry}
-      bundle={undefined}
-      tools={{ servers: [], builtins: [] }}
-      visualState="active"
-      statusLabel="Ready"
-      onEdit={vi.fn()}
-      onUnlink={onUnlink}
-    />,
+    <AgentNamesContext.Provider value={new Map([["google-workspace", "Google Workspace"]])}>
+      <SkillView
+        skill={entry}
+        bundle={null}
+        visualState="active"
+        statusLabel="Enabled"
+        onEdit={vi.fn()}
+        onUnlink={onUnlink}
+      />
+    </AgentNamesContext.Provider>,
   );
 }
 
-const linked = { ...skill, linked: true, linkTarget: "/repos/skills/shared" };
+const custom: SkillCatalogEntryInfo = { ...skill, id: "shared", name: "Shared", source: "user" };
+const linked: SkillCatalogEntryInfo = { ...custom, linked: true, linkTarget: "/repos/skills/shared" };
 
 describe("SkillView", () => {
+  it("names the agents that mount the skill", () => {
+    expect(render({ ...skill, usedBy: ["google-workspace"] })).toContain(">Google Workspace<");
+  });
+
+  it("says Pizza Bot reads an unclaimed skill directly", () => {
+    expect(render(skill)).toContain("Pizza Bot reads it directly");
+  });
+
   it("offers Edit for an ordinary custom skill", () => {
-    expect(render(skill)).toContain("Edit</button>");
+    expect(render(custom)).toContain("Edit</button>");
   });
 
   it("offers Unlink instead of Edit for a linked user skill and names its source folder", () => {
@@ -49,7 +57,7 @@ describe("SkillView", () => {
   });
 
   it("does not offer Unlink for an ordinary custom skill", () => {
-    expect(skillUnlinkAction(skill, vi.fn(), vi.fn())).toBeUndefined();
+    expect(skillUnlinkAction(custom, vi.fn(), vi.fn())).toBeUndefined();
   });
 
   it("confirms that only the link is removed, then deletes it", async () => {

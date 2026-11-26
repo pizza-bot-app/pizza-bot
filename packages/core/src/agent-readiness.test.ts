@@ -1,46 +1,48 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILTIN_EVAL_TOOL_REF,
-  evaluateSkillReadiness,
-  projectSkillReadiness,
-  type SkillCatalogEntry,
-  type SkillReadinessContext,
+  evaluateAgentReadiness,
+  projectAgentReadiness,
+  type AgentCatalogEntry,
+  type AgentReadinessContext,
 } from "./index.js";
 
-function skill(id: string, declaredTools: string[]): SkillCatalogEntry {
+function agent(id: string, declaredTools: string[], skills: string[] = []): AgentCatalogEntry {
   return {
     id,
     name: id,
     description: id,
+    systemPrompt: "",
     source: "user",
     declaredTools,
+    skills,
     interruptOn: {},
-    files: [],
   };
 }
 
-function context(overrides: Partial<SkillReadinessContext> = {}): SkillReadinessContext {
+function context(overrides: Partial<AgentReadinessContext> = {}): AgentReadinessContext {
   return {
     catalog: {},
     tools: new Set(),
     mcpServers: new Map(),
     builtins: new Set([BUILTIN_EVAL_TOOL_REF]),
+    skills: new Set(["calendar"]),
     ...overrides,
   };
 }
 
-describe("evaluateSkillReadiness", () => {
+describe("evaluateAgentReadiness", () => {
   it("makes dependency-free and available built-in skills ready immediately", () => {
-    expect(evaluateSkillReadiness(skill("plain", []), context())).toEqual({ status: "ready" });
+    expect(evaluateAgentReadiness(agent("plain", []), context())).toEqual({ status: "ready" });
     expect(
-      evaluateSkillReadiness(skill("analyst", [BUILTIN_EVAL_TOOL_REF]), context()),
+      evaluateAgentReadiness(agent("analyst", [BUILTIN_EVAL_TOOL_REF]), context()),
     ).toEqual({ status: "ready" });
   });
 
   it("keeps a skill loading while its MCP server is loading", () => {
     expect(
-      evaluateSkillReadiness(
-        skill("mail", ["mcp:outlook:send"]),
+      evaluateAgentReadiness(
+        agent("mail", ["mcp:outlook:send"]),
         context({ mcpServers: new Map([["outlook", { status: "loading" }]]) }),
       ),
     ).toEqual({ status: "loading", detail: "outlook is still loading" });
@@ -53,25 +55,33 @@ describe("evaluateSkillReadiness", () => {
       mcpServers: new Map([["outlook", { status: "ready" }]]),
     });
     expect(
-      evaluateSkillReadiness(
-        skill("mail", ["mcp:outlook:send", "mcp:outlook:search_*"]),
+      evaluateAgentReadiness(
+        agent("mail", ["mcp:outlook:send", "mcp:outlook:search_*"]),
         ctx,
       ),
     ).toEqual({ status: "ready" });
     expect(
-      evaluateSkillReadiness(skill("mail", ["mcp:outlook:delete"]), ctx),
+      evaluateAgentReadiness(agent("mail", ["mcp:outlook:delete"]), ctx),
     ).toEqual({ status: "unavailable", detail: "mcp:outlook:delete was not discovered" });
     expect(
-      evaluateSkillReadiness(skill("mail", ["mcp:outlook:missing_*"]), ctx),
+      evaluateAgentReadiness(agent("mail", ["mcp:outlook:missing_*"]), ctx),
     ).toEqual({ status: "unavailable", detail: "mcp:outlook:missing_* matched no tools" });
   });
 
-  it("projects only ready skills into the callable catalog", () => {
+  it("requires every mounted skill to be enabled", () => {
+    expect(evaluateAgentReadiness(agent("planner", [], ["calendar"]), context())).toEqual({ status: "ready" });
+    expect(evaluateAgentReadiness(agent("planner", [], ["missing"]), context())).toEqual({
+      status: "unavailable",
+      detail: "skill missing is missing or disabled",
+    });
+  });
+
+  it("projects only ready agents into the callable catalog", () => {
     const skills = new Map([
-      ["plain", skill("plain", [])],
-      ["mail", skill("mail", ["mcp:outlook:send"])],
+      ["plain", agent("plain", [])],
+      ["mail", agent("mail", ["mcp:outlook:send"])],
     ]);
-    const projected = projectSkillReadiness(
+    const projected = projectAgentReadiness(
       skills,
       context({ mcpServers: new Map([["outlook", { status: "loading" }]]) }),
     );

@@ -35,6 +35,8 @@ export function Composer({
   prefillToken,
   composerRef,
   history,
+  recipientName = "Pizza Bot",
+  pinnedModel,
 }: {
   threadId: string;
   streaming?: boolean;
@@ -52,6 +54,9 @@ export function Composer({
   prefillToken?: number;
   composerRef?: React.RefObject<HTMLTextAreaElement | null>;
   history?: PromptHistoryCycler;
+  recipientName?: string;
+  /** Shown instead of the model picker when the recipient fixes its own model. */
+  pinnedModel?: { id: string; setBy: string };
 }) {
   const initialDraft = useRef(composerDraftStore.get(threadId)).current;
   const [text, setText] = useState(initialDraft.text);
@@ -322,7 +327,7 @@ export function Composer({
               ? "Queue until approval is resolved…"
               : streaming
               ? "Steer… Enter to queue, ⌘/Ctrl+Enter to send now"
-              : "Message Pizza Bot…"
+              : `Message ${recipientName}…`
           }
           rows={1}
         />
@@ -351,12 +356,18 @@ export function Composer({
               }}
             />
 
-            <ModelCombobox
-              models={models.models}
-              value={model}
-              onChange={setModel}
-              formatModelLabel={(option) => shortModelName(option.displayName)}
-            />
+            {pinnedModel ? (
+              <span className="composer-model-pinned" title={`Set by ${pinnedModel.setBy}`}>
+                {pinnedModelLabel(pinnedModel.id, models)}
+              </span>
+            ) : (
+              <ModelCombobox
+                models={models.models}
+                value={model}
+                onChange={setModel}
+                formatModelLabel={(option) => shortModelName(option.displayName)}
+              />
+            )}
 
           </div>
 
@@ -434,3 +445,9 @@ function AttachmentChip({
     </span>
   );
 }
+
+export function pinnedModelLabel(modelId: string, models: ModelsInfo): string {
+  const known = models.models.find((option) => option.id === modelId);
+  return known ? shortModelName(known.displayName) : modelId;
+}
+

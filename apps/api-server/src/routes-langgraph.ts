@@ -12,10 +12,11 @@ export function langGraphRoutes(host: AgentHost): Hono {
   app.post("/threads", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
       thread_id?: string;
-      metadata?: { folder_id?: unknown };
+      metadata?: { folder_id?: unknown; agent_id?: unknown };
     };
     const threadId = body.thread_id ?? newThreadId();
     const folderId = body.metadata?.folder_id;
+    const agentId = body.metadata?.agent_id;
     if (folderId !== undefined) {
       if (typeof folderId !== "string") {
         return c.json({ error: "metadata.folder_id must be a string" }, 400);
@@ -23,13 +24,37 @@ export function langGraphRoutes(host: AgentHost): Hono {
       if (!host.folderStore.get(folderId)) {
         return c.json({ error: "folder not found" }, 404);
       }
-      host.threadStore.ensure({ threadId, folderId });
+    }
+    if (agentId !== undefined) {
+      if (typeof agentId !== "string") {
+        return c.json({ error: "metadata.agent_id must be a string" }, 400);
+      }
+      if (!(await host.agentDefinition(agentId))) {
+        return c.json({ error: "agent not found" }, 404);
+      }
+      if ((await host.agentCatalog()).find((entry) => entry.id === agentId)?.enabled === false) {
+        return c.json({ error: "that agent is turned off; turn it on in Agents first" }, 409);
+      }
+      const existing = host.threadStore.get(threadId);
+      if (existing && existing.agentId !== agentId) {
+        return c.json({ error: "the thread already exists with a different agent" }, 409);
+      }
+    }
+    if (folderId !== undefined || agentId !== undefined) {
+      host.threadStore.ensure({
+        threadId,
+        ...(folderId !== undefined ? { folderId } : {}),
+        ...(agentId !== undefined ? { agentId } : {}),
+      });
     }
     const now = new Date().toISOString();
     return c.json({
       thread_id: threadId,
       status: "idle",
-      metadata: folderId === undefined ? {} : { folder_id: folderId },
+      metadata: {
+        ...(folderId !== undefined ? { folder_id: folderId } : {}),
+        ...(agentId !== undefined ? { agent_id: agentId } : {}),
+      },
       created_at: now,
       updated_at: now,
     });
@@ -40,7 +65,7 @@ export function langGraphRoutes(host: AgentHost): Hono {
     const body = await c.req.json().catch(() => ({}));
     const { values, as_node } = body as { values?: unknown; as_node?: string };
     const threadId = c.req.param("thread_id");
-    const cp = await host.agent.updateState(threadId, values, as_node);
+    const cp = await (await host.threadGraph(threadId)).updateState(threadId, values, as_node);
     return c.json({ checkpoint_id: cp.checkpointId, thread_id: cp.threadId });
   });
 
@@ -97,7 +122,8 @@ async function collectHistory(
   options: StateHistoryOptions & { limit: number },
 ): Promise<unknown[]> {
   const out: unknown[] = [];
-  for await (const s of host.agent.getStateHistory(threadId, options)) {
+  const graph = await host.threadGraph(threadId);
+  for await (const s of graph.getStateHistory(threadId, options)) {
     out.push(toProtocolState(s));
     if (out.length >= options.limit) break;
   }

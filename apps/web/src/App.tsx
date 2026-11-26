@@ -16,12 +16,23 @@ import {
 } from "./use-thread-slice.js";
 import { protocolStreamStore } from "./protocol-stream-store.js";
 import { resolveApiBase, resolveApiHeaders } from "./api-config.js";
-import { useSkillsAdmin, useMcpServersAdmin, useMemoriesAdmin, useModels, usePluginsAdmin, useProvidersAdmin, useStatus, useTriggers } from "./use-app-data.js";
+import { useAgentsAdmin, useGraphs, useSkillsAdmin, useMcpServersAdmin, useMemoriesAdmin, useModels, usePluginsAdmin, useProvidersAdmin, useStatus, useTodos, useTriggers } from "./use-app-data.js";
 import { PIZZA_BOT_AGENT } from "@pizza-bot/core";
 import { SkillsModule } from "./components/skills/SkillsModule.js";
+import { AgentsModule } from "./components/agents/AgentsModule.js";
+import { AgentNamesContext } from "./components/agent-names.js";
 import { McpServersModule } from "./components/mcp/McpServersModule.js";
 import { MemoriesModule } from "./components/memories/MemoriesModule.js";
 import { TriggerModule } from "./components/schedules/TriggerModule.js";
+import { GraphsModule } from "./components/graphs/GraphsModule.js";
+import { GraphRunPane } from "./components/graphs/GraphRunPane.js";
+import { TodosModule } from "./components/todos/TodosModule.js";
+import type { WorkThreadHint } from "./components/todos/TodoDetail.js";
+import { FlagThreadButton } from "./components/todos/FlagThreadButton.js";
+import { flaggedThreadIds, openTodoForThread } from "./lib/todo-views.js";
+import { knownWorkThreads } from "./lib/todo-ownership.js";
+import { recipientOptions, threadAgent } from "./lib/thread-agent.js";
+import { subscribeSidebarRefresh } from "./sidebar-refresh.js";
 import {
   SettingsModule,
   type SettingsCategory,
@@ -95,7 +106,19 @@ export function App() {
     }),
     [],
   );
-  const skillsAdmin = useSkillsAdmin(client, visibleAdmin.skills);
+  const skillsAdmin = useSkillsAdmin(client, visibleAdmin.skills || visibleAdmin.agents);
+  // Names are needed wherever delegations or "Used by" lists render.
+  const pickingAgents = view === "inbox" || view === "todos";
+  const agentsAdmin = useAgentsAdmin(
+    client,
+    visibleAdmin.agents || visibleAdmin.skills || pickingAgents,
+    visibleAdmin.agents,
+    pickingAgents ? 10_000 : undefined,
+  );
+  const agentNames = useMemo(
+    () => new Map(agentsAdmin.agents.agents.map((entry) => [entry.id, entry.name])),
+    [agentsAdmin.agents],
+  );
   const mcpAdmin = useMcpServersAdmin(client, 5_000, visibleAdmin.mcp);
   const memoriesAdmin = useMemoriesAdmin(client, 5_000, visibleAdmin.memories);
   const pluginsAdmin = usePluginsAdmin(client, visibleAdmin.plugins);
@@ -137,17 +160,71 @@ export function App() {
   );
 
   const triggers = useTriggers(client, 5_000, visibleAdmin.triggers);
+  const graphs = useGraphs(client, 5_000, visibleAdmin.graphs || view === "todos");
+  const todos = useTodos(client);
+  const refreshTodos = todos.refresh;
+  const flaggedThreads = useMemo(() => flaggedThreadIds(todos.todos), [todos.todos]);
+  const [todoFocus, setTodoFocus] = useState<{ id: string; token: number } | null>(null);
+  const openTodo = useCallback((todoId: string) => {
+    setTodoFocus((prev) => ({ id: todoId, token: (prev?.token ?? 0) + 1 }));
+    setView("todos");
+  }, []);
 
   const { theme, persona, features, agent: agentSettings } = useSettings(client);
 
   const [threadTitles, setThreadTitles] = useState<Map<string, string>>(() => new Map());
   const [threadModels, setThreadModels] = useState<Map<string, string>>(() => new Map());
+  // A thread's graph is fixed at creation, so entries are only ever added.
+  const [threadGraphIds, setThreadGraphIds] = useState<Map<string, string>>(() => new Map());
+  const noteGraphThreads = useCallback((rows: Array<Pick<ThreadInfo, "threadId" | "graphId">>) => {
+    setThreadGraphIds((prev) => {
+      const added = rows.filter((row) => row.graphId && !prev.has(row.threadId));
+      if (added.length === 0) return prev;
+      const next = new Map(prev);
+      for (const row of added) next.set(row.threadId, row.graphId!);
+      return next;
+    });
+  }, []);
   const [selectedThreadModels, setSelectedThreadModels] = useState<Map<string, string>>(
     () => new Map(),
   );
+  // A thread's agent is fixed at creation, so entries are only ever added.
+  const [threadAgentIds, setThreadAgentIds] = useState<Map<string, string>>(() => new Map());
+  const noteAgentThreads = useCallback((rows: Array<Pick<ThreadInfo, "threadId" | "agentId">>) => {
+    setThreadAgentIds((prev) => {
+      const added = rows.filter((row) => row.agentId && !prev.has(row.threadId));
+      if (added.length === 0) return prev;
+      const next = new Map(prev);
+      for (const row of added) next.set(row.threadId, row.agentId!);
+      return next;
+    });
+  }, []);
+  // A new conversation's folder and recipient wait here until its first message creates it.
+  const [threadDrafts, setThreadDrafts] = useState<Map<string, { folderId?: string; agentId?: string }>>(
+    () => new Map(),
+  );
+  const threadDraftsRef = useRef(threadDrafts);
+  threadDraftsRef.current = threadDrafts;
+
+  // A Todo's work thread is listed only while it awaits the user, so both sets track each listing.
+  const [backgroundThreadIds, setBackgroundThreadIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [awaitingThreadIds, setAwaitingThreadIds] = useState<ReadonlySet<string>>(() => new Set());
+  const noteBackgroundThreads = useCallback((threadIds: readonly string[]) => {
+    setBackgroundThreadIds((prev) => {
+      const added = threadIds.filter((threadId) => !prev.has(threadId));
+      return added.length === 0 ? prev : new Set([...prev, ...added]);
+    });
+  }, []);
 
   const seedThreadMetadata = useCallback((rows: ThreadInfo[]) => {
-    setThreadCount(rows.length);
+    setThreadCount(rows.filter((row) => !row.background).length);
+    noteGraphThreads(rows);
+    noteAgentThreads(rows);
+    noteBackgroundThreads(rows.filter((row) => row.background).map((row) => row.threadId));
+    setAwaitingThreadIds((prev) => {
+      const next = new Set(rows.filter((row) => row.awaitingAction).map((row) => row.threadId));
+      return next.size === prev.size && [...next].every((threadId) => prev.has(threadId)) ? prev : next;
+    });
     setThreadTitles((prev) => {
       let changed = false;
       const next = new Map(prev);
@@ -174,7 +251,7 @@ export function App() {
     // overriding a thread the user already opened.
     if (!didAutoOpenRef.current && activeThreadIdRef.current === null) {
       didAutoOpenRef.current = true;
-      const threadId = initialThreadId(rows);
+      const threadId = initialThreadId(rows.filter((row) => !row.background));
       if (threadId) {
         setOpenedThreads((prev) =>
           prev.has(threadId) ? prev : new Set(prev).add(threadId),
@@ -182,7 +259,29 @@ export function App() {
         setActiveThreadId(threadId);
       }
     }
-  }, []);
+  }, [noteAgentThreads, noteBackgroundThreads, noteGraphThreads]);
+
+  // The thread-change stream also reports Todo edits, including the orchestrator's.
+  const onMetadataChanged = useCallback(() => {
+    refreshTodos().catch((error: unknown) => console.error("todo refresh failed", error));
+  }, [refreshTodos]);
+  // Outside the Inbox no Sidebar follows the stream, so the Todos view follows it itself.
+  const viewingTodos = view === "todos";
+  useEffect(() => {
+    if (!viewingTodos) return;
+    return subscribeSidebarRefresh(
+      client,
+      () => Promise.all([refreshTodos(), client.listThreads().then(seedThreadMetadata)]),
+      (message, error) => console.error(message, error),
+    );
+  }, [client, refreshTodos, seedThreadMetadata, viewingTodos]);
+
+  useEffect(() => {
+    const known = knownWorkThreads(todos.todos);
+    noteAgentThreads(known.agents);
+    noteGraphThreads(known.graphs);
+    noteBackgroundThreads([...known.agents, ...known.graphs].map((entry) => entry.threadId));
+  }, [todos.todos, noteAgentThreads, noteBackgroundThreads, noteGraphThreads]);
 
   // Only the active pane renders; every thread's run remains owned by the store.
   // A thread is in this set once opened from a persisted source, meaning it should
@@ -223,6 +322,20 @@ export function App() {
     },
     [openThread],
   );
+  const openTodoThread = useCallback(
+    (threadId: string, workThread?: WorkThreadHint) => {
+      if (workThread) {
+        if ("graphId" in workThread) noteGraphThreads([{ threadId, graphId: workThread.graphId }]);
+        else noteAgentThreads([{ threadId, agentId: workThread.agentId }]);
+        noteBackgroundThreads([threadId]);
+        setThreadTitles((prev) =>
+          prev.has(threadId) ? prev : new Map(prev).set(threadId, workThread.title),
+        );
+      }
+      openNotifiedThread(threadId);
+    },
+    [noteAgentThreads, noteBackgroundThreads, noteGraphThreads, openNotifiedThread],
+  );
   const desktopNotifications = useDesktopNotifications(
     openNotifiedThread,
     activeThreadId,
@@ -258,27 +371,62 @@ export function App() {
   // A feature disabled while its view is open must not strand the user there.
   useEffect(() => {
     if (
-      (view === "automations" && !features.enableAutomations) ||
+      ((view === "automations" || view === "graphs") && !features.enableAutomations) ||
       (view === "memories" && !features.enableMemories)
     ) {
       setView("inbox");
     }
   }, [view, features.enableAutomations, features.enableMemories]);
 
-  const onNewChat = useCallback(async (folderId?: string) => {
+  const onNewChat = useCallback((folderId?: string) => {
     shouldFocusComposerRef.current = true;
     setSearchTarget(null);
     setView("inbox");
     const threadId = freshThreadId();
-    if (folderId) {
+    if (folderId) setThreadDrafts((prev) => new Map(prev).set(threadId, { folderId }));
+    openThread(threadId, false);
+  }, [openThread]);
+
+  const setDraftRecipient = useCallback((threadId: string, agentId: string | undefined) => {
+    setThreadDrafts((prev) => {
+      const { agentId: _previous, ...rest } = prev.get(threadId) ?? {};
+      return new Map(prev).set(threadId, agentId ? { ...rest, agentId } : rest);
+    });
+  }, []);
+
+  /** Creates a drafted thread with its folder and recipient; only a recipient failure blocks the send. */
+  const createDraftedThread = useCallback(
+    async (threadId: string) => {
+      const draft = threadDraftsRef.current.get(threadId);
+      if (!draft?.folderId && !draft?.agentId) return;
       try {
-        await client.createThread(threadId, folderId);
+        await client.createThread(threadId, draft.folderId, draft.agentId);
       } catch (error) {
+        if (draft.agentId) throw error;
         console.error("create thread in folder failed", error);
       }
-    }
-    openThread(threadId, false);
-  }, [client, openThread]);
+      if (draft.agentId) noteAgentThreads([{ threadId, agentId: draft.agentId }]);
+      setThreadDrafts((prev) => {
+        if (!prev.has(threadId)) return prev;
+        const next = new Map(prev);
+        next.delete(threadId);
+        return next;
+      });
+    },
+    [client, noteAgentThreads],
+  );
+
+  const onMessageAgent = useCallback(
+    async (agentId: string) => {
+      const home = await client.openAgentHome(agentId);
+      noteAgentThreads([home]);
+      setThreadTitles((prev) =>
+        prev.get(home.threadId) === home.title ? prev : new Map(prev).set(home.threadId, home.title),
+      );
+      openNotifiedThread(home.threadId);
+    },
+    [client, noteAgentThreads, openNotifiedThread],
+  );
 
   const onOpenSearchHit = useCallback(
     (hit: SearchHit) => {
@@ -292,6 +440,19 @@ export function App() {
     },
     [openThread],
   );
+  const onOpenGraphRun = useCallback(
+    (run: ThreadInfo) => {
+      noteGraphThreads([run]);
+      setThreadTitles((prev) =>
+        prev.get(run.threadId) === run.title ? prev : new Map(prev).set(run.threadId, run.title),
+      );
+      setSearchTarget(null);
+      setView("inbox");
+      openThread(run.threadId, true);
+    },
+    [noteGraphThreads, openThread],
+  );
+
   const onSearchTargetHandled = useCallback((token: number) => {
     setSearchTarget((current) => (current?.token === token ? null : current));
   }, []);
@@ -386,13 +547,32 @@ export function App() {
     : undefined;
   const activeModel = selectableModels.models.find((model) => model.id === activeModelId);
 
-  const active = useThreadSliceReadOnly(activeThreadId);
+  const activeGraphId = activeThreadId ? threadGraphIds.get(activeThreadId) : undefined;
+  const activeDraft = activeThreadId ? threadDrafts.get(activeThreadId) : undefined;
+  const activeAgentId = activeThreadId
+    ? (threadAgentIds.get(activeThreadId) ?? activeDraft?.agentId)
+    : undefined;
+  const catalogAgents = agentsAdmin.agents.agents;
+  const activeAgent = useMemo(
+    () => threadAgent(activeAgentId, catalogAgents, agent),
+    [activeAgentId, agent, catalogAgents],
+  );
+  const recipients = useMemo(
+    () => recipientOptions(catalogAgents, agent.name),
+    [agent.name, catalogAgents],
+  );
+  const activePersisted =
+    activeThreadId !== null &&
+    (threadTitles.has(activeThreadId) || threadAgentIds.has(activeThreadId));
+  const active = useThreadSliceReadOnly(activeGraphId ? null : activeThreadId);
+  const railVisible = showRail && !activeGraphId;
   const delegations = active.delegations;
   const status = active.status;
   const isRunning = status === "streaming";
 
   return (
     <TooltipProvider>
+      <AgentNamesContext.Provider value={agentNames}>
       <div className="app has-sidebar">
         <div className="body">
           <AppNavigation
@@ -402,7 +582,26 @@ export function App() {
             onViewChange={setView}
           />
 
-          {view === "automations" ? (
+          {view === "todos" ? (
+            <div className="module-hub">
+              <TodosModule
+                key={todoFocus?.token ?? 0}
+                {...(todoFocus ? { focusId: todoFocus.id } : {})}
+                todos={todos.todos}
+                threadTitles={threadTitles}
+                agents={catalogAgents}
+                graphs={graphs.listing.graphs}
+                automationsEnabled={features.enableAutomations}
+                awaitingThreadIds={awaitingThreadIds}
+                onCreate={todos.create}
+                onUpdate={todos.update}
+                onDelete={todos.remove}
+                onUnlinkThread={todos.unlinkThread}
+                onCheckIn={todos.checkIn}
+                onOpenThread={openTodoThread}
+              />
+            </div>
+          ) : view === "automations" ? (
             <div className="module-hub">
               <ModuleTabs
                 ariaLabel={L.automationsSection}
@@ -426,6 +625,10 @@ export function App() {
                 onRun={triggers.run}
               />
             </div>
+          ) : view === "graphs" ? (
+            <div className="module-hub">
+              <GraphsModule client={client} listing={graphs.listing} onOpenRun={onOpenGraphRun} />
+            </div>
           ) : view === "memories" ? (
             <div className="module-hub">
               <MemoriesModule
@@ -436,11 +639,27 @@ export function App() {
                 onGetContent={memoriesAdmin.getContent}
               />
             </div>
+          ) : view === "agents" ? (
+            <div className="module-hub">
+              <AgentsModule
+                agents={agentsAdmin.agents}
+                tools={agentsAdmin.tools}
+                models={selectableModels}
+                skills={skillsAdmin.skills}
+                onCreate={agentsAdmin.create}
+                onUpdate={agentsAdmin.update}
+                onSetEnabled={agentsAdmin.setEnabled}
+                onDelete={agentsAdmin.remove}
+                onGetDefinition={agentsAdmin.getDefinition}
+                onGenerate={agentsAdmin.generate}
+                onOpenPlugin={openPlugin}
+                onMessage={onMessageAgent}
+              />
+            </div>
           ) : view === "skills" ? (
             <div className="module-hub">
               <SkillsModule
                 skills={skillsAdmin.skills}
-                tools={skillsAdmin.tools}
                 onCreate={skillsAdmin.create}
                 onImport={skillsAdmin.importSkill}
                 onUpdate={skillsAdmin.update}
@@ -471,6 +690,7 @@ export function App() {
                 key={pluginFocus}
                 plugins={pluginsAdmin.plugins}
                 focusName={pluginFocus}
+                onOpenAgents={() => setView("agents")}
                 onOpenSkills={() => setView("skills")}
                 onOpenMcpServers={() => setView("mcp")}
                 onImport={pluginsAdmin.importPlugin}
@@ -532,17 +752,19 @@ export function App() {
             >
               <ModuleHeader icon={<Inbox size={18} />} title={L.inboxSection} count={threadCount}>
                 <span className="module-header-spacer" />
-                <button
-                  className={`rail-toggle${showRail ? " active" : ""}`}
-                  title={showRail ? "Hide activity" : "Show activity"}
-                  aria-pressed={showRail}
-                  onClick={() => setShowRail((v) => !v)}
-                >
-                  <Activity size={15} /> Activity
-                  {Object.keys(delegations).length > 0 && (
-                    <span className="rail-toggle-indicator" aria-hidden="true" />
-                  )}
-                </button>
+                {!activeGraphId && (
+                  <button
+                    className={`rail-toggle${showRail ? " active" : ""}`}
+                    title={showRail ? "Hide activity" : "Show activity"}
+                    aria-pressed={showRail}
+                    onClick={() => setShowRail((v) => !v)}
+                  >
+                    <Activity size={15} /> Activity
+                    {Object.keys(delegations).length > 0 && (
+                      <span className="rail-toggle-indicator" aria-hidden="true" />
+                    )}
+                  </button>
+                )}
               </ModuleHeader>
 
               <div className="inbox-body">
@@ -556,22 +778,48 @@ export function App() {
                   onOpenSearchHit={onOpenSearchHit}
                   onDeleted={onThreadDeleted}
                   onThreadsLoaded={seedThreadMetadata}
+                  onMetadataChanged={onMetadataChanged}
                   threadTitles={threadTitles}
+                  flaggedThreadIds={flaggedThreads}
+                  backgroundThreadIds={backgroundThreadIds}
                   listRef={listRef}
                   onFocusComposer={focusComposer}
                 />
 
                 <main className="content">
-                  <div className={panesClass(showRail)}>
+                  <div className={panesClass(railVisible)}>
                     <section className="chat-pane">
                       <div className="pane-slot" style={{ display: "flex" }}>
-                        {activeThreadId ? (
+                        {activeThreadId && activeGraphId ? (
+                          <GraphRunPane
+                            key={activeThreadId}
+                            client={client}
+                            threadId={activeThreadId}
+                            graphId={activeGraphId}
+                            title={activeThreadTitle ?? activeGraphId}
+                            onRename={(title) => onRename(activeThreadId, title)}
+                            {...(isMobile ? { onBack: onBackToList } : {})}
+                          />
+                        ) : activeThreadId ? (
                           <ChatPane
                             key={activeThreadId}
                             threadId={activeThreadId}
                             hydrateOnMount={openedThreads.has(activeThreadId)}
                             onFork={onFork}
-                            agent={agent}
+                            agent={activeAgent}
+                            {...(!activePersisted
+                              ? {
+                                  recipient: {
+                                    options: recipients,
+                                    ...(activeDraft?.agentId ? { value: activeDraft.agentId } : {}),
+                                    onChange: (agentId: string | undefined) =>
+                                      setDraftRecipient(activeThreadId, agentId),
+                                  },
+                                  beforeFirstSend: () => createDraftedThread(activeThreadId),
+                                }
+                              : activeAgentId
+                                ? { recipient: {} }
+                                : {})}
                             onRename={(title) => onRename(activeThreadId, title)}
                             models={selectableModels}
                             initialModel={activeModelId}
@@ -591,21 +839,48 @@ export function App() {
                               searchTarget?.threadId === activeThreadId ? searchTarget : undefined
                             }
                             onSearchTargetHandled={onSearchTargetHandled}
+                            {...(activeAgentId && backgroundThreadIds.has(activeThreadId)
+                              ? {
+                                  workThread: {
+                                    onOpenConversation: () => {
+                                      onMessageAgent(activeAgentId).catch((error: unknown) =>
+                                        console.error("open agent conversation failed", error),
+                                      );
+                                    },
+                                  },
+                                }
+                              : {})}
                             headerActions={
-                              isMobile ? (
-                                <button
-                                  className={`rail-toggle icon-only${showRail ? " active" : ""}`}
-                                  title={showRail ? "Hide activity" : "Show activity"}
-                                  aria-label={showRail ? "Hide activity" : "Show activity"}
-                                  aria-pressed={showRail}
-                                  onClick={() => setShowRail((v) => !v)}
-                                >
-                                  <Activity size={16} />
-                                  {Object.keys(delegations).length > 0 && (
-                                    <span className="rail-toggle-indicator" aria-hidden="true" />
-                                  )}
-                                </button>
-                              ) : undefined
+                              <>
+                                {threadTitles.has(activeThreadId) &&
+                                  !backgroundThreadIds.has(activeThreadId) && (
+                                  <FlagThreadButton
+                                    todo={openTodoForThread(todos.todos, activeThreadId)}
+                                    compact={isMobile}
+                                    onFlag={() =>
+                                      todos.create({
+                                        title: (activeThreadTitle ?? "Conversation").slice(0, 200),
+                                        threadIds: [activeThreadId],
+                                      })
+                                    }
+                                    onOpenTodo={openTodo}
+                                  />
+                                )}
+                                {isMobile && (
+                                  <button
+                                    className={`rail-toggle icon-only${showRail ? " active" : ""}`}
+                                    title={showRail ? "Hide activity" : "Show activity"}
+                                    aria-label={showRail ? "Hide activity" : "Show activity"}
+                                    aria-pressed={showRail}
+                                    onClick={() => setShowRail((v) => !v)}
+                                  >
+                                    <Activity size={16} />
+                                    {Object.keys(delegations).length > 0 && (
+                                      <span className="rail-toggle-indicator" aria-hidden="true" />
+                                    )}
+                                  </button>
+                                )}
+                              </>
                             }
                           />
                         ) : (
@@ -613,14 +888,14 @@ export function App() {
                         )}
                       </div>
                     </section>
-                    {isMobile && showRail && (
+                    {isMobile && railVisible && (
                       <div
                         className="pane-drawer-backdrop"
                         aria-hidden="true"
                         onClick={() => setShowRail(false)}
                       />
                     )}
-                    {showRail && (
+                    {railVisible && (
                       <aside className="rail-pane">
                         <ActivityRail
                           delegations={delegations}
@@ -654,6 +929,7 @@ export function App() {
           onOpenShortcuts={() => setHelpOpen(true)}
         />
       </div>
+      </AgentNamesContext.Provider>
     </TooltipProvider>
   );
 }

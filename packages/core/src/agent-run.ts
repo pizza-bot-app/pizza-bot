@@ -1,16 +1,19 @@
 /** Runtime-neutral agent inputs, state, dependencies, and handles. */
 import type {
   NormalizedMessage,
+  InputResponseCommand,
   ResumeCommand,
   RunStatus,
   ThreadStateValues,
 } from "./protocol-types.js";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { SkillCatalog } from "./skill.js";
-import type { SkillAvailability } from "./skill-readiness.js";
+import type { AgentCatalog } from "./agent-definition.js";
+import type { AgentAvailability } from "./agent-readiness.js";
 import type { ToolCatalog } from "./wildcard.js";
 import type { AttachmentResolver } from "./attachment.js";
 import type { LocalFolder } from "./local-folder.js";
+import type { TodoAccess } from "./todo.js";
 
 export interface Logger {
   info(msg: string, ...args: unknown[]): void;
@@ -28,9 +31,16 @@ export interface RuntimeDeps {
    * Preserves original server tool names for wildcard expansion and display.
    */
   catalog?: ToolCatalog;
+  /** Enabled skills, served read-only beneath `/skills/`. */
   skills?: SkillCatalog;
-  /** Full readiness projection; non-ready skills are context only, never subagents. */
-  skillAvailability?: readonly SkillAvailability[];
+  /** Skill ids mounted on the orchestrator; agents mount their own. */
+  rootSkills?: readonly string[];
+  /** Ready agents, each compiled into one subagent behind the `task` tool. */
+  agents?: AgentCatalog;
+  /** Full readiness projection; non-ready agents are context only, never subagents. */
+  agentAvailability?: readonly AgentAvailability[];
+  /** Pinned subagent models, keyed by agent id; an agent without one inherits `model`. */
+  agentModels?: ReadonlyMap<string, BaseChatModel>;
   /**
    * Routes `/memories/` to a sandboxed shared filesystem backend.
    * Absence means no durable memory directory is available.
@@ -51,6 +61,8 @@ export interface RuntimeDeps {
    * state never contains file bytes. Absence disables inlining.
    */
   attachmentResolver?: AttachmentResolver;
+  /** The user's Todo list, exposed to the root agent only; absence withholds the Todo tools. */
+  todos?: TodoAccess;
   /** Per-run root-agent tool-call limit; -1 disables the limiter. */
   maxToolCalls?: number;
   /** Per-run subagent tool-call limit; -1 disables the limiter. */
@@ -61,7 +73,12 @@ export interface RuntimeDeps {
 
 export type RunInput =
   | { messages: NormalizedMessage[] }
-  | { command: ResumeCommand };
+  | { command: ResumeCommand | InputResponseCommand }
+  /**
+   * Seeds a graph run's `input` state. With `continueFromCheckpoint`, a thread
+   * that already has a checkpoint resumes it and the seed is used only when none exists.
+   */
+  | { graphInput: Record<string, unknown>; continueFromCheckpoint?: boolean };
 
 export interface RunOptions {
   threadId: string;

@@ -1,12 +1,15 @@
 import {
   BUILTIN_EVAL_TOOL_DESCRIPTION,
   BUILTIN_EVAL_TOOL_REF,
+  BUILTIN_TOOL_REFS,
+  TODO_DIGEST_CRON,
   ModelRegistry,
   ModelUnavailableError,
-  projectSkillReadiness,
+  projectAgentReadiness,
   automaticModelCatalog,
   selectModel,
-  skillMcpServerIds,
+  agentInfoOf,
+  agentMcpServerIds,
   skillInfoOf,
   type AutomaticModelCatalog,
   type McpDependencyState,
@@ -18,15 +21,24 @@ import {
   type RunStatus,
   type RuntimeDeps,
   type ThreadState,
+  type AgentAvailability,
+  type AgentCatalog,
+  type AgentCatalogEntry,
+  type AgentInfo,
   type SkillCatalog,
   type SkillCatalogEntry,
-  type SkillAvailability,
   type SkillInfo,
   type ThreadActivityOutcome,
+  type GraphSpec,
 } from "@pizza-bot/core";
 import { registerBuiltinProviders, UnavailableChatModel } from "@pizza-bot/inference-providers";
-import type { LangGraphAgent } from "@pizza-bot/runtime-langgraph";
+import {
+  compileGraphSpec,
+  type LangGraphAgent,
+  type LangGraphThreadGraph,
+} from "@pizza-bot/runtime-langgraph";
 import type { ProtocolEvent } from "@langchain/langgraph";
+import type { StructuredToolInterface } from "@langchain/core/tools";
 import {
   openPersistence,
   openAppDatabase,
@@ -34,6 +46,7 @@ import {
   TriggerStore,
   ThreadStore,
   FolderStore,
+  TodoStore,
   SearchStore,
   SettingsStore,
   ProviderConfigStore,
@@ -55,9 +68,12 @@ import {
   createPluginHostContract,
   loadBuiltinSkills,
   loadUserSkills,
+  loadUserAgents,
   loadUserMcpServers,
   expandMcpEnvVars,
+  mergeAgentCatalogs,
   mergeSkillCatalogs,
+  migrateSkillToolGrants,
   connectMcpServers,
   mcpEntriesFromRegistry,
   type McpClientPool,
@@ -78,24 +94,32 @@ import {
   resolveExternalPluginsDirs,
   resolveBuiltinSkillsDir,
   resolveSkillsDir,
+  resolveAgentsDir,
   resolveMemoriesDir,
   resolveMcpConfig,
 } from "./plugins-dir.js";
+import { randomUUID } from "node:crypto";
+import { CronJob } from "cron";
 import { lstat, mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { ProtocolRunManager } from "./protocol-run-manager.js";
+import { GraphRegistry } from "./graph-registry.js";
 import type { ImportedPlugin } from "./plugin-import.js";
 import { protocolRunLauncher } from "./protocol-run-launcher.js";
 import { TriggerService } from "./trigger-service.js";
+import { TodoService, type AgentStatus } from "./todo-service.js";
 import { SystemMessage, HumanMessage, type AIMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { GraphManager } from "./graph-manager.js";
 import {
+  buildAgentGeneratorPrompt,
   buildSkillGeneratorPrompt,
+  normalizeAgentDraft,
   normalizeSkillDraft,
   parseSkillDraftJson,
+  type AgentDraft,
+  type GeneratorTool,
   type SkillDraft,
-  type SkillGeneratorTool,
 } from "./skill-generator.js";
 import { getLogger, redactDiagnosticText } from "@pizza-bot/logging";
 
@@ -119,6 +143,16 @@ function interruptIdsOf(state: ThreadState): string[] {
       ),
     ]),
   ];
+}
+
+/** The question an `ask_user` pause carries, wherever the approval payload nests it. */
+function askUserQuestion(interrupts: ReadonlyArray<{ value: unknown }> | undefined): string | undefined {
+  for (const pending of interrupts ?? []) {
+    const value = pending.value as { actionRequests?: Array<{ name?: string; args?: { question?: unknown } }> };
+    const request = value?.actionRequests?.find((candidate) => candidate.name === "ask_user");
+    if (typeof request?.args?.question === "string") return request.args.question;
+  }
+  return undefined;
 }
 
 function terminalActivityOutcome(
@@ -165,7 +199,7 @@ export interface McpServerListEntry {
   toolCount: number;
   crashedAt?: string;
   detail?: string;
-  dependentSkills: CapabilitySkillDependency[];
+  dependentAgents: CapabilityAgentDependency[];
 }
 
 export interface McpServerToolInfo {
@@ -173,10 +207,10 @@ export interface McpServerToolInfo {
   description?: string;
 }
 
-export interface CapabilitySkillDependency {
+export interface CapabilityAgentDependency {
   id: string;
   name: string;
-  source: SkillCatalogEntry["source"];
+  source: AgentCatalogEntry["source"];
   pluginName?: string;
   enabled: boolean;
 }
@@ -193,7 +227,7 @@ export class CapabilityDependencyError extends Error {
     super(
       code === "dependency_disabled"
         ? "Required MCP servers must be configured and enabled first."
-        : "Enabled skills depend on this MCP server.",
+        : "Enabled agents depend on this MCP server.",
     );
     this.name = "CapabilityDependencyError";
   }
@@ -238,6 +272,21 @@ function skillPreferenceKey(skill: SkillCatalogEntry): CapabilityPreferenceKey {
     source: skill.pluginName ? `plugin:${skill.pluginName}` : skill.source,
     id: skill.id,
   };
+}
+
+function agentPreferenceKey(agent: AgentCatalogEntry): CapabilityPreferenceKey {
+  return {
+    kind: "agent",
+    source: agent.pluginName ? `plugin:${agent.pluginName}` : agent.source,
+    id: agent.id,
+  };
+}
+
+interface CapabilityProjection {
+  ready: AgentCatalog;
+  availability: AgentAvailability[];
+  skills: SkillCatalog;
+  rootSkills: string[];
 }
 
 function mcpPreferenceKey(
@@ -290,13 +339,13 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function skillProjectionFingerprint(
-  projection: { ready: SkillCatalog; availability: SkillAvailability[] },
+function capabilityProjectionFingerprint(
+  projection: CapabilityProjection,
   catalog: ToolCatalog,
 ): string {
-  const grantedTools = [...projection.ready.values()].map((skill) => ({
-    id: skill.id,
-    servers: skill.declaredTools
+  const grantedTools = [...projection.ready.values()].map((agent) => ({
+    id: agent.id,
+    servers: agent.declaredTools
       .filter((ref) => ref.startsWith("mcp:"))
       .map((ref) => ref.split(":")[1]!)
       .filter((server, index, servers) => servers.indexOf(server) === index)
@@ -305,6 +354,8 @@ function skillProjectionFingerprint(
   return JSON.stringify({
     availability: projection.availability,
     grantedTools,
+    skills: [...projection.skills.keys()],
+    rootSkills: projection.rootSkills,
   });
 }
 
@@ -334,9 +385,14 @@ export class AgentHost {
 
   readonly triggers: TriggerStore;
   readonly triggerService: TriggerService;
+  readonly graphRegistry: GraphRegistry;
+  private readonly compiledGraphs = new Map<string, { fingerprint: string; graph: LangGraphThreadGraph }>();
 
   readonly threadStore: ThreadStore;
   readonly folderStore: FolderStore;
+  readonly todoStore: TodoStore;
+  readonly todoService: TodoService;
+  private digestJob: CronJob | undefined;
   readonly search: SearchStore;
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
@@ -358,8 +414,10 @@ export class AgentHost {
   private builtinSkills?: SkillCatalog;
   private pluginSkills?: SkillCatalog;
   private skillInventory: SkillCatalog = new Map();
-  private skillAvailability: SkillAvailability[] = [];
-  private appliedSkillProjection = "";
+  private agentsDir?: string | false;
+  private pluginAgents?: AgentCatalog;
+  private agentInventory: AgentCatalog = new Map();
+  private appliedCapabilityProjection = "";
   private mcpConfigPath?: string | false;
   private pluginMcpServers?: Record<string, McpServerEntry>;
   private providerMcpEnv?: Record<string, string>;
@@ -398,6 +456,7 @@ export class AgentHost {
     this.triggers = this.appDb.triggers;
     this.threadStore = this.appDb.threadStore;
     this.folderStore = this.appDb.folders;
+    this.todoStore = this.appDb.todos;
     this.search = this.appDb.search;
     this.settings = this.appDb.settings;
     this.providerConfigs = this.appDb.providerConfigs;
@@ -407,15 +466,72 @@ export class AgentHost {
     this.explicitModelId = explicitModelId ?? process.env.PIZZA_MODEL ?? null;
     this.modelId = this.selectDefaultModel();
     if (this.appDb.attachments) this.attachments = this.appDb.attachments;
+    this.graphRegistry = new GraphRegistry(join(dataRoot, "graphs"));
     this.triggerService = new TriggerService(protocolRunLauncher(this.protocolRuns), this.triggers, {
       isEnabled: () => this.settings.get().enableAutomations,
+      awaitsInput: async (threadId) => stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId)),
+      todoCheckIn: (trigger, occurrence) => this.todoService.resolveCheckIn(trigger, occurrence),
+    });
+    this.todoService = new TodoService({
+      todos: this.todoStore,
+      threads: this.threadStore,
+      triggers: this.triggers,
+      scheduler: () => this.triggerService,
+      isRunning: (threadId) => this.protocolRuns.isRunning(threadId),
+      cancelRun: (threadId) => {
+        this.protocolRuns.cancel(threadId);
+      },
+      automationsEnabled: () => this.settings.get().enableAutomations,
+      agentStatus: (agentId) => this.agentStatus(agentId),
+      readyAgents: () =>
+        (this.graphs?.agentAvailability() ?? [])
+          .filter((state) => state.status === "ready")
+          .flatMap((state) => {
+            const status = this.agentStatus(state.id);
+            return status ? [{ id: state.id, ...status }] : [];
+          }),
+      listGraphs: async () =>
+        (await this.graphRegistry.list()).graphs.map((spec) => ({
+          id: spec.id,
+          name: spec.name,
+          ...(spec.description ? { description: spec.description } : {}),
+          settlesTodos: spec.todoOutcome !== undefined,
+        })),
+      awaitsInput: async (threadId) => stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId)),
+      postToThread: async (threadId, text) => {
+        const graph = await this.threadGraph(threadId);
+        await graph.updateStateAsFinished(threadId, {
+          messages: [{ role: "assistant", content: text, id: `msg_notify_${randomUUID()}` }],
+        });
+      },
+      announce: async (threadId, { notify }) => {
+        await this.runMaintenance.reindexThread(threadId);
+        if (!notify) return;
+        const messageId = `msg_${randomUUID()}`;
+        this.threadActivity.append({
+          eventId: `${threadId}:${messageId}`,
+          threadId,
+          runId: messageId,
+          outcome: "message",
+          interruptIds: [],
+          threadTitle: threadActivityTitle(this.threadStore.get(threadId)),
+        });
+      },
+      deleteThreads: (threadIds) => {
+        for (const threadId of threadIds) {
+          this.deleteThread(threadId).catch((error: unknown) => {
+            console.warn(`[todos] removing work thread ${threadId} failed:`, error);
+          });
+        }
+      },
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
     this.runMaintenance = new RunMaintenance({
       threadStore: this.threadStore,
       search: this.search,
       getMessages: async (threadId) => {
         await this.warmup;
-        const state = await this.agent.getState(threadId);
+        const state = await (await this.threadGraph(threadId)).getState(threadId);
         return (state.values as { messages?: IndexableMessage[] } | undefined)?.messages ?? [];
       },
       generateTitle: async (userMessage, assistantMessage) => {
@@ -430,7 +546,7 @@ export class AgentHost {
       },
       log: (m) => console.log(m),
     });
-    this.protocolEndUnsub = this.protocolRuns.onEnd(({ threadId, runId, status, inputType }) => {
+    this.protocolEndUnsub = this.protocolRuns.onEnd(({ threadId, runId, status, inputType, error }) => {
       const outcome = terminalActivityOutcome(status);
       if (!outcome) return;
       void this.queueThreadMaintenance(threadId, async () => {
@@ -442,8 +558,26 @@ export class AgentHost {
             interruptIds = await this.readThreadInterruptIds(threadId);
             this.threadStore.ensure({ threadId });
             this.threadStore.update(threadId, { unread: true, awaitingAction: true });
+            if (this.threadStore.get(threadId)?.background) {
+              await this.isolated("record a check-in pause", async () => {
+                const state = await (await this.threadGraph(threadId)).getState(threadId);
+                await this.todoService.recordPause(threadId, askUserQuestion(state.interrupts));
+              });
+            }
             await this.runMaintenance.reindexThread(threadId);
             return;
+          }
+          const ended = this.threadStore.get(threadId);
+          if (ended?.background) {
+            if (status === "success" && ended.graphId) {
+              const graphId = ended.graphId;
+              await this.isolated("settle a workflow check-in", () => this.settleGraphCheckIn(threadId, graphId));
+            }
+            if (status === "error" || status === "timeout") {
+              await this.isolated("record a failed check-in", async () =>
+                this.todoService.recordFailure(threadId, error ?? (status === "timeout" ? "The check-in timed out." : "The check-in failed.")),
+              );
+            }
           }
           await this.runMaintenance.onRunEnd(threadId);
           const awaitingAction = await this.readThreadAwaitingAction(
@@ -458,17 +592,19 @@ export class AgentHost {
             this.threadStore.update(threadId, { awaitingAction });
           }
         } finally {
-          const threadTitle = threadActivityTitle(
-            this.threadStore.get(threadId),
-          );
-          this.threadActivity.append({
-            eventId: `${threadId}:${runId}`,
-            threadId,
-            runId,
-            outcome,
-            interruptIds,
-            threadTitle,
-          });
+          const thread = this.threadStore.get(threadId);
+          // A check-in that finished on its own is not news; one waiting on the user is.
+          if (thread?.background && outcome !== "interrupted") this.todoService.runEnded(threadId);
+          if (!thread?.background || outcome === "interrupted") {
+            this.threadActivity.append({
+              eventId: `${threadId}:${runId}`,
+              threadId,
+              runId,
+              outcome,
+              interruptIds,
+              threadTitle: threadActivityTitle(thread),
+            });
+          }
         }
       });
     });
@@ -520,7 +656,10 @@ export class AgentHost {
       this.attachments?.deleteByThread(threadId);
       this.threadActivity.deleteByThread(threadId);
       const deleted = this.threadStore.delete(threadId);
+      // Startup recovery would otherwise relaunch a paused trigger run on the deleted thread.
+      this.triggers.killWaitingOccurrencesForThread(threadId, "thread deleted", new Date().toISOString());
       this.search.deleteThread(threadId);
+      this.todoStore.forgetThread(threadId);
       // SqliteSaver.deleteThread skips its lazy schema setup on an unopened database.
       await this.persistence.checkpointer.getTuple({
         configurable: { thread_id: threadId, checkpoint_ns: "" },
@@ -585,16 +724,20 @@ export class AgentHost {
     threadId: string,
     resumeFallback: boolean,
   ): Promise<boolean> {
+    const thread = this.threadStore.get(threadId);
+    const recorded = resumeFallback || (thread?.awaitingAction ?? false);
+    // The assistant's graph, which reads an unready agent's thread, cannot see its pending approvals.
+    if (thread?.agentId && !this.graphs?.hasRootAgent(thread.agentId)) return recorded;
     try {
-      return stateAwaitsAction(await this.agent.getState(threadId));
+      return stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId));
     } catch {
-      return resumeFallback || (this.threadStore.get(threadId)?.awaitingAction ?? false);
+      return recorded;
     }
   }
 
   private async readThreadInterruptIds(threadId: string): Promise<string[]> {
     try {
-      return interruptIdsOf(await this.agent.getState(threadId));
+      return interruptIdsOf(await (await this.threadGraph(threadId)).getState(threadId));
     } catch {
       return [];
     }
@@ -622,23 +765,36 @@ export class AgentHost {
 
   async skillCatalog(): Promise<SkillInfo[]> {
     await this.warmup;
-    const states = new Map(this.skillAvailability.map((state) => [state.id, state]));
-    const servers = new Map((await this.listMcpServers()).map((server) => [server.id, server]));
+    const usedBy = this.skillClaims();
     return [...this.skillInventory.values()].map((skill) => {
-      const enabled = this.skillEnabled(skill);
-      const state = states.get(skill.id);
+      const agents = usedBy.get(skill.id);
       return {
         ...skillInfoOf(skill),
+        enabled: this.skillEnabled(skill),
+        ...(agents ? { usedBy: agents } : {}),
+      };
+    });
+  }
+
+  async agentCatalog(): Promise<AgentInfo[]> {
+    await this.warmup;
+    const states = new Map(
+      (this.graphs?.agentAvailability() ?? []).map((state) => [state.id, state]),
+    );
+    const servers = new Map((await this.listMcpServers()).map((server) => [server.id, server]));
+    return [...this.agentInventory.values()].map((agent) => {
+      const enabled = this.agentEnabled(agent);
+      const state = states.get(agent.id);
+      return {
+        ...agentInfoOf(agent),
         enabled,
         status: enabled ? state?.status ?? "unavailable" : "disabled",
         ...(!enabled
           ? { statusDetail: "Disabled" }
-          : state
-          ? {
-              ...(state.detail ? { statusDetail: state.detail } : {}),
-            }
-          : {}),
-        mcpDependencies: skillMcpServerIds(skill).map((id) => {
+          : state?.detail
+            ? { statusDetail: state.detail }
+            : {}),
+        mcpDependencies: agentMcpServerIds(agent).map((id) => {
           const server = servers.get(id);
           return server
             ? { id, enabled: server.enabled, status: server.status }
@@ -646,6 +802,25 @@ export class AgentHost {
         }),
       };
     });
+  }
+
+  async agentsDirectory(): Promise<string | false> {
+    await this.warmup;
+    return this.agentsDir ?? false;
+  }
+
+  async agentDefinition(id: string): Promise<AgentCatalogEntry | undefined> {
+    await this.warmup;
+    return this.agentInventory.get(id);
+  }
+
+  /** Skill id → ids of every installed agent that mounts it, enabled or not. */
+  private skillClaims(): Map<string, string[]> {
+    const claims = new Map<string, string[]>();
+    for (const agent of this.agentInventory.values()) {
+      for (const skill of agent.skills) claims.set(skill, [...(claims.get(skill) ?? []), agent.id]);
+    }
+    return claims;
   }
 
   async skillsDirectory(): Promise<string | false> {
@@ -664,37 +839,51 @@ export class AgentHost {
     return this.skillInventory.get(id);
   }
 
-  // Without a stored preference a skill follows its MCP servers, so a server that
-  // ships disabled takes its skills with it until the user turns it on.
   private skillEnabled(skill: SkillCatalogEntry): boolean {
+    return this.capabilityPreferences.get(skillPreferenceKey(skill)) ?? true;
+  }
+
+  // Without a stored preference an agent follows its MCP servers, so a server that
+  // ships disabled takes its agents with it until the user turns it on.
+  private agentEnabled(agent: AgentCatalogEntry): boolean {
     return (
-      this.capabilityPreferences.get(skillPreferenceKey(skill)) ??
-      !skillMcpServerIds(skill).some(
+      this.capabilityPreferences.get(agentPreferenceKey(agent)) ??
+      !agentMcpServerIds(agent).some(
         (id) => this.mcpLifecycle.get(id)?.status === "disabled",
       )
     );
   }
 
-  private dependentSkills(serverId: string): CapabilitySkillDependency[] {
-    return [...this.skillInventory.values()]
-      .filter((skill) => skillMcpServerIds(skill).includes(serverId))
-      .map((skill) => ({
-        id: skill.id,
-        name: skill.name,
-        source: skill.source,
-        ...(skill.pluginName ? { pluginName: skill.pluginName } : {}),
-        enabled: this.skillEnabled(skill),
+  private dependentAgents(serverId: string): CapabilityAgentDependency[] {
+    return [...this.agentInventory.values()]
+      .filter((agent) => agentMcpServerIds(agent).includes(serverId))
+      .map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        source: agent.source,
+        ...(agent.pluginName ? { pluginName: agent.pluginName } : {}),
+        enabled: this.agentEnabled(agent),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async generateSkillDraft(prompt: string): Promise<SkillDraft> {
     await this.warmup;
+    const model = await this.graphs!.buildDefaultModel();
+    const reply = (await model.invoke([
+      new SystemMessage(buildSkillGeneratorPrompt()),
+      new HumanMessage(prompt),
+    ])) as AIMessage;
+    return normalizeSkillDraft(parseSkillDraftJson(aiMessageText(reply)));
+  }
+
+  async generateAgentDraft(prompt: string): Promise<AgentDraft> {
+    await this.warmup;
     await this.initialMcpStartup;
     const model = await this.graphs!.buildDefaultModel();
 
     const catalog = await this.toolCatalog();
-    const tools: SkillGeneratorTool[] = [
+    const tools: GeneratorTool[] = [
       {
         ref: BUILTIN_EVAL_TOOL_REF,
         description: BUILTIN_EVAL_TOOL_DESCRIPTION,
@@ -715,11 +904,11 @@ export class AgentHost {
     ];
 
     const reply = (await model.invoke([
-      new SystemMessage(buildSkillGeneratorPrompt(tools)),
+      new SystemMessage(buildAgentGeneratorPrompt(tools)),
       new HumanMessage(prompt),
     ])) as AIMessage;
 
-    return normalizeSkillDraft(parseSkillDraftJson(aiMessageText(reply)), tools);
+    return normalizeAgentDraft(parseSkillDraftJson(aiMessageText(reply)), tools);
   }
 
   get plugins(): LoadedPlugins | undefined {
@@ -732,7 +921,37 @@ export class AgentHost {
 
   async startAutomations(): Promise<void> {
     await this.whenInitialMcpSettled();
-    if (!this.closing) this.triggerService.start();
+    if (this.closing) return;
+    await this.todoService.refreshGraphs().catch((error: unknown) => console.warn("[todos] graph list failed:", error));
+    if (this.closing) return;
+    this.triggerService.start();
+    this.digestJob ??= CronJob.from({
+      cronTime: TODO_DIGEST_CRON,
+      onTick: () => {
+        if (!this.closing && this.settings.get().enableAutomations) {
+          void this.isolated("post Todo digests", () => this.todoService.flushDigests());
+        }
+      },
+      start: true,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+  }
+
+  /** Runs a Todo side step of run-end handling so its failure cannot skip the rest. */
+  private async isolated(what: string, step: () => Promise<void> | void): Promise<void> {
+    try {
+      await step();
+    } catch (error) {
+      console.warn(`[todos] failed to ${what}:`, error);
+    }
+  }
+
+  /** A graph that owns a Todo settles it from the `todoOutcome` state key its spec names. */
+  private async settleGraphCheckIn(threadId: string, graphId: string): Promise<void> {
+    const { spec, graph } = await this.compiledGraph(graphId);
+    if (!spec.todoOutcome) return;
+    const state = await graph.getState(threadId);
+    this.todoService.recordGraphOutcome(threadId, (state.values as Record<string, unknown>)[spec.todoOutcome]);
   }
 
   private async whenInitialMcpSettled(): Promise<void> {
@@ -741,8 +960,101 @@ export class AgentHost {
   }
 
   private async *streamProtocolReady(input: RunInput, opts: RunOptions): AsyncIterable<ProtocolEvent> {
+    const requestedGraph = opts.configurable?.graph_id;
+    const graphId =
+      typeof requestedGraph === "string" && requestedGraph.length > 0
+        ? requestedGraph
+        : this.threadStore.get(opts.threadId)?.graphId;
+    if (graphId) {
+      yield* this.streamGraphRun(graphId, input, opts);
+      return;
+    }
     const { agent, cleaned } = await this.resolveTurn(opts);
     yield* agent.streamProtocol(input, cleaned);
+  }
+
+  /**
+   * An agent thread's graph, on the thread's model. Only an agent that is missing or
+   * not ready reads through the assistant; any other failure surfaces, since the
+   * assistant's graph cannot see the agent's pending approvals.
+   */
+  private async agentThreadGraph(
+    agentId: string,
+    background: boolean,
+    modelId: string | undefined,
+  ): Promise<LangGraphThreadGraph> {
+    if (!this.graphs!.hasRootAgent(agentId)) return this.agent;
+    return (await this.graphs!.rootAgentFor(agentId, modelId, background ? this.todoService : undefined)).agent;
+  }
+
+  /** Enabled agents only, with whether they can run now. */
+  private agentStatus(agentId: string): AgentStatus | undefined {
+    const state = this.graphs?.agentAvailability().find((candidate) => candidate.id === agentId);
+    const definition = this.agentInventory.get(agentId);
+    if (!state || !definition) return undefined;
+    return {
+      name: state.name,
+      description: definition.description,
+      ready: state.status === "ready",
+      ...(state.detail ? { detail: state.detail } : {}),
+    };
+  }
+
+  private async *streamGraphRun(
+    graphId: string,
+    input: RunInput,
+    opts: RunOptions,
+  ): AsyncIterable<ProtocolEvent> {
+    await this.warmup;
+    if ("messages" in input) {
+      throw new Error("A graph run accepts graph input or a resume, not chat messages.");
+    }
+    const thread = this.threadStore.get(opts.threadId);
+    // A thread's checkpoints belong to one graph; another graph would misread them.
+    if (thread && thread.graphId !== graphId) {
+      throw new Error(`Thread ${opts.threadId} does not run graph ${graphId}.`);
+    }
+    const { spec, graph } = await this.compiledGraph(graphId);
+    if (!thread) {
+      this.threadStore.create({
+        threadId: opts.threadId,
+        graphId,
+        title: spec.name,
+        source: opts.configurable?.source === "trigger" ? "trigger" : "user",
+      });
+    }
+    const cleaned = { ...opts };
+    if (opts.configurable) {
+      const { graph_id: _graphId, model: _model, ...rest } = opts.configurable;
+      cleaned.configurable = rest;
+    }
+    yield* graph.streamProtocol(input, cleaned);
+  }
+
+  /** The graph whose checkpoints a thread holds: its graph run, its agent, or the assistant. */
+  async threadGraph(threadId: string): Promise<LangGraphThreadGraph> {
+    await this.warmup;
+    const thread = this.threadStore.get(threadId);
+    if (thread?.graphId) return (await this.compiledGraph(thread.graphId)).graph;
+    if (thread?.agentId) return this.agentThreadGraph(thread.agentId, thread.background === true, thread.modelId);
+    return this.agent;
+  }
+
+  private async compiledGraph(graphId: string): Promise<{ spec: GraphSpec; graph: LangGraphThreadGraph }> {
+    const spec = await this.graphRegistry.get(graphId);
+    if (!spec) throw new Error(`Graph ${graphId} does not exist or does not parse.`);
+    const fingerprint = JSON.stringify(spec);
+    const cached = this.compiledGraphs.get(graphId);
+    if (cached?.fingerprint === fingerprint) return { spec, graph: cached.graph };
+    const graph = compileGraphSpec(spec, {
+      ...(this.persistence.checkpointer ? { checkpointer: this.persistence.checkpointer } : {}),
+      agentFor: async (modelId, agentId) =>
+        agentId ? (await this.graphs!.rootAgentFor(agentId, modelId ?? this.modelId)).agent : this.agentFor(modelId),
+      modelFor: (modelId) => this.graphs!.buildModel(modelId ?? this.modelId),
+      tool: (ref) => this.mcpTools[ref] as StructuredToolInterface | undefined,
+    });
+    this.compiledGraphs.set(graphId, { fingerprint, graph });
+    return { spec, graph };
   }
 
   private async resolveTurn(
@@ -754,9 +1066,15 @@ export class AgentHost {
       typeof requestedModel === "string" && requestedModel.length > 0
         ? requestedModel
         : undefined;
-    const pinnedModel = this.threadStore.get(opts.threadId)?.modelId;
-    const modelId = explicitModel ?? pinnedModel ?? this.modelId;
-    const agent = await this.agentFor(modelId);
+    const existing = this.threadStore.get(opts.threadId);
+    const requestedModelId = explicitModel ?? existing?.modelId ?? this.modelId;
+    const { agent, modelId } = existing?.agentId
+      ? await this.graphs!.rootAgentFor(
+          existing.agentId,
+          requestedModelId,
+          existing.background ? this.todoService : undefined,
+        )
+      : { agent: await this.agentFor(requestedModelId), modelId: requestedModelId };
     const thread = this.threadStore.ensure({ threadId: opts.threadId, modelId });
     if (thread.modelId !== modelId) {
       this.threadStore.update(opts.threadId, { modelId });
@@ -940,10 +1258,10 @@ export class AgentHost {
     await this.graphs!.reloadSettings();
   }
 
-  private skillProjection(
+  private capabilityProjection(
     tools: Readonly<Record<string, unknown>>,
     catalog: ToolCatalog,
-  ): { ready: SkillCatalog; availability: SkillAvailability[] } {
+  ): CapabilityProjection {
     const mcpServers = new Map<string, McpDependencyState>();
     for (const [server, state] of this.mcpLifecycle) {
       if (state.status === "connected") {
@@ -963,15 +1281,25 @@ export class AgentHost {
         });
       }
     }
-    const enabledSkills = new Map(
+    const skills: SkillCatalog = new Map(
       [...this.skillInventory].filter(([, skill]) => this.skillEnabled(skill)),
     );
-    return projectSkillReadiness(enabledSkills, {
-      catalog,
-      tools: new Set(Object.keys(tools)),
-      mcpServers,
-      builtins: new Set([BUILTIN_EVAL_TOOL_REF]),
-    });
+    const enabledAgents: AgentCatalog = new Map(
+      [...this.agentInventory].filter(([, agent]) => this.agentEnabled(agent)),
+    );
+    const claims = this.skillClaims();
+    return {
+      ...projectAgentReadiness(enabledAgents, {
+        catalog,
+        tools: new Set(Object.keys(tools)),
+        mcpServers,
+        builtins: new Set(BUILTIN_TOOL_REFS),
+        skills: new Set(skills.keys()),
+      }),
+      skills,
+      // A skill an agent mounts is that agent's; the orchestrator gets the rest.
+      rootSkills: [...skills.keys()].filter((id) => !claims.has(id)),
+    };
   }
 
   private async applyMcpCapabilities(
@@ -979,20 +1307,21 @@ export class AgentHost {
     catalog: ToolCatalog,
     forceRebuild = false,
   ): Promise<void> {
-    const projection = this.skillProjection(tools, catalog);
-    const fingerprint = skillProjectionFingerprint(projection, catalog);
-    if (forceRebuild || fingerprint !== this.appliedSkillProjection) {
+    const projection = this.capabilityProjection(tools, catalog);
+    const fingerprint = capabilityProjectionFingerprint(projection, catalog);
+    if (forceRebuild || fingerprint !== this.appliedCapabilityProjection) {
       await this.graphs!.replaceCapabilities({
-        skills: projection.ready,
+        skills: projection.skills,
+        rootSkills: projection.rootSkills,
+        agents: projection.ready,
+        agentAvailability: projection.availability,
         tools,
         catalog,
-        skillAvailability: projection.availability,
       });
-      this.appliedSkillProjection = fingerprint;
+      this.appliedCapabilityProjection = fingerprint;
     }
     this.mcpTools = tools;
     this.mcpCatalog = catalog;
-    this.skillAvailability = projection.availability;
     if (this.pluginsImpl) {
       (this.pluginsImpl as { tools: Record<string, unknown> }).tools = tools;
       (this.pluginsImpl as { catalog: ToolCatalog }).catalog = catalog;
@@ -1037,12 +1366,10 @@ export class AgentHost {
     await this.warmup;
     if (!this.skillsDir) return;
     const userSkills = await loadUserSkills(this.skillsDir, (m) => console.log(`[skills] ${m}`));
-    const shippedSkills = mergeShippedSkills(
-      this.builtinSkills ?? new Map(),
-      this.pluginSkills ?? new Map(),
-    );
-    const merged = mergeSkillCatalogs(shippedSkills, userSkills, (m) =>
-      console.log(`[skills] ${m}`),
+    const merged = mergeSkillCatalogs(
+      mergeShippedSkills(this.builtinSkills ?? new Map(), this.pluginSkills ?? new Map()),
+      userSkills,
+      (m) => console.log(`[skills] ${m}`),
     );
     console.log(
       `[skills] reloaded ${userSkills.size} user skill(s); catalog now ${merged.size} total`,
@@ -1050,11 +1377,39 @@ export class AgentHost {
     const previousInventory = this.skillInventory;
     this.skillInventory = merged;
     try {
-      // Skill instructions are captured when graphs are built, so force replacement
-      // even when readiness and tool grants did not change.
+      // Skill files are captured when graphs are built, so force replacement even
+      // when readiness and tool grants did not change.
       await this.applyMcpCapabilities(this.mcpTools, this.mcpCatalog, true);
     } catch (error) {
       this.skillInventory = previousInventory;
+      throw error;
+    }
+  }
+
+  /** Moves tool grants out of user skills into agents, then reloads agents if any moved. */
+  async adoptSkillToolGrants(): Promise<void> {
+    await this.warmup;
+    if (!this.skillsDir || !this.agentsDir) return;
+    const moved = await migrateSkillToolGrants(this.skillsDir, this.agentsDir, (m) =>
+      console.log(`[skills] ${m}`),
+    );
+    if (moved.length > 0) await this.reloadAgents();
+  }
+
+  async reloadAgents(): Promise<void> {
+    await this.warmup;
+    if (!this.agentsDir) return;
+    const userAgents = await loadUserAgents(this.agentsDir, (m) => console.log(`[agents] ${m}`));
+    const merged = mergeAgentCatalogs(this.pluginAgents ?? new Map(), userAgents, (m) =>
+      console.log(`[agents] ${m}`),
+    );
+    const previousInventory = this.agentInventory;
+    this.agentInventory = merged;
+    try {
+      // Prompts and models are captured when graphs are built.
+      await this.applyMcpCapabilities(this.mcpTools, this.mcpCatalog, true);
+    } catch (error) {
+      this.agentInventory = previousInventory;
       throw error;
     }
   }
@@ -1063,13 +1418,21 @@ export class AgentHost {
     await this.warmup;
     const skill = this.skillInventory.get(id);
     if (!skill) return undefined;
+    await this.setPreference(skillPreferenceKey(skill), enabled);
+    return (await this.skillCatalog()).find((candidate) => candidate.id === id);
+  }
+
+  async setAgentEnabled(id: string, enabled: boolean): Promise<AgentInfo | undefined> {
+    await this.warmup;
+    const agent = this.agentInventory.get(id);
+    if (!agent) return undefined;
     if (enabled) {
       const servers = new Map((await this.listMcpServers()).map((server) => [server.id, server]));
       const blockers: Array<{
         id: string;
         reason: "disabled" | "missing";
       }> = [];
-      for (const serverId of skillMcpServerIds(skill)) {
+      for (const serverId of agentMcpServerIds(agent)) {
         const server = servers.get(serverId);
         if (!server) blockers.push({ id: serverId, reason: "missing" });
         else if (!server.enabled) blockers.push({ id: serverId, reason: "disabled" });
@@ -1078,8 +1441,11 @@ export class AgentHost {
         throw new CapabilityDependencyError("dependency_disabled", blockers);
       }
     }
+    await this.setPreference(agentPreferenceKey(agent), enabled);
+    return (await this.agentCatalog()).find((candidate) => candidate.id === id);
+  }
 
-    const key = skillPreferenceKey(skill);
+  private async setPreference(key: CapabilityPreferenceKey, enabled: boolean): Promise<void> {
     const previous = this.capabilityPreferences.get(key);
     this.capabilityPreferences.set(key, enabled);
     try {
@@ -1089,11 +1455,14 @@ export class AgentHost {
       else this.capabilityPreferences.set(key, previous);
       throw error;
     }
-    return (await this.skillCatalog()).find((candidate) => candidate.id === id);
   }
 
   clearUserSkillPreference(id: string): void {
     this.capabilityPreferences.delete({ kind: "skill", source: "user", id });
+  }
+
+  clearUserAgentPreference(id: string): void {
+    this.capabilityPreferences.delete({ kind: "agent", source: "user", id });
   }
 
   async mcpConfigFile(): Promise<string | false> {
@@ -1127,7 +1496,7 @@ export class AgentHost {
         entry: redactMcpEntry(entry),
         enabled,
         ...statusOf(catalog, id, this.mcpLifecycle, health),
-        dependentSkills: this.dependentSkills(id),
+        dependentAgents: this.dependentAgents(id),
       });
     }
     for (const [id, entry] of Object.entries(userEntries)) {
@@ -1140,7 +1509,7 @@ export class AgentHost {
         entry: redactMcpEntry(entry),
         enabled,
         ...statusOf(catalog, id, this.mcpLifecycle, health),
-        dependentSkills: this.dependentSkills(id),
+        dependentAgents: this.dependentAgents(id),
       });
     }
     out.sort((a, b) => a.id.localeCompare(b.id));
@@ -1208,9 +1577,9 @@ export class AgentHost {
     id: string,
   ): Promise<Array<{ id: string; name: string }>> {
     await this.warmup;
-    return this.dependentSkills(id)
-      .filter((skill) => skill.enabled)
-      .map((skill) => ({ id: skill.id, name: skill.name }));
+    return this.dependentAgents(id)
+      .filter((agent) => agent.enabled)
+      .map((agent) => ({ id: agent.id, name: agent.name }));
   }
 
   clearUserMcpServerPreference(id: string): void {
@@ -1556,15 +1925,25 @@ export class AgentHost {
       const skills = mergeSkillCatalogs(shippedSkills, userSkills, (m) =>
         console.log(`[skills] ${m}`),
       );
-      const previousInventory = this.skillInventory;
+      const userAgents = this.agentsDir
+        ? await loadUserAgents(this.agentsDir, (m) => console.log(`[agents] ${m}`))
+        : new Map();
+      const agents = mergeAgentCatalogs(next.agents, userAgents, (m) =>
+        console.log(`[agents] ${m}`),
+      );
+      const previousSkills = this.skillInventory;
+      const previousAgents = this.agentInventory;
       this.skillInventory = skills;
+      this.agentInventory = agents;
       try {
         await this.applyMcpCapabilities(tools, catalog, true);
         this.pluginsImpl = next;
         this.pluginMcpServers = nextPluginEntries;
         this.pluginSkills = next.skills;
+        this.pluginAgents = next.agents;
       } catch (error) {
-        this.skillInventory = previousInventory;
+        this.skillInventory = previousSkills;
+        this.agentInventory = previousAgents;
         throw error;
       }
       console.log(
@@ -1721,6 +2100,8 @@ export class AgentHost {
 
     const skillsDir =
       opts.pluginsDir === false || dataRootIsMemory ? false : resolveSkillsDir(opts.dataRoot);
+    const agentsDir =
+      opts.pluginsDir === false || dataRootIsMemory ? false : resolveAgentsDir(opts.dataRoot);
 
     const memoriesDir = resolveMemoriesDir(opts.dataRoot);
 
@@ -1787,6 +2168,9 @@ export class AgentHost {
         ? await loadBuiltinSkills(builtinSkillsDir, (m) => console.log(`[skills] ${m}`))
         : new Map();
       const pluginSkills = plugins?.skills ?? new Map();
+      if (skillsDir && agentsDir) {
+        await migrateSkillToolGrants(skillsDir, agentsDir, (m) => console.log(`[skills] ${m}`));
+      }
       const userSkills = skillsDir ? await loadUserSkills(skillsDir, (m) => console.log(`[skills] ${m}`)) : new Map();
       const shippedSkills = mergeShippedSkills(builtinSkills, pluginSkills);
       // User-authored skills intentionally override shipped skills with the same id.
@@ -1797,6 +2181,12 @@ export class AgentHost {
           `(${userSkills.size} user, ${builtinSkills.size} builtin, ${pluginSkills.size} plugin)`,
         );
       }
+
+      const pluginAgents = plugins?.agents ?? new Map();
+      const userAgents = agentsDir
+        ? await loadUserAgents(agentsDir, (m) => console.log(`[agents] ${m}`))
+        : new Map();
+      const agents = mergeAgentCatalogs(pluginAgents, userAgents, (m) => console.log(`[agents] ${m}`));
 
       // MCP-backed capabilities arrive incrementally after the core graph is ready.
       const tools: Record<string, unknown> = {};
@@ -1811,6 +2201,9 @@ export class AgentHost {
       host.builtinSkills = builtinSkills;
       host.pluginSkills = pluginSkills;
       host.skillInventory = skills;
+      host.agentsDir = agentsDir;
+      host.pluginAgents = pluginAgents;
+      host.agentInventory = agents;
       host.pluginMcpServers = pluginMcpServers;
       host.pluginDirs = pluginsDir;
       host.pluginsInstallDir =
@@ -1823,9 +2216,8 @@ export class AgentHost {
         plugins,
       );
       host.beginMcpReload(effectiveMcpServers);
-      const skillProjection = host.skillProjection(tools, catalog);
-      host.skillAvailability = skillProjection.availability;
-      host.appliedSkillProjection = skillProjectionFingerprint(skillProjection, catalog);
+      const projection = host.capabilityProjection(tools, catalog);
+      host.appliedCapabilityProjection = capabilityProjectionFingerprint(projection, catalog);
       host.mcpTools = tools;
       host.mcpCatalog = catalog;
       const dependencies: RuntimeDeps = {
@@ -1846,11 +2238,14 @@ export class AgentHost {
             }
           : {}),
         localFolders: () => host.localFolders.list(),
+        todos: host.todoService,
         ...(host.attachments ? { attachmentResolver: host.attachments.resolver } : {}),
         ...(Object.keys(tools).length > 0 ? { tools } : {}),
         ...(Object.keys(catalog).length > 0 ? { catalog } : {}),
-        ...(skillProjection.ready.size > 0 ? { skills: skillProjection.ready } : {}),
-        skillAvailability: skillProjection.availability,
+        ...(projection.skills.size > 0 ? { skills: projection.skills } : {}),
+        ...(projection.rootSkills.length > 0 ? { rootSkills: projection.rootSkills } : {}),
+        ...(projection.ready.size > 0 ? { agents: projection.ready } : {}),
+        agentAvailability: projection.availability,
       };
       const graphs = new GraphManager({
         modelId: host.modelId,
@@ -1895,6 +2290,7 @@ export class AgentHost {
     for (const timer of this.mcpRecoveryTimers.values()) clearTimeout(timer);
     this.mcpRecoveryTimers.clear();
     this.triggerService.stop();
+    void this.digestJob?.stop();
     // Warmup may still be opening persistence or spawning MCP children.
     await this.warmup.catch(() => {});
     // Refuse new runs, abort in-flight ones, and drain them; run-end side effects

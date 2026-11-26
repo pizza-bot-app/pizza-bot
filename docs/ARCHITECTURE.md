@@ -34,7 +34,7 @@ apps/        api-server (Hono) · cli · desktop-shell (Electron) · web (React)
 packages/    core · runtime-langgraph · inference-providers
              · plugin-api · plugin-sdk · storage · logging
 plugins/     shipped plugin bundles and their packaging workspace
-skills/      SKILL.md capabilities the orchestrator equips + delegates to
+skills/      built-in SKILL.md playbooks, read on demand by agents
 tests/       langgraph-compat
 ```
 
@@ -172,6 +172,22 @@ in `core/src/protocol-types.ts`:
   `interruptOn` is set — `HumanInTheLoopMiddleware`. The clock context is also
   attached to subagents and is never checkpointed. Task planning middleware
   is intentionally excluded, including from model-specific harness profiles.
+- **Agent threads.** A thread created with an `agentId` (fixed at creation, like
+  `graphId`) runs that agent definition as its top-level agent through
+  `createAgentRootAgent`: the definition's prompt, tools, skills, and approvals,
+  on its pinned model or else the conversation's. It gets no persona addendum,
+  no Todo tools, and no `eval` unless it declares `builtin:eval`. Delegation is a
+  grant: `builtin:task` gives it a `task` tool over the other ready agents, and
+  without it the tool is absent. `GraphManager.rootAgentFor` caches one compiled
+  graph per agent and model, cleared with the assistant's on capability changes.
+  An agent's home thread is its single pinned `agentHome` thread
+  (`POST /agents/:id/home`). An unavailable agent's thread still reads its
+  history through the assistant; runs on it fail with the agent's status.
+- **Todo tools** (`list_todos`, `create_todo`, `update_todo`,
+  `runtime-langgraph/src/todo-tools.ts`) go to the root agent only, over the
+  `TodoAccess` seam in `RuntimeDeps`; subagents never receive them. A Todo created
+  in a run is linked to that run's thread. An agent that owns a Todo works on it
+  in background check-ins (§7).
 - **Runaway-call limits** are per agent invocation, with no combined parent/child
   budget. The orchestrator allows 40 model calls and its user-configured per-run
   tool-call limit (100 by default); each `task`-invoked subagent independently
@@ -211,20 +227,22 @@ in `core/src/protocol-types.ts`:
   the API lists directories only beneath canonical
   `PIZZA_LOCAL_FOLDER_BROWSE_ROOTS` and never follows symlinks while browsing.
 
-  One backend is shared by the orchestrator and every skill worker. Workers
+  One backend is shared by the orchestrator and every subagent. Subagents
   inherit the thread's `/` state files and their writes merge back, and the
   memory setting and folder grants apply to the whole thread rather than to one
-  skill:
+  agent. Enabled skills are served read-only from the catalog under `/skills/`,
+  so their files never enter a checkpoint:
 
   ```mermaid
   flowchart LR
     subgraph Thread["One thread"]
       O[Orchestrator]
-      W1[Skill worker A]
-      W2[Skill worker B]
+      W1[Subagent A]
+      W2[Subagent B]
     end
     O & W1 & W2 --> CB{{"Shared CompositeBackend"}}
-    CB -->|"/ (incl. /skills/)"| SB["StateBackend<br/>thread checkpoint · not on disk"]
+    CB -->|"/"| SB["StateBackend<br/>thread checkpoint · not on disk"]
+    CB -->|"/skills/"| SK["Skill catalog<br/>read-only · not checkpointed"]
     CB -->|"/memories/"| MEM["Memories dir on disk<br/>only while Memory is on in Settings"]
     CB -->|"/local/&lt;id&gt;/"| LF["Granted folders on disk<br/>read-only unless the grant allows writes"]
   ```
@@ -240,7 +258,7 @@ in `core/src/protocol-types.ts`:
   explicitly, because the worker's message handler runs outside the call's async
   context. Cancellation terminates the worker rather than disposing the isolate.
   Each agent invocation gets its own worker, keyed by the `checkpoint_ns` prefix
-  its eval calls and `afterAgent` share, so parallel runs of one skill neither swap
+  its eval calls and `afterAgent` share, so parallel runs of one agent neither swap
   configs nor tear each other down; and since upstream's eval queue is
   module-global, per-worker hosting also stops evals in different agents from
   serializing behind one another.
@@ -259,7 +277,7 @@ in `core/src/protocol-types.ts`:
   resume from (and, for a cut page, the limit that fits); an uncut page is
   unchanged.
   MCP tools are deliberately withheld: reaching one from generated code
-  would bypass the approval a skill declares through `interruptOn`. Writes are not
+  would bypass the approval an agent declares through `interruptOn`. Writes are not
   narrowed at the bridge — the composite backend re-reads each grant's `readOnly`
   flag on every call, so it refuses the write and names why, whereas the bridged
   list is fixed when the graph compiles and would freeze a live gate. Two sandbox
@@ -277,7 +295,7 @@ in `core/src/protocol-types.ts`:
   `ModelDescriptor.contextWindow` for clients and
   `model.profile.maxInputTokens` for DeepAgents summarization. Native LangChain
   profiles remain the fallback when catalog metadata is unavailable.
-- **HITL**: a skill declares `interruptOn: { toolRef: { allowedDecisions } }`.
+- **HITL**: an agent declares `interruptOn: { toolRef: { allowedDecisions } }`.
   On an interrupt the runtime surfaces the pause as a native protocol interrupt
   frame; the UI renders the AI Elements-derived `Confirmation` component; the
   client sends the decision back over the SDK as an `input.respond` command →
@@ -291,50 +309,58 @@ in `core/src/protocol-types.ts`:
   `defaultTools` are empty and it receives no skill, no `eval`, and none of the
   per-subagent guardrails. Dropping it costs no capability: the orchestrator holds
   the same filesystem tools and `eval` directly, so the only loss is an isolated
-  context to do noisy filesystem work in. With no ready skills there is nothing
+  context to do noisy filesystem work in. With no ready agents there is nothing
   to route to, so the `task` tool
   and the QuickJS `task()` bridge are both absent, and the orchestrator prompt
   omits its delegation guidance; readiness is dynamic, so an
-  installed-but-unavailable skill also withholds them. With skills, the root
+  installed-but-unavailable agent also withholds them. With agents, the root
   QuickJS interpreter exposes `task()` for programmatic fan-out.
-  Each skill catalog entry compiles directly into one subagent invoked through the
-  `task` tool. Its `SKILL.md` body is the system prompt, its description is the
-  routing signal, and its declared `mcp:server:tool` refs are its complete tool
-  surface. A readiness projection compiles the subagent only after every explicit
-  tool exists, every wildcard has completed discovery with a match, and every
-  built-in dependency is available. Dependency-free skills are ready
-  immediately. Loading or unavailable skills are omitted from the callable
-  subagent list and summarized in the root prompt. Subagents share the selected
-  conversation model and each receive only their own skill bundle. Synchronous
-  subagent graphs do not contain subagent middleware, so only the orchestrator can
-  delegate.
+  Each ready agent definition compiles into one declarative DeepAgents
+  `SubAgent` invoked through the `task` tool. Its body is the system prompt, its
+  description is the routing signal, its declared `mcp:server:tool` refs are its
+  complete tool surface, its `model` (resolved through the provider registry so
+  provider shims apply) is the model it runs on, and its `skills` mount on its own
+  `SkillsMiddleware`. Because the roster bypasses `createDeepAgent`'s per-subagent
+  defaults, the runtime mounts filesystem and skills middleware on each subagent
+  itself. A readiness projection compiles the subagent only after every explicit
+  tool exists, every wildcard has completed discovery with a match, every
+  built-in dependency is available, every mounted skill is enabled, and a pinned
+  model resolves; a pin that cannot resolve makes the agent unavailable instead of
+  falling back. Loading or unavailable agents are omitted from the callable
+  subagent list and summarized in the root prompt. Synchronous subagent graphs do
+  not contain subagent middleware, so only the orchestrator can delegate.
 
-Delegation is **routing, not rewriting**: the skill owns the procedure and the
+  Skills use DeepAgents' native progressive disclosure: names and descriptions in
+  the prompt, `SKILL.md` read on demand. A skill an agent mounts belongs to that
+  agent; every other enabled skill mounts on the orchestrator through
+  `createDeepAgent({ skills })`. The orchestrator caches its skill list per
+  thread, so each message turn sends `skillsMetadata: null` to reload it.
+
+Delegation is **routing, not rewriting**: the agent owns the procedure and the
 output shape, so a dispatch extracts the user's ask rather than composing a brief
 around it, and the reply relays the subagent's report instead of re-summarizing it.
 Two layers state it, and a live 2x2 ablation says both earn their place. The
 `task` tool description (`TASK_USAGE_NOTES`) has to, because it must displace
 DeepAgents' own usage notes, which tell the model to put full detail in the
 dispatch, state exactly what to get back, and relay a summary — advice for a
-generic subagent, not a skill-scoped one — and because it sits in the schema
+generic subagent, not a designed one — and because it sits in the schema
 the model is filling out. The orchestrator prompt
 (`packages/core/src/agent.ts`) also has to, for the **return** half: measured over
 three runs each, dropping its relay paragraph cut the share of the subagent's report
-that reached the user from 0.67 to 0.34, losing exactly the specifics a skill
+that reached the user from 0.67 to 0.34, losing exactly the specifics a subagent
 exists to produce (attendee names, case ages, identifiers). No tool description
 can reach that path, because by then the tool call is over. A third layer, a
 preamble prepended to each subagent's own prompt, was deleted: a subagent cannot tell
 the user's own words from the orchestrator's invention, so it can only defer to
-its skill instructions, which is what they already say.
+its own instructions, which is what they already say.
 
-A skill's `description` is the third lever and the strongest one on the dispatch
-itself. It is the only per-skill text the orchestrator ever sees — it never reads
-a `SKILL.md` — so a description that states what the subagent decides for itself and
-what it returns removes the uncertainty that makes the orchestrator invent a spec.
-In the same ablation, expanding two descriptions that way cut dispatch length 36%
-(45 to 29 words) and stopped a request from being split across redundant subagents.
-Skill authors own that text; see the skill-authoring guidance in
-[skills/README.md](../skills/README.md).
+An agent's `description` is the third lever and the strongest one on the dispatch
+itself. It is the only per-agent text the orchestrator ever sees, so a description
+that states what the subagent decides for itself and what it returns removes the
+uncertainty that makes the orchestrator invent a spec. In the same ablation,
+expanding two descriptions that way cut dispatch length 36% (45 to 29 words) and
+stopped a request from being split across redundant subagents. Agent authors own
+that text; see [EXTENDING.md](EXTENDING.md#agents).
 
 `taskDispatchMiddleware` owns the tool outright: it passes
 its own `createSubAgentMiddleware({ taskDescription, generalPurposeAgent: false })`
@@ -359,7 +385,7 @@ Two systems, injected as `RuntimeDeps` (`packages/storage`):
   long-term memory; durable analog to the in-memory store).
 
 Everything the platform itself owns — thread metadata, user-defined thread
-folders, triggers, terminal run activity, capability enablement preferences, the
+folders, Todos and their thread links, triggers, terminal run activity, capability enablement preferences, the
 FTS message index, and attachment metadata — lives in one
 `app.sqlite`, opened once via `openAppDatabase()`: a **single**
 `better-sqlite3` handle (one WAL lock) shared by the stores, rather than one
@@ -461,7 +487,9 @@ subscribe.
 process arms them, with no cross-process lease. Every trigger fires a run through a
 `RunLauncher` backed by the `ProtocolRunManager` (`protocol-run-launcher.ts`) and
 is tracked by a durable `trigger_occurrences` row (pending → running →
-succeeded/failed/dead). On startup the service runs two recovery passes: cron
+succeeded/failed/dead, or `waiting` while a run is paused for a person; the
+resumed run on the same thread closes it out, and a refused or cancelled resume
+leaves it waiting). On startup the service runs two recovery passes: cron
 triggers get **missed-run recovery** (if a schedule interval elapsed while the
 process was down, the run fires once to catch up), and any occurrence left
 `pending`/`running` by a crash is replayed once, bounded by a per-occurrence
@@ -472,6 +500,135 @@ occurrence on wake because its tool side effects may already have happened;
 crash recovery remains the startup-only path. Initial startup similarly waits
 for the bounded MCP connection pass to settle before arming schedules or
 recovering occurrences, so recovered runs receive the settled skill projection.
+
+### Todo check-ins
+
+A Todo owned by an agent has one trigger with a `todoId`, created and edited
+through the Todo (`TodoService` in the api-server), never through `/triggers`,
+which does not list it. Its cron is the most frequent check-in; with no cron the
+agent checks in only when asked (`POST /todos/:id/check-in`) or handed the Todo.
+Each firing resolves, through the `todoCheckIn` hook, to the owner's background
+thread for that Todo and a prompt describing the Todo, its timeline, and the
+agents it can hand off to; a check-in is skipped while the last one runs or waits
+on the user, and once the Todo is complete. The background thread has the owner's
+`agentId` and `background: true`, and runs the agent with the ambient tools
+(`runtime-langgraph/src/ambient-tools.ts`): `update_todo` writes the timeline,
+`notify_user` appends a message to the agent's home thread, marks it unread,
+indexes it for search, and appends a `message` thread activity (a desktop
+notification), `ask_user` pauses through `HumanInTheLoopMiddleware` with only `respond` allowed,
+and `reassign_todo` hands the Todo on. A handoff needs a note, refuses an agent
+that already handed this Todo on, is capped at `TODO_MAX_HANDOFFS` since the user
+last assigned it, and wakes the new owner at once with occurrence reason
+`handoff` in a new background thread. Background threads stay out of the Inbox
+list and the activity stream unless they wait on the user; a check-in that ends in
+an error is recorded on the Todo as a `failed` event with the error's message.
+`notify_user` and forks write state with `updateStateAsFinished`, which writes as
+the graph's terminal node so the thread has no pending step.
+
+Refinements on top of check-ins:
+
+- **Snooze.** `snoozedUntil` (set by the user, or by the agent's `snooze_until`
+  tool, at most 90 days out) skips scheduled check-ins; asked-for check-ins,
+  handoffs, and subtask wakes still run.
+- **Budget.** `maxCheckIns` caps check-ins since the user last assigned the Todo;
+  once used up, check-ins are skipped and one `paused` event is recorded.
+- **Notifications.** An agent may send at most `TODO_NOTIFY_LIMIT_PER_DAY`
+  immediate notifications in a rolling day. A Todo in `digest` mode queues them
+  instead, and a host cron (`TODO_DIGEST_CRON`, 5 pm local, while Automations is
+  on) posts one message per agent to its home thread; a busy home thread keeps the
+  queue for the next run.
+- **Questions surface.** An `ask_user` pause also posts the question to the agent's
+  home thread, so it reads like a message from a colleague. That post raises no
+  notification of its own; the paused work thread already does.
+- **Home-thread writes** (`notify_user`, surfaced questions, digests) run one at a
+  time per agent and are refused while the home thread runs or waits on a decision,
+  because writing past a pending interrupt would discard it. Notifications still
+  in flight count toward the daily limit, so parallel tool calls cannot exceed it.
+- **Work threads stay work logs.** `run.start` on a background thread is refused
+  (`409 work_thread`) and search leaves them out; the check-in prompt carries the
+  Todo and its timeline inside a `<todo-record>` block that the ambient prompt
+  marks as data, never instructions. The web renders user-authored messages
+  without raw HTML, so the delimiters show as text.
+- **Changing hands stops the check-in.** Taking a Todo back, reassigning it, or
+  deleting it cancels its running check-in, closes a paused one, and drops a wake
+  queued for it; a handoff through the run's own `reassign_todo` does not.
+- **Work-thread retention.** Deleting a Todo removes its work threads through the
+  host's thread delete path (checkpoints, search, activity). Each new work thread
+  prunes the Todo's older ones beyond the newest five, sparing any that run or wait
+  on the user, so a workflow-owned Todo cannot accumulate a thread per check-in.
+- **Subtasks.** `request_todo` creates a child Todo (`parentTodoId`) owned by
+  another agent, on its parent's schedule, and wakes it; the parent keeps its Todo,
+  sees its children in each check-in prompt, and is woken with reason `subtask`
+  when one finishes. A wake that arrives while the Todo's last check-in is busy is
+  delivered when that run ends. Nesting is capped at `TODO_MAX_DEPTH`, open
+  children at `TODO_MAX_OPEN_SUBTASKS`, and requests since the user last assigned
+  the Todo at `TODO_MAX_SUBTASKS`. A child starts with its parent's check-in
+  limit. While any Todo above it is complete or unowned, only asked-for check-ins
+  run and it cannot request subtasks; deleting a parent returns its open children
+  to the user. A child the user has assigned themselves is exempt.
+- **Workflows own Todos.** An owner of `graph:<id>` (stored in the same owner
+  column) is checked in on by running that graph with `input.todo`, each run in a
+  new background graph thread. The spec's `todoOutcome` names the state key that
+  settles the Todo when the run succeeds (`done`/`complete`/`completed`/`true`
+  completes it, `failed` records a failure, other text is a progress note). Agents
+  can hand a Todo only to a workflow whose spec names a `todoOutcome`; a workflow
+  is a final destination; a graph that owns a
+  Todo cannot be deleted. A restarted check-in occurrence is closed rather than
+  replayed, so a check-in's side effects never repeat.
+
+### Graph runs
+
+A trigger either starts a conversation with its `prompt` or, when it names a
+`graphId`, runs a declarative graph. Specs (`packages/core/src/graph-spec.ts`)
+live one JSON file per graph under `<dataRoot>/graphs` and are compiled by
+`compileGraphSpec` (`runtime-langgraph/src/graph-compiler.ts`) into a
+checkpointed `StateGraph`. Node types are `transform`, `branch`, `tool`, `llm`,
+`agent`, and `human`. Their fields use `{{path}}` templates over graph state,
+with no expressions, so a graph without `llm`/`agent` nodes is deterministic.
+
+- **One graph per thread.** A graph run is a thread whose `graphId` is fixed at
+  creation. `AgentHost.threadGraph` routes every state read and stream for that
+  thread to the compiled graph, never to the assistant. Chat messages and forks
+  are refused on graph threads. A spec that a trigger targets or any run still
+  uses can't be deleted (`409 in_use`), because its runs resolve their state
+  through it.
+- **Input.** The run starts from `input` state: `{ trigger, prompt?, body? }`
+  for a trigger (a webhook body is delivered as JSON, not mined for a prompt), or
+  the caller's object for `POST /graphs/:id/runs`.
+- **The agent node** runs the assistant (or, with `agentId`, that agent definition as its
+  root agent) inside the node with the node's config,
+  so its checkpoints, stream frames, and approval pauses nest under the
+  `<node>:<task>` namespace and resume through the parent.
+- **The human node** calls `interrupt()` with a `GraphHumanRequest`. It resumes
+  with `input.respond` carrying `{ interruptId, response }`, keyed by interrupt
+  id.
+- **Recovery** replays a crashed graph occurrence on its own thread with
+  `continueFromCheckpoint`. If the thread has a checkpoint, the run resumes it
+  instead of re-running finished nodes. If it has none, the run starts from the
+  same seed. A `waiting` occurrence whose thread no longer awaits input lost
+  its resumed run to the crash, so it is continued the same way; a
+  conversation occurrence in that state is marked failed instead, because
+  re-running its prompt would repeat its side effects.
+- **Tool nodes do not apply a skill's `interruptOn` approval.** Gate a tool node
+  that has side effects with a `human` node in front of it.
+- **The live view** reads plain v3 frames. `tasks` frames mark node start and
+  result; `lifecycle` and `checkpoints` frames give the subgraph tree and the
+  step timeline. `tests/langgraph-compat/graph-run-conformance.test.ts` pins
+  these shapes.
+- **The web renders a graph thread as a graph, never as a chat.** A thread with
+  a `graphId` opens `GraphRunPane` instead of the chat pane, so it has no
+  composer and no tool-approval card for a `human` pause. `graph-run-store.ts`
+  keeps one SDK `StreamController` per open run. Its projection
+  (`apps/web/src/projection/graph-run.ts`) folds two sources by task id:
+  checkpoint history, and the live root `tasks` channel. History is needed
+  because the server evicts a run's frames shortly after the run ends. The
+  topology is drawn with React Flow from the spec, not from `getGraph()`.
+  Branch edges come from `cases`/`default`, and the edge a run took is the
+  predecessor that finished last before the next node started. A `human` node
+  is answered with `input.respond` `{ interruptId, response }`. An `agent`
+  node's tool approvals resume with the usual decisions. Its transcript is the
+  SDK messages projection at `<node>:<task>`, which is only available while the
+  run's frames are buffered; after that the view shows the node's output value.
 
 ---
 
@@ -488,45 +645,44 @@ using a supported subset of the Claude Code plugin format:
   is the adapter's; the platform's layer is manifest parsing and wildcard tool
   resolution (`mcp:server:*`). Connections start with bounded concurrency and
   publish successful discovery snapshots incrementally. Snapshots rebuild
-  the static graph only when the skill readiness projection changes; in-flight turns keep
+  the static graph only when the agent readiness projection changes; in-flight turns keep
   their graph while subsequent turns see the replacement. A server entry can set
   `enabled: false` to remain configured without launching. String fields expand two kinds of
   placeholder at load time: `${CLAUDE_PLUGIN_ROOT}`/`${PLUGIN_ROOT}` (the plugin's
   on-disk dir) and `${ENV_VAR}` from the environment (Claude Code's `.mcp.json`
   convention) — so a secret like a bearer token stays out of the committed
   manifest (e.g. a plugin `.mcp.json` header reading `${SOME_API_KEY}`).
-- **Skills** — `SKILL.md` bundles are the only extension point for delegation.
-  `loadPlugins` reads each plugin-shipped skill dir into a `SkillCatalog`
-  (`@pizza-bot/core`), and the runtime turns the complete catalog into isolated
-  subagents. Each subagent receives its `SKILL.md` body directly as its system prompt
-  and its description becomes root routing metadata in the `task` tool. The root
-  does not receive DeepAgents' skills middleware, so it delegates from that
-  metadata without reading the skill body first. The runtime still seeds every
-  equipped skill's files into the run's state `files` as FileDataV2 (UTF-8 strings
-  or binary `Uint8Array` plus MIME type), preserving sibling assets in the shared
-  backend. `FilesystemBackend` is deliberately not used for this (it walks the
-  real disk unsandboxed). The editor equips skills via a picker beside Tools;
-  `GET /skills` is the catalog. **Three sources** feed one catalog: built-in
-  skills under the repo/package `skills/` directory (`loadBuiltinSkills`),
-  plugin-shipped skills (`loadSkillCatalog`), and **user-authored** skills under
-  `<data-root>/skills` (`loadUserSkills`), merged with the user winning on an id
-  collision. User skills are editable via `POST/PATCH/DELETE /skills` →
-  `host.reloadSkills()` (live on response, no restart); editing a built-in or
-  plugin-provided skill creates a user override, and deleting that override
-  reveals the original source again.
+- **Agents** — `agents/<id>.md` files in the Claude Code subagent layout are the
+  extension point for delegation (`agent-catalog.ts`). **Two sources** feed one
+  catalog: plugin-shipped agents (`loadAgentCatalog`) and user agents under
+  `<data-root>/agents` (`loadUserAgents`), merged with the user winning on an id
+  collision. User agents are editable via `POST/PATCH/DELETE /agents` →
+  `host.reloadAgents()`.
+- **Skills** — `SKILL.md` bundles are playbooks agents read on demand.
+  **Three sources** feed one catalog: built-in skills under the repo/package
+  `skills/` directory (`loadBuiltinSkills`), plugin-shipped skills
+  (`loadSkillCatalog`), and user skills under `<data-root>/skills`
+  (`loadUserSkills`), merged with the user winning on an id collision. User skills
+  are editable via `POST/PATCH/DELETE /skills` → `host.reloadSkills()` (live on
+  response, no restart); editing a built-in or plugin-provided skill creates a user
+  override, and deleting that override reveals the original source again. Skill
+  frontmatter keeps to the Agent Skills spec; the loader ignores `tools` and
+  `interruptOn` there, and a user skill that still declares them is converted once
+  into an agent that mounts it (`migrateSkillToolGrants`).
 
 Capability enablement is an installation-owned overlay in `app.sqlite`, keyed
 by resource kind, source identity, and id. It applies uniformly to user,
 built-in, and plugin contributions without mutating shipped files. Disabled
-skills are filtered before readiness projection, unavailable-skill prompting,
-subagent compilation, and state seeding. Explicit enable requests require every
-declared MCP server to exist and be enabled, and a server cannot be disabled or
-deleted while an enabled skill depends on it. External configuration absence,
-loading, and connection health affect readiness without changing saved
-enablement intent, so an enabled skill can be temporarily unavailable and
-recovers when its dependencies return.
+agents and skills are filtered before readiness projection, unavailable-agent
+prompting, and subagent compilation. Without a saved preference an agent follows
+its MCP servers, so a server that ships disabled takes its agents with it.
+Explicit enable requests require every declared MCP server to exist and be
+enabled, and a server cannot be disabled or deleted while an enabled agent depends
+on it. External configuration absence, loading, and connection health affect
+readiness without changing saved enablement intent, so an enabled agent can be
+temporarily unavailable and recovers when its dependencies return.
 
-Plugins contribute skills and MCP servers only — there is no web-UI contribution
+Plugins contribute agents, skills, and MCP servers only — there is no web-UI contribution
 kind. A plugin may declare the namespaced
 `extensions["dev.pizzabot.materializer"]` lifecycle hook to generate those same
 declarative resources from local source roots. The host runs its root-confined
@@ -569,6 +725,21 @@ Activity panel renders observed subagent delegations and transcript drill-downs,
 not model-maintained progress state.
 
 The inbox sidebar treats `All`, `Unread`, and `Action` as global smart views.
+A new conversation has a **To:** picker (Pizza Bot or an enabled agent) until
+its first message; choosing an agent creates the thread with `metadata.agent_id`.
+Agent threads show the agent's name in the Inbox and welcome state, and the Agents
+view's Message action opens the agent's home thread.
+
+A Todo's detail assigns it to an agent with a check-in schedule and shows its
+timeline. Background check-in threads appear only in the Action view, and an
+`ask_user` pause renders as a question card that takes a typed answer.
+
+**Todos** sit beside the Inbox with their own smart views (Today, Planned,
+Important, All, Completed). Flagging a thread creates a Todo linked to it, and the
+Inbox marks threads linked to an incomplete Todo. Todo edits ride the
+`/threads/events` change stream, so a Todo the assistant creates mid-run appears
+without polling.
+
 User folders are an orthogonal, single-folder organization layer over thread
 metadata; deleting a folder moves its threads to `Inbox`. The filter control
 shows or hides the folder panel and resets the active view to `All` when hidden,
@@ -661,7 +832,8 @@ standard-client compatibility.
 
 ### External plugin contributions are declarative
 
-A plugin contributes two declarative resource kinds — MCP servers and skills —
+A plugin contributes three declarative resource kinds — MCP servers, agents, and
+skills —
 using a supported subset of the Claude Code plugin format. An optional trusted
 materializer can produce those resources before they are loaded, but there is no
 executable-web-UI contribution kind; the manifest ignores unsupported fields

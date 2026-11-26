@@ -1,11 +1,14 @@
 export const L = {
   inboxSection: "Inbox",
+  todosSection: "Todos",
   memoriesSection: "Memories",
+  agentsSection: "Agents",
   skillsSection: "Skills",
   mcpSection: "MCP Servers",
   schedulesSection: "Schedules",
   webhooksSection: "Webhooks",
   automationsSection: "Automations",
+  graphsSection: "Graphs",
   pluginsSection: "Plugins",
   settingsSection: "Settings",
   settingsCategoriesLabel: "Settings categories",
@@ -78,6 +81,8 @@ export const L = {
   providerSaving: "Saving…",
   providerRemove: "Remove",
 
+  agent: "Agent",
+  agents: "Agents",
   skill: "Skill",
   skills: "Skills",
   mcpServer: "MCP server",
@@ -89,6 +94,51 @@ export const L = {
   webhook: "Webhook",
   webhooks: "Webhooks",
   run: "Run",
+  todo: "Todo",
+  todos: "Todos",
+
+  todoViewToday: "Today",
+  todoViewPlanned: "Planned",
+  todoViewImportant: "Important",
+  todoViewAll: "All",
+  todoViewCompleted: "Completed",
+  addTodoPlaceholder: "Add a todo",
+  flagThread: "Add to Todos",
+  flaggedThread: "In Todos",
+  todoAssignedTo: "Assigned to",
+  todoAssignedToMe: "Me",
+  todoCheckIn: "Check in",
+  todoCheckInNow: "Check in now",
+  todoNextCheckIn: "Next check-in",
+  todoOpenWorkThread: "Open work thread",
+  todoTimeline: "Timeline",
+  todoWaitingForYou: "Waiting for you",
+  todoCheckInsPaused: "Check-ins are paused until Automations is turned on in Settings.",
+  todoWorkThread: "Todo",
+  todoWorkflows: "Workflows",
+  todoUpdates: "Updates",
+  todoUpdatesImmediate: "Each update",
+  todoUpdatesDigest: "Daily digest (5 pm)",
+  todoSnooze: "Snooze",
+  todoSnoozeChoose: "Snooze until…",
+  todoSnoozeCustom: "Snooze until a date and time",
+  todoSnoozedUntil: "Snoozed until",
+  todoUnsnooze: "Unsnooze",
+  todoBudget: "Limit check-ins",
+  todoBudgetNone: "No limit",
+  todoPartOf: "Part of",
+  todoSubtasks: "Subtasks",
+  agentQuestion: "Question",
+  agentQuestionPlaceholder: "Your answer",
+  agentQuestionSend: "Send answer",
+
+  recipientLabel: "To",
+  recipientPickerLabel: "Send this conversation to",
+  agentUnavailable: "unavailable",
+  workflowUnavailable: "workflow no longer exists",
+  agentMissingDescription: "This agent is no longer in your catalog, so it can't reply.",
+  agentHomeThread: "Home conversation",
+  messageAgent: "Message",
 
   cronSchedule: "Scheduled",
   webhookSchedule: "Webhook",
@@ -100,14 +150,25 @@ export const L = {
   hasScheduleTitle: "Has a schedule",
   manageSchedules: "Manage in Schedules →",
 
+  noAgents: "No agents yet",
   noSkills: "No skills yet",
   noMcpServers: "No MCP servers yet",
   noMemories: "No memories yet",
   noSchedules: "No schedules yet",
   noWebhooks: "No webhooks yet",
   noPlugins: "No plugins installed",
+  noTodos: "Nothing here",
 } as const;
 
 export function scheduleKindLabel(kind: "cron" | "webhook"): string {
   return kind === "cron" ? L.cronSchedule : L.webhookSchedule;
 }
+
+export function workThreadNotice(agentName: string): string {
+  return `This is ${agentName}'s work on a Todo. Message ${agentName} in your conversation with them.`;
+}
+
+export function messageAgentLabel(agentName: string): string {
+  return `Message ${agentName}`;
+}
+

@@ -81,6 +81,38 @@ describe("TriggerStore: CRUD", () => {
     const s = openTriggerStore(file);
     expect(s.get("old")?.name).toBeUndefined();
     expect(s.update("old", { name: "Renamed" })?.name).toBe("Renamed");
+    expect(s.update("old", { graphId: "digest" })?.graphId).toBe("digest");
+  });
+
+  it("ties a check-in schedule to its Todo for good", () => {
+    const s = openTriggerStore(tmpDb());
+    s.create({ id: "c", kind: "cron", cron: "0 9 * * *", todoId: "todo-1", enabled: true });
+    expect(s.forTodo("todo-1")?.id).toBe("c");
+    expect(s.update("c", { cron: "0 * * * *" })).toMatchObject({ todoId: "todo-1", cron: "0 * * * *" });
+    expect(s.forTodo("todo-2")).toBeUndefined();
+  });
+
+  it("targets a graph until the graph id is patched blank", () => {
+    const s = openTriggerStore(tmpDb());
+    s.create({ id: "g", kind: "webhook", graphId: "triage", enabled: true, webhookSecret: "k" });
+    expect(s.get("g")?.graphId).toBe("triage");
+    expect(s.update("g", { graphId: "" })?.graphId).toBeUndefined();
+  });
+
+  it("round-trips a structured webhook body on the occurrence", () => {
+    const s = openTriggerStore(tmpDb());
+    s.create({ id: "g", kind: "webhook", graphId: "triage", enabled: true, webhookSecret: "k" });
+    const body = { user: "ada", tags: ["a"], n: 2 };
+    const { occurrence } = s.createOccurrence({
+      id: "o1",
+      triggerId: "g",
+      scheduledAt: "2026-01-01T00:00:00.000Z",
+      reason: "webhook",
+      now: "2026-01-01T00:00:00.000Z",
+      inputOverride: body,
+    });
+    expect(occurrence.inputOverride).toEqual(body);
+    expect(s.getOccurrence("o1")?.promptOverride).toBeUndefined();
   });
 
   it("lists newest-first and filters enabled by kind", () => {
@@ -224,8 +256,9 @@ describe("TriggerStore: durable occurrences", () => {
     expect(s.getOccurrence("occ")).toMatchObject({ status: "running", runId: "run" });
     expect(s.get("t")).toMatchObject({ lastRunAt: "2026-07-05T10:00:01.000Z", lastThreadId: "thread" });
 
-    const completed = s.completeOccurrenceByRunId(
+    const completed = s.completeOccurrenceRun(
       "run",
+      "thread",
       "success",
       "2026-07-05T10:00:10.000Z",
     );
@@ -234,6 +267,22 @@ describe("TriggerStore: durable occurrences", () => {
       expect.objectContaining({ id: "occ", runId: "run", status: "succeeded" }),
     ]);
     s.close();
+  });
+
+  it("parks a paused run as waiting, outside recovery, until the resumed run on its thread ends", () => {
+    const s = openTriggerStore(tmpDb());
+    s.create({ id: "t", kind: "cron", enabled: true, cron: "0 9 * * *", graphId: "g" });
+    s.createOccurrence({ id: "occ", triggerId: "t", scheduledAt: "2026-07-05T10:00:00.000Z", reason: "cron", now: "2026-07-05T10:00:00.000Z" });
+    s.beginOccurrence("occ", "2026-07-05T10:00:01.000Z", 3);
+    s.attachRun("occ", "thread", "run", "running", "2026-07-05T10:00:01.000Z");
+
+    expect(s.completeOccurrenceRun("run", "thread", "interrupted", "2026-07-05T10:00:02.000Z"))
+      .toMatchObject({ status: "waiting", runStatus: "interrupted" });
+    expect(s.listRecoverableOccurrences()).toEqual([]);
+    expect(s.completeOccurrenceRun("run_resume", "other-thread", "success", "2026-07-05T10:01:00.000Z"))
+      .toBeUndefined();
+    expect(s.completeOccurrenceRun("run_resume", "thread", "success", "2026-07-05T10:01:00.000Z"))
+      .toMatchObject({ id: "occ", status: "succeeded", runId: "run" });
   });
 
   it("recovers a crash-orphaned occurrence exactly once until its budget is spent", () => {
