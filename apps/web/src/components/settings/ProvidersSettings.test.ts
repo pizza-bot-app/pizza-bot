@@ -6,6 +6,7 @@ import type { ProviderAuthMethod } from "@pizza-bot/core";
 import {
   getProviderStatus,
   FieldInput,
+  syncedValues,
   secretKeysWithStoredValue,
   secretReferenceValidationError,
   unavailableLocalSecretValidationError,
@@ -248,5 +249,37 @@ describe("FieldInput", () => {
     );
 
     expect(html).toContain('<span class="field-hint">Needed for Gemini 4.</span>');
+  });
+});
+
+describe("syncedValues", () => {
+  it("follows the server for fields the user has not edited", () => {
+    expect(
+      syncedValues(
+        { project: "", location: "global" },
+        { project: "", location: "global" },
+        { project: "my-project", location: "us" },
+      ),
+    ).toEqual({ project: "my-project", location: "us" });
+  });
+
+  it("keeps the user's unsaved edits", () => {
+    expect(
+      syncedValues(
+        { project: "draft", location: "global" },
+        { project: "", location: "global" },
+        { project: "my-project", location: "us" },
+      ),
+    ).toEqual({ project: "draft", location: "us" });
+  });
+
+  it("adds fields a newer schema introduces and drops removed ones", () => {
+    expect(
+      syncedValues(
+        { platform: "auto", legacy: "x" },
+        { platform: "auto", legacy: "x" },
+        { platform: "auto", project: "" },
+      ),
+    ).toEqual({ platform: "auto", project: "" });
   });
 });

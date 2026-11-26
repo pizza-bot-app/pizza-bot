@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 import { errorMessage, SECRET_UNCHANGED } from "@/api-client";
 import type {
@@ -249,9 +249,15 @@ function ProviderRow({
   const [methodId, setMethodId] = useState(provider.config?.method ?? methods[0]?.id ?? "");
   const method = methods.find((m) => m.id === methodId) ?? methods[0];
 
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    seedValues(method, provider.config),
-  );
+  const seed = useMemo(() => seedValues(method, provider.config), [method, provider.config]);
+  const [values, setValues] = useState<Record<string, string>>(seed);
+  const lastSeed = useRef(seed);
+  useEffect(() => {
+    const previous = lastSeed.current;
+    if (previous === seed) return;
+    lastSeed.current = seed;
+    setValues((current) => syncedValues(current, previous, seed));
+  }, [seed]);
   const [saving, setSaving] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -707,6 +713,20 @@ async function materializeSecret(providerId: string, fieldKey: string, typed: st
 function envRefName(providerId: string, fieldKey: string): string {
   const sanitize = (s: string) => s.replace(/[^A-Za-z0-9]/g, "_").toUpperCase();
   return `PIZZA_SECRET_${sanitize(providerId)}_${sanitize(fieldKey)}`;
+}
+
+/** Fields the user has not edited follow the server; edited ones keep the draft. */
+export function syncedValues(
+  current: Record<string, string>,
+  previousSeed: Record<string, string>,
+  nextSeed: Record<string, string>,
+): Record<string, string> {
+  const out = { ...nextSeed };
+  for (const key of Object.keys(nextSeed)) {
+    const draft = current[key];
+    if (draft !== undefined && draft !== (previousSeed[key] ?? "")) out[key] = draft;
+  }
+  return out;
 }
 
 function seedValues(method: ProviderAuthMethod | undefined, config: ProviderConfigView | undefined): Record<string, string> {
