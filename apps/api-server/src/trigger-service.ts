@@ -55,6 +55,7 @@ export class TriggerService {
   private readonly maxAttempts: number;
   private readonly log: (msg: string) => void;
   private active = false;
+  private recoveredOccurrences = false;
   private scheduleFingerprint = "";
   private lastInvocationMs = 0;
 
@@ -151,7 +152,12 @@ export class TriggerService {
     if (!this.reconcileSchedules(true)) return;
     this.active = true;
     if (!wasActive) {
-      this.recoverOccurrences();
+      // Only a previous process's runs can be orphaned; re-arming after an automations
+      // toggle would otherwise relaunch this process's live runs as duplicates.
+      if (!this.recoveredOccurrences) {
+        this.recoveredOccurrences = true;
+        this.recoverOccurrences();
+      }
       for (const trigger of this.store.listEnabled("cron")) this.recoverMissedRun(trigger);
       this.log(`armed: ${this.jobs.size} cron job(s)`);
     }

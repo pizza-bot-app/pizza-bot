@@ -684,12 +684,22 @@ The model seam (`core/model-provider.ts`) is provider-agnostic: `ModelProvider`
 the `provider:model` prefix. The composition root registers
 providers (`agent-host.ts` registers them through `registerBuiltinProviders`) and
 each turn carries its model as `configurable.model`. Amazon Bedrock, Anthropic,
-Google Gemini, OpenAI, OpenRouter, Requesty, Opper, and Ollama are peer
-`ModelProvider` adapters;
+Google Gemini, OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference,
+LiteLLM, and Ollama are peer `ModelProvider` adapters;
 another provider can follow the same pattern without changing the runtime,
 transport, or frontend. Each adapter is a peer submodule under
 `packages/inference-providers/src/providers/<id>` (Bedrock keeps its own
-subdirectory for the shim's multiple files). Provider quirks stay
+subdirectory for the shim's multiple files). Hosted OpenAI-compatible gateways
+(Requesty, Opper, UberLLM, Cheaper Inference) and self-hosted proxies
+(LiteLLM) are not adapters of their own: each is an `OpenAiCompatibleSpec`
+(base URL, env prefix, optional featured listing, a reader for its `/models`
+entries or its own discovery hook, and whether the key is optional) run by the
+shared `OpenAiCompatibleProvider`,
+so adding a gateway means writing a spec. The OpenAI-compatible family and
+OpenRouter also accept an "Advanced request JSON" setting that is merged into
+every request body. It is validated when settings are saved and rejects fields
+the agent depends on (`model`, `messages`, `tools`, `stream`, …) and the output
+cap, which the token budget setting owns. Provider quirks stay
 provider-local: the Bedrock adapter
 (`packages/inference-providers/src/providers/bedrock`) owns the `maxTokens`
 default

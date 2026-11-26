@@ -306,6 +306,53 @@ describe("TriggerService: runNow (manual)", () => {
 });
 
 describe("TriggerService: automations gate and recovery", () => {
+  it("does not relaunch live occurrences when automations are toggled off and on", () => {
+    const app = openAppDatabase(":memory:");
+    apps.push(app);
+    app.triggers.create({ id: "t", kind: "webhook", enabled: true, webhookSecret: "k", prompt: "triage" });
+    app.settings.patch({ enableAutomations: true });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, app.triggers, {
+      isEnabled: () => app.settings.get().enableAutomations,
+      log: () => {},
+    });
+    svc.start();
+    svc.invokeWebhook("t", { a: 1 });
+    const occurrenceId = app.triggers.occurrences("t")[0]!.id;
+
+    app.settings.patch({ enableAutomations: false });
+    svc.reload();
+    app.settings.patch({ enableAutomations: true });
+    svc.reload();
+
+    expect(m.starts).toHaveLength(1);
+    expect(app.triggers.getOccurrence(occurrenceId)).toMatchObject({ status: "running", attempt: 1 });
+    svc.stop();
+  });
+
+  it("recovers orphans once automations are first enabled after starting disabled", () => {
+    const app = openAppDatabase(":memory:");
+    apps.push(app);
+    const at = new Date().toISOString();
+    app.triggers.create({ id: "t", kind: "cron", prompt: "p", enabled: true, cron: "0 0 1 1 *", lastRunAt: at });
+    app.triggers.createOccurrence({ id: "orphan", triggerId: "t", scheduledAt: at, reason: "manual", now: at });
+    app.triggers.beginOccurrence("orphan", at, 3);
+    app.triggers.attachRun("orphan", "thread_prev", "run_prev", "running", at);
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, app.triggers, {
+      isEnabled: () => app.settings.get().enableAutomations,
+      log: () => {},
+    });
+    svc.start();
+    expect(m.starts).toHaveLength(0);
+
+    app.settings.patch({ enableAutomations: true });
+    svc.reload();
+    expect(m.starts).toHaveLength(1);
+    expect(app.triggers.getOccurrence("orphan")).toMatchObject({ attempt: 2 });
+    svc.stop();
+  });
+
   it("does not run persisted schedules while disabled and restores them when enabled", async () => {
     const app = openAppDatabase(":memory:");
     apps.push(app);

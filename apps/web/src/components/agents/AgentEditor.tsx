@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { errorMessage } from "@/api-client";
 import type {
   AgentDefinition,
   AgentDraft,
@@ -76,7 +77,7 @@ export function AgentEditor({
       setDeclaredTools(draft.declaredTools);
       setInterruptOn(draft.interruptOn);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Generate failed");
+      setError(errorMessage(e) ?? "Generate failed");
     } finally {
       setGenerating(false);
     }
@@ -101,10 +102,10 @@ export function AgentEditor({
       await onSave(definition);
       notify({ title: isNew ? "Agent created" : "Agent saved", tone: "success" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e) ?? "Save failed");
       notify({
         title: "Could not save agent",
-        description: e instanceof Error ? e.message : undefined,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {

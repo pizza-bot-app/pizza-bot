@@ -63,6 +63,8 @@ export const L = {
   secretRefHint: "Enter the name of an environment variable holding this secret, referenced as ${MY_VAR}. The value is never stored — only the reference.",
   secretKeychainHint: "Stored encrypted in your OS keychain by the desktop app. Only a generated reference is sent over HTTP or saved.",
   secretRefPlaceholder: "${MY_API_KEY}",
+  jsonFieldPlaceholder: '{"service_tier": "flex"}',
+  jsonFieldHint: "Merged into every request this provider sends. Use it for provider options Pizza Bot has no setting for.",
   secretStoredPlaceholder: "•••••••• (stored — leave blank to keep)",
   secretUnavailablePlaceholder: "Enter this credential again",
   secretUnavailableHint: "The saved credential cannot be read by this app. Enter it again and save.",

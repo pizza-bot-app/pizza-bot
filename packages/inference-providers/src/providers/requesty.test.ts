@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HumanMessage } from "@langchain/core/messages";
 import { RequestyLangChainModelProvider } from "./requesty.js";
 
 beforeEach(() => {
@@ -82,49 +81,6 @@ describe("Requesty model discovery", () => {
     );
   });
 
-  it("falls back to the full catalog when managed policies are unavailable", async () => {
-    const provider = new RequestyLangChainModelProvider({
-      apiKey: "test-key",
-      baseUrl: "https://requesty.example/v1",
-      fetch: catalogFetch({
-        "https://requesty.example/v1/models": {
-          data: [{ id: "openai/gpt-4o-mini", api: "chat" }],
-        },
-      }),
-      modelsDevFetch: vi.fn(async () => new Response("{}", { status: 200 })),
-    });
-
-    await expect(provider.listModels()).resolves.toEqual([
-      expect.objectContaining({ id: "openai/gpt-4o-mini", provider: "requesty" }),
-    ]);
-  });
-
-  it("reports rejected credentials from the catalog", async () => {
-    const provider = new RequestyLangChainModelProvider({
-      apiKey: "bad-key",
-      fetch: vi.fn(async () => new Response("forbidden", { status: 403 })),
-    });
-
-    await expect(provider.listModels()).rejects.toMatchObject({
-      name: "ModelCatalogError",
-      code: "authentication",
-      retryable: false,
-    });
-  });
-
-  it("reports missing credentials without calling discovery", async () => {
-    vi.stubEnv("REQUESTY_API_KEY", "");
-    const fetchFn = vi.fn();
-    const provider = new RequestyLangChainModelProvider({ apiKey: "", fetch: fetchFn });
-
-    await expect(provider.listModels()).rejects.toMatchObject({
-      name: "ModelCatalogError",
-      code: "credentials",
-      retryable: false,
-    });
-    expect(fetchFn).not.toHaveBeenCalled();
-  });
-
   it("fills missing native metadata from the Requesty models.dev catalog", async () => {
     const provider = new RequestyLangChainModelProvider({
       apiKey: "test-key",
@@ -157,24 +113,6 @@ describe("Requesty model discovery", () => {
       }),
     ]);
   });
-  it("replaces a cleared custom endpoint with the environment fallback", async () => {
-    vi.stubEnv("REQUESTY_BASE_URL", "https://router.eu.requesty.ai/v1");
-    const fetchFn = vi.fn(async () => Response.json({ data: [] }));
-    const provider = new RequestyLangChainModelProvider({
-      apiKey: "test-key",
-      baseUrl: "https://requesty-custom.example/v1",
-      fetch: fetchFn,
-    });
-
-    provider.configure({ method: "api-key", values: { apiKey: "test-key", baseUrl: "" } });
-    await provider.listModels();
-
-    expect(fetchFn).toHaveBeenCalledWith(
-      "https://router.eu.requesty.ai/v1/models",
-      expect.any(Object),
-    );
-  });
-
   it("uses the default endpoint when no override is configured", async () => {
     const fetchFn = vi.fn(async () => Response.json({ data: [] }));
     const provider = new RequestyLangChainModelProvider({ apiKey: "test-key", fetch: fetchFn });
@@ -186,102 +124,5 @@ describe("Requesty model discovery", () => {
       "https://router.requesty.ai/v1/models",
       expect.any(Object),
     );
-  });
-
-  it("drops cached descriptors when the configuration changes", async () => {
-    const fetchFn = catalogFetch({
-      "https://requesty.example/v1/models": {
-        data: [{ id: "openai/gpt-4o-mini", api: "chat", max_output_tokens: 4_096 }],
-      },
-      "https://router.eu.requesty.ai/v1/models": { data: [] },
-    });
-    const provider = new RequestyLangChainModelProvider({
-      apiKey: "test-key",
-      baseUrl: "https://requesty.example/v1",
-      fetch: fetchFn,
-      modelsDevFetch: vi.fn(async () => new Response("{}", { status: 200 })),
-    });
-    await provider.listModels();
-    expect((await provider.buildModel("openai/gpt-4o-mini"))).toMatchObject({ maxTokens: 4_096 });
-
-    provider.configure({
-      method: "api-key",
-      values: { apiKey: "test-key", baseUrl: "https://router.eu.requesty.ai/v1" },
-    });
-
-    expect((await provider.buildModel("openai/gpt-4o-mini"))).toMatchObject({ maxTokens: 8_192 });
-  });
-});
-
-describe("Requesty model construction", () => {
-  it("builds a Chat Completions model with the configured output cap", async () => {
-    const provider = new RequestyLangChainModelProvider({
-      apiKey: "test-key",
-      maxTokens: 32_000,
-      models: [{
-        id: "anthropic/claude-sonnet-4-5",
-        provider: "requesty",
-        displayName: "anthropic/claude-sonnet-4-5 (Requesty)",
-        contextWindow: 200_000,
-        maxOutputTokens: 16_000,
-      }],
-    });
-
-    const model = await provider.buildModel("anthropic/claude-sonnet-4-5");
-
-    expect(model).toMatchObject({
-      model: "anthropic/claude-sonnet-4-5",
-      apiKey: "test-key",
-      maxTokens: 16_000,
-    });
-    expect(model._llmType()).toBe("openai");
-    expect(model.profile.maxInputTokens).toBe(200_000);
-  });
-
-  it("classifies a missing API key as expired authentication", async () => {
-    vi.stubEnv("REQUESTY_API_KEY", "");
-    const provider = new RequestyLangChainModelProvider({ apiKey: "" });
-
-    await expect(provider.buildModel("openai/gpt-4o-mini")).rejects.toMatchObject({
-      code: "AUTH_EXPIRED",
-    });
-  });
-
-  it("sends chat completions to the configured base URL", async () => {
-    const fetchFn = vi.fn(async (
-      _input: Parameters<typeof fetch>[0],
-      _init?: Parameters<typeof fetch>[1],
-    ) => new Response(JSON.stringify({
-      id: "chatcmpl-1",
-      model: "gpt-4o-mini-2024-07-18",
-      choices: [{
-        index: 0,
-        message: { role: "assistant", content: "ok" },
-        finish_reason: "stop",
-      }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    }));
-    const provider = new RequestyLangChainModelProvider({
-      apiKey: "test-key",
-      baseUrl: "https://router.eu.requesty.ai/v1",
-      fetch: fetchFn,
-      models: [{
-        id: "openai/gpt-4o-mini",
-        provider: "requesty",
-        displayName: "openai/gpt-4o-mini (Requesty)",
-      }],
-    });
-    const model = await provider.buildModel("openai/gpt-4o-mini");
-
-    const reply = await model.invoke([new HumanMessage("hi")]);
-
-    expect(reply.content).toBe("ok");
-    const [input, init] = fetchFn.mock.calls[0] ?? [];
-    expect(String(input)).toBe("https://router.eu.requesty.ai/v1/chat/completions");
-    const body = JSON.parse(String(init?.body)) as { model: string; max_tokens: number };
-    expect(body).toMatchObject({ model: "openai/gpt-4o-mini", max_tokens: 8_192 });
   });
 });

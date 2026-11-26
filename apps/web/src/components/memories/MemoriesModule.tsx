@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { errorMessage } from "@/api-client";
 import type { MemoryInfo, MemoryDoc } from "@/api-client";
 import { Brain, ChevronLeft, FileText, Trash2 } from "lucide-react";
 import { ResourceModule, type ResourceDetailArgs } from "../ResourceModule.js";
@@ -212,10 +213,10 @@ function MemoryEditor({
       else await onUpdate(id, content);
       notify({ title: isNew ? "Memory created" : "Memory saved", tone: "success" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e) ?? "Save failed");
       notify({
         title: "Could not save memory",
-        description: e instanceof Error ? e.message : undefined,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {

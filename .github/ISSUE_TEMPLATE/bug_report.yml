@@ -52,6 +52,9 @@ body:
         - OpenRouter
         - Requesty
         - Opper
+        - UberLLM
+        - Cheaper Inference
+        - LiteLLM
         - Ollama
         - Not reached / not applicable
     validations:

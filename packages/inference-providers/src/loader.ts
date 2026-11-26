@@ -8,6 +8,9 @@ import { OpenAiLangChainModelProvider } from "./providers/openai.js";
 import { OpenRouterLangChainModelProvider } from "./providers/openrouter.js";
 import { RequestyLangChainModelProvider } from "./providers/requesty.js";
 import { OpperLangChainModelProvider } from "./providers/opper.js";
+import { UberLlmLangChainModelProvider } from "./providers/uberllm.js";
+import { CheaperInferenceLangChainModelProvider } from "./providers/cheaperinference.js";
+import { LiteLLMLangChainModelProvider } from "./providers/litellm.js";
 import { OllamaLangChainModelProvider } from "./providers/ollama.js";
 
 /** Resolve saved secret references before a provider can build its first model. */
@@ -27,13 +30,24 @@ export async function registerBuiltinProviders(registry: ModelRegistry, configs?
     new OpenRouterLangChainModelProvider(),
     new RequestyLangChainModelProvider(),
     new OpperLangChainModelProvider(),
+    new UberLlmLangChainModelProvider(),
+    new CheaperInferenceLangChainModelProvider(),
+    new LiteLLMLangChainModelProvider(),
     new OllamaLangChainModelProvider(),
   ];
   for (const provider of providers) {
     const saved = configs?.getConfig(provider.id);
     if (saved && provider.configure) {
       // Expand secret references in memory; persisted config remains indirect.
-      provider.configure(expandMcpEnvVars({ method: saved.method, values: saved.values }));
+      // A saved config can stop validating once its env references change, and one
+      // provider must not keep the backend from starting; it stays unconfigured.
+      try {
+        provider.configure(expandMcpEnvVars({ method: saved.method, values: saved.values }));
+      } catch (err) {
+        console.warn(
+          `[providers] ignoring saved ${provider.id} settings: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
     registry.register(provider);
     const preferences = configs?.getModelPreferences(provider.id);

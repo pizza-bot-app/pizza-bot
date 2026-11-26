@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { ApiClient, ApiError } from "./api-client.js";
+import { ApiClient, ApiError, errorMessage } from "./api-client.js";
 
 describe("ApiClient", () => {
   afterEach(() => {
@@ -638,6 +638,29 @@ describe("ApiClient", () => {
       code: "boom",
       message: "list models failed: 503 backend unavailable",
     });
+  });
+
+  it("shows a rejected request's own sentence as the user message", () => {
+    const rejected = new ApiError(
+      "update provider",
+      400,
+      "Bad Request",
+      'Advanced request JSON cannot set "tools"; Pizza Bot controls those fields.',
+    );
+
+    expect(rejected.detail).toBe('Advanced request JSON cannot set "tools"; Pizza Bot controls those fields.');
+    expect(errorMessage(rejected)).toBe('Advanced request JSON cannot set "tools"; Pizza Bot controls those fields.');
+  });
+
+  it("keeps the full message for machine codes, server errors, and missing details", () => {
+    expect(errorMessage(new ApiError("list threads", 403, "Forbidden", "origin_not_allowed")))
+      .toBe("list threads failed: 403 origin_not_allowed");
+    expect(errorMessage(new ApiError("list models", 503, "Service Unavailable", "backend unavailable")))
+      .toBe("list models failed: 503 backend unavailable");
+    expect(errorMessage(new ApiError("get skill", 404, "Not Found")))
+      .toBe("get skill failed: 404 Not Found");
+    expect(errorMessage(new Error("offline"))).toBe("offline");
+    expect(errorMessage("not an error")).toBeUndefined();
   });
 
   it("requests an unfiltered forced model catalog refresh", async () => {

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { errorMessage } from "@/api-client";
 import type { SkillBundle, SkillDraft, SkillSiblingFile } from "@/api-client";
 import { ChevronLeft, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { L } from "../../lexicon.js";
@@ -47,7 +48,7 @@ export function SkillEditor({ skill, onSave, onGenerate, removalAction, customiz
       setDescription(draft.description);
       setBody(draft.body);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Generate failed");
+      setError(errorMessage(e) ?? "Generate failed");
     } finally {
       setGenerating(false);
     }
@@ -71,10 +72,10 @@ export function SkillEditor({ skill, onSave, onGenerate, removalAction, customiz
       await onSave(bundle);
       notify({ title: isNew ? "Skill created" : "Skill saved", tone: "success" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e) ?? "Save failed");
       notify({
         title: "Could not save skill",
-        description: e instanceof Error ? e.message : undefined,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {

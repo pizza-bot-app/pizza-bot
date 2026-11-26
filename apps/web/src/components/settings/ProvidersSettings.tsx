@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
-import { SECRET_UNCHANGED } from "@/api-client";
+import { errorMessage, SECRET_UNCHANGED } from "@/api-client";
 import type {
   ProviderView,
   ProviderConfigView,
@@ -314,12 +314,12 @@ function ProviderRow({
         { method: method.id, values: out },
         modelPreferences,
       );
-      notify({ title: `${provider.id} saved`, tone: "success" });
+      notify({ title: `${providerLabel(provider.id)} saved`, tone: "success" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(errorMessage(e) ?? "Save failed");
       notify({
-        title: `Could not save ${provider.id}`,
-        description: e instanceof Error ? e.message : undefined,
+        title: `Could not save ${providerLabel(provider.id)}`,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {
@@ -334,12 +334,12 @@ function ProviderRow({
       await onRemove(provider.id);
       setValues(seedValues(method, undefined));
       setModelPreferences({ mode: "all", selected: [] });
-      notify({ title: `${provider.id} removed`, tone: "success" });
+      notify({ title: `${providerLabel(provider.id)} removed`, tone: "success" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Remove failed");
+      setError(errorMessage(e) ?? "Remove failed");
       notify({
-        title: `Could not remove ${provider.id}`,
-        description: e instanceof Error ? e.message : undefined,
+        title: `Could not remove ${providerLabel(provider.id)}`,
+        description: errorMessage(e),
         tone: "error",
       });
     } finally {
@@ -602,6 +602,15 @@ function FieldInput({
             </option>
           ))}
         </select>
+      ) : field.type === "json" ? (
+        <textarea
+          className="field-input mono"
+          rows={4}
+          spellCheck={false}
+          value={value}
+          placeholder={field.default ?? L.jsonFieldPlaceholder}
+          onChange={(e) => onChange(e.target.value)}
+        />
       ) : (
         <input
           className="field-input"
@@ -623,6 +632,7 @@ function FieldInput({
           onChange={(e) => onChange(e.target.value)}
         />
       )}
+      {field.type === "json" && <span className="field-hint">{L.jsonFieldHint}</span>}
       {field.type === "password" && (
         <span className={`field-hint${unavailable ? " error" : ""}`}>
           {unavailable
