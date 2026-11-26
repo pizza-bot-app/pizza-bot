@@ -236,16 +236,34 @@ describe("TodoStore", () => {
       expect(s.get(child.id)!.parentTodoId).toBeUndefined();
     });
 
-    it("queues digest entries by agent and hands each out once", () => {
+    it("keeps digest entries until they are deleted as delivered", () => {
       const s = store(ticking());
       const a = s.create({ title: "a" });
       s.enqueueDigest("researcher", a.id, "first");
       s.enqueueDigest("booker", a.id, "other");
       s.enqueueDigest("researcher", a.id, "second");
-      const taken = s.takeDigests();
-      expect(taken.get("researcher")!.map((entry) => entry.message)).toEqual(["first", "second"]);
-      expect(taken.get("booker")).toHaveLength(1);
-      expect(s.takeDigests().size).toBe(0);
+      const pending = s.pendingDigests();
+      expect(pending.get("researcher")!.map((entry) => entry.message)).toEqual(["first", "second"]);
+      s.deleteDigestEntries(pending.get("researcher")!.map((entry) => entry.id));
+      expect([...s.pendingDigests().keys()]).toEqual(["booker"]);
+    });
+
+    it("counts delivered notifications by actor since a time", () => {
+      const s = store(ticking());
+      const a = s.create({ title: "a" });
+      s.appendEvent(a.id, { kind: "notified", actor: "researcher", threadId: "home" });
+      s.appendEvent(a.id, { kind: "notified", actor: "researcher", note: "queued" });
+      s.appendEvent(a.id, { kind: "notified", actor: "booker", threadId: "home" });
+      expect(s.countEvents("notified", "researcher", "2026-01-01T00:00:00.000Z", true)).toBe(1);
+      expect(s.countEvents("notified", "researcher", "2026-01-01T00:00:00.000Z")).toBe(2);
+      expect(s.countEvents("notified", "researcher", "2027-01-01T00:00:00.000Z")).toBe(0);
+    });
+
+    it("caps linked threads", () => {
+      const s = store();
+      const todo = s.create({ title: "a", threadIds: Array.from({ length: 50 }, (_, i) => `th${i}`) });
+      expect(s.linkThread(todo.id, "one-more")!.threadIds).toHaveLength(50);
+      expect(s.linkThread(todo.id, "th3")!.threadIds).toHaveLength(50);
     });
   });
 });

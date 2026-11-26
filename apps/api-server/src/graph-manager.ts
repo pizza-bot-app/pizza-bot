@@ -349,11 +349,16 @@ export class GraphManager {
       );
       return { agent, modelId: resolvedModelId };
     })().catch((err) => {
-      this.rootAgents.delete(key);
+      if (this.rootAgents.get(key) === built) this.rootAgents.delete(key);
       throw err;
     });
     this.rootAgents.set(key, built);
     return built;
+  }
+
+  /** Whether the agent is enabled and ready to run as a thread's top-level agent. */
+  hasRootAgent(agentId: string): boolean {
+    return this.dependencies.agents?.has(agentId) ?? false;
   }
 
   private unavailableAgentMessage(agentId: string): string {

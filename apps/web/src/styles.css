@@ -2318,6 +2318,11 @@ select:focus-visible,
 .todo-quick-add-icon { position: absolute; left: 12px; color: var(--brand); pointer-events: none; }
 
 .todo-row { align-items: center; gap: 10px; }
+.todo-row-select {
+  background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit;
+  text-align: left; cursor: pointer; align-self: stretch; justify-content: center;
+}
+.todo-row-select:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
 .todo-row.completed .todo-row-title { text-decoration: line-through; color: var(--dim); font-weight: 500; }
 .todo-row-title { white-space: normal; overflow-wrap: anywhere; }
 .todo-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 11.5px; color: var(--dim); }

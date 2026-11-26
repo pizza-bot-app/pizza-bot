@@ -123,11 +123,12 @@ export function useSkillsAdmin(client: ApiClient, enabled = true) {
  * The agent list loads wherever display names are needed; the tool catalog the
  * editor picks from loads only while `editing`.
  */
-export function useAgentsAdmin(client: ApiClient, enabled = true, editing = enabled) {
+/** `intervalMs` keeps readiness current where it decides what can be chosen, e.g. the To: field. */
+export function useAgentsAdmin(client: ApiClient, enabled = true, editing = enabled, intervalMs?: number) {
   const { data: agents, refresh } = useAdminData(
     useCallback(() => client.listAgents(), [client]),
     { agents: [] } as AgentCatalogInfo,
-    undefined,
+    intervalMs,
     enabled,
   );
   const { data: tools } = useAdminData(

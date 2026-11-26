@@ -10,18 +10,22 @@ import {
   type AgentCatalogEntry,
   type TodoAccess,
 } from "@pizza-bot/core";
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
 import { createAgentRootAgent } from "./index.js";
 
 class ToolCapturingModel extends BaseChatModel<Record<string, never>> {
   readonly boundToolSets: string[][] = [];
+  readonly descriptions: Record<string, string>[] = [];
   readonly systemPrompts: string[] = [];
 
   _llmType(): string {
     return "tool-capturing";
   }
 
-  override bindTools(tools: Array<{ name: string }>): this {
+  override bindTools(tools: Array<{ name: string; description?: string }>): this {
     this.boundToolSets.push(tools.map((item) => item.name));
+    this.descriptions.push(Object.fromEntries(tools.map((item) => [item.name, item.description ?? ""])));
     return this;
   }
 
@@ -84,6 +88,9 @@ describe("createAgentRootAgent", () => {
     const lead = definition("lead", { declaredTools: [BUILTIN_TASK_TOOL_REF] });
     const model = await firstTurn(lead, new Map([["lead", lead], ["writer", definition("writer")]]));
     expect(model.boundToolSets[0]).toContain("task");
+    const roster = model.descriptions[0]!.task!;
+    expect(roster).toContain("writer");
+    expect(roster).not.toContain("lead");
   });
 
   it("gets eval only when it declares builtin:eval", async () => {
@@ -99,4 +106,35 @@ describe("createAgentRootAgent", () => {
       }),
     ).rejects.toThrow(/agent "mailer"/);
   });
+
+  it("pauses at the root for an approval the definition declares", async () => {
+    class SendingModel extends ToolCapturingModel {
+      override async _generate(messages: BaseMessage[]) {
+        await super._generate(messages);
+        const message = new AIMessage({
+          content: "",
+          tool_calls: [{ id: "send-1", name: "mail__send", args: { to: "ada" }, type: "tool_call" }],
+        });
+        return { generations: [{ message, text: "" }] };
+      }
+    }
+    const send = tool(async () => "sent", { name: "mail__send", description: "Send mail.", schema: z.object({ to: z.string() }) });
+    const mailer = definition("mailer", { declaredTools: ["mcp:mail:send"], interruptOn: { "mcp:mail:send": true } });
+    const root = await createAgentRootAgent(mailer, {
+      model: new SendingModel({}),
+      checkpointer: new MemorySaver(),
+      catalog: { mail: ["send"] },
+      tools: { "mcp:mail:send": send },
+    });
+    for await (const _event of root.streamProtocol(
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "email ada" }] }] },
+      { threadId: "t-mailer" },
+    )) {
+      // drain
+    }
+    const state = await root.getState("t-mailer");
+    expect(state.awaitingInput).toBe(true);
+    expect(JSON.stringify(state.interrupts)).toContain("mail__send");
+  });
 });
+

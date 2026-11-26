@@ -25,7 +25,11 @@ function testHost() {
   const host = {
     threadStore: appDb.threadStore,
     folderStore: appDb.folders,
-    agentDefinition: async (id: string) => (id === researcher.id ? researcher : undefined),
+    agentDefinition: async (id: string) => (id === researcher.id || id === "off" ? { ...researcher, id } : undefined),
+    agentCatalog: async () => [
+      { id: researcher.id, enabled: true },
+      { id: "off", enabled: false },
+    ],
   } as unknown as AgentHost;
   return { host, appDb };
 }
@@ -83,8 +87,12 @@ describe("POST /agents/:id/home", () => {
     expect(((await again.json()) as ThreadRecord).threadId).toBe(home.threadId);
   });
 
-  it("404s for an unknown agent", async () => {
-    const { host } = testHost();
+  it("404s for an unknown agent and refuses a turned-off one", async () => {
+    const { host, appDb } = testHost();
     expect((await agentRoutes(host).request("/agents/ghost/home", { method: "POST" })).status).toBe(404);
+    expect((await agentRoutes(host).request("/agents/off/home", { method: "POST" })).status).toBe(409);
+    expect((await langGraphRoutes(host).request("/threads", post({ thread_id: "t9", metadata: { agent_id: "off" } }))).status)
+      .toBe(409);
+    expect(appDb.threadStore.agentHome("off")).toBeUndefined();
   });
 });

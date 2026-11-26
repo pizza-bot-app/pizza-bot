@@ -492,7 +492,9 @@ export class AgentHost {
           id: spec.id,
           name: spec.name,
           ...(spec.description ? { description: spec.description } : {}),
+          settlesTodos: spec.todoOutcome !== undefined,
         })),
+      awaitsInput: async (threadId) => stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId)),
       postToThread: async (threadId, text) => {
         const graph = await this.threadGraph(threadId);
         await graph.updateStateAsFinished(threadId, {
@@ -534,19 +536,24 @@ export class AgentHost {
             this.threadStore.ensure({ threadId });
             this.threadStore.update(threadId, { unread: true, awaitingAction: true });
             if (this.threadStore.get(threadId)?.background) {
-              const state = await (await this.threadGraph(threadId)).getState(threadId);
-              await this.todoService.recordPause(threadId, askUserQuestion(state.interrupts));
+              await this.isolated("record a check-in pause", async () => {
+                const state = await (await this.threadGraph(threadId)).getState(threadId);
+                await this.todoService.recordPause(threadId, askUserQuestion(state.interrupts));
+              });
             }
             await this.runMaintenance.reindexThread(threadId);
             return;
           }
-          if (status === "success") {
-            const thread = this.threadStore.get(threadId);
-            if (thread?.background && thread.graphId) await this.settleGraphCheckIn(threadId, thread.graphId);
-          }
-          if (status === "error" || status === "timeout") {
-            if (this.threadStore.get(threadId)?.background) {
-              this.todoService.recordFailure(threadId, error ?? (status === "timeout" ? "The check-in timed out." : "The check-in failed."));
+          const ended = this.threadStore.get(threadId);
+          if (ended?.background) {
+            if (status === "success" && ended.graphId) {
+              const graphId = ended.graphId;
+              await this.isolated("settle a workflow check-in", () => this.settleGraphCheckIn(threadId, graphId));
+            }
+            if (status === "error" || status === "timeout") {
+              await this.isolated("record a failed check-in", async () =>
+                this.todoService.recordFailure(threadId, error ?? (status === "timeout" ? "The check-in timed out." : "The check-in failed.")),
+              );
             }
           }
           await this.runMaintenance.onRunEnd(threadId);
@@ -564,6 +571,7 @@ export class AgentHost {
         } finally {
           const thread = this.threadStore.get(threadId);
           // A check-in that finished on its own is not news; one waiting on the user is.
+          if (thread?.background && outcome !== "interrupted") this.todoService.runEnded(threadId);
           if (!thread?.background || outcome === "interrupted") {
             this.threadActivity.append({
               eventId: `${threadId}:${runId}`,
@@ -887,16 +895,28 @@ export class AgentHost {
   async startAutomations(): Promise<void> {
     await this.whenInitialMcpSettled();
     if (this.closing) return;
+    await this.todoService.refreshGraphs().catch((error: unknown) => console.warn("[todos] graph list failed:", error));
+    if (this.closing) return;
     this.triggerService.start();
-    await this.todoService.refreshGraphs().catch(() => undefined);
     this.digestJob ??= CronJob.from({
       cronTime: TODO_DIGEST_CRON,
       onTick: () => {
-        if (this.settings.get().enableAutomations) void this.todoService.flushDigests();
+        if (!this.closing && this.settings.get().enableAutomations) {
+          void this.isolated("post Todo digests", () => this.todoService.flushDigests());
+        }
       },
       start: true,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
+  }
+
+  /** Runs a Todo side step of run-end handling so its failure cannot skip the rest. */
+  private async isolated(what: string, step: () => Promise<void> | void): Promise<void> {
+    try {
+      await step();
+    } catch (error) {
+      console.warn(`[todos] failed to ${what}:`, error);
+    }
   }
 
   /** A graph that owns a Todo settles it from the `todoOutcome` state key its spec names. */
@@ -926,13 +946,18 @@ export class AgentHost {
     yield* agent.streamProtocol(input, cleaned);
   }
 
-  /** An agent thread's graph; an unavailable agent's history still reads through the assistant. */
-  private async agentThreadGraph(agentId: string, background: boolean): Promise<LangGraphThreadGraph> {
-    try {
-      return (await this.graphs!.rootAgentFor(agentId, undefined, background ? this.todoService : undefined)).agent;
-    } catch {
-      return this.agent;
-    }
+  /**
+   * An agent thread's graph, on the thread's model. Only an agent that is missing or
+   * not ready reads through the assistant; any other failure surfaces, since the
+   * assistant's graph cannot see the agent's pending approvals.
+   */
+  private async agentThreadGraph(
+    agentId: string,
+    background: boolean,
+    modelId: string | undefined,
+  ): Promise<LangGraphThreadGraph> {
+    if (!this.graphs!.hasRootAgent(agentId)) return this.agent;
+    return (await this.graphs!.rootAgentFor(agentId, modelId, background ? this.todoService : undefined)).agent;
   }
 
   /** Enabled agents only, with whether they can run now. */
@@ -984,7 +1009,7 @@ export class AgentHost {
     await this.warmup;
     const thread = this.threadStore.get(threadId);
     if (thread?.graphId) return (await this.compiledGraph(thread.graphId)).graph;
-    if (thread?.agentId) return this.agentThreadGraph(thread.agentId, thread.background === true);
+    if (thread?.agentId) return this.agentThreadGraph(thread.agentId, thread.background === true, thread.modelId);
     return this.agent;
   }
 

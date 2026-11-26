@@ -1,7 +1,7 @@
 /** Durable Todos and their thread links, in the shared app.sqlite handle. */
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
-import { TODO_GRAPH_OWNER_PREFIX } from "@pizza-bot/core";
+import { TODO_GRAPH_OWNER_PREFIX, TODO_THREADS_MAX } from "@pizza-bot/core";
 import type {
   Todo,
   TodoAccess,
@@ -49,6 +49,7 @@ interface EventRow {
 export type NewTodoEvent = Omit<TodoEvent, "id" | "at">;
 
 export interface DigestEntry {
+  id: string;
   todoId: string;
   message: string;
   at: string;
@@ -123,6 +124,7 @@ export class TodoStore implements TodoAccess {
     }
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos (parent_todo_id);
+      CREATE INDEX IF NOT EXISTS idx_todo_events_actor ON todo_events (kind, actor, at);
       CREATE TABLE IF NOT EXISTS todo_digest (
         entry_id TEXT PRIMARY KEY,
         agent_id TEXT NOT NULL,
@@ -326,24 +328,39 @@ export class TodoStore implements TodoAccess {
       .run(randomUUID(), agentId, todoId, message, this.now());
   }
 
-  /** Removes and returns every queued digest entry, grouped by agent, oldest first. */
-  takeDigests(): Map<string, DigestEntry[]> {
-    return this.db.transaction(() => {
-      const rows = this.db
-        .prepare<[], { agent_id: string; todo_id: string; message: string; at: string }>(
-          "SELECT agent_id, todo_id, message, at FROM todo_digest ORDER BY at, rowid",
-        )
-        .all();
-      this.db.prepare("DELETE FROM todo_digest").run();
-      const byAgent = new Map<string, DigestEntry[]>();
-      for (const row of rows) {
-        const entry = { todoId: row.todo_id, message: row.message, at: row.at };
-        const list = byAgent.get(row.agent_id);
-        if (list) list.push(entry);
-        else byAgent.set(row.agent_id, [entry]);
-      }
-      return byAgent;
+  /** Queued digest entries grouped by agent, oldest first; delete them once delivered. */
+  pendingDigests(): Map<string, DigestEntry[]> {
+    const rows = this.db
+      .prepare<[], { entry_id: string; agent_id: string; todo_id: string; message: string; at: string }>(
+        "SELECT entry_id, agent_id, todo_id, message, at FROM todo_digest ORDER BY at, rowid",
+      )
+      .all();
+    const byAgent = new Map<string, DigestEntry[]>();
+    for (const row of rows) {
+      const entry = { id: row.entry_id, todoId: row.todo_id, message: row.message, at: row.at };
+      const list = byAgent.get(row.agent_id);
+      if (list) list.push(entry);
+      else byAgent.set(row.agent_id, [entry]);
+    }
+    return byAgent;
+  }
+
+  deleteDigestEntries(ids: readonly string[]): void {
+    const remove = this.db.prepare("DELETE FROM todo_digest WHERE entry_id = ?");
+    this.db.transaction(() => {
+      for (const id of ids) remove.run(id);
     })();
+  }
+
+  /** Events of `kind` by `actor` at or after `since`, across all Todos; `withThread` counts only delivered ones. */
+  countEvents(kind: TodoEvent["kind"], actor: string, since: string, withThread = false): number {
+    return (
+      this.db
+        .prepare<[string, string, string], { n: number }>(
+          `SELECT COUNT(*) AS n FROM todo_events WHERE kind = ? AND actor = ? AND at >= ?${withThread ? " AND thread_id IS NOT NULL" : ""}`,
+        )
+        .get(kind, actor, since)?.n ?? 0
+    );
   }
 
   setBackgroundThread(id: string, threadId: string): void {
@@ -375,8 +392,11 @@ export class TodoStore implements TodoAccess {
     return deleted;
   }
 
+  /** Refuses (returns the Todo unchanged) once it has `TODO_THREADS_MAX` links. */
   linkThread(id: string, threadId: string): StoredTodo | undefined {
-    if (!this.get(id)) return undefined;
+    const current = this.get(id);
+    if (!current) return undefined;
+    if (current.threadIds.length >= TODO_THREADS_MAX && !current.threadIds.includes(threadId)) return current;
     const now = this.now();
     const inserted = this.db.transaction(() => {
       const changes = this.insertLink(id, threadId, now);

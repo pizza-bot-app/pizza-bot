@@ -30,6 +30,7 @@ import { TodosModule } from "./components/todos/TodosModule.js";
 import type { WorkThreadHint } from "./components/todos/TodoDetail.js";
 import { FlagThreadButton } from "./components/todos/FlagThreadButton.js";
 import { flaggedThreadIds, openTodoForThread } from "./lib/todo-views.js";
+import { knownWorkThreads } from "./lib/todo-ownership.js";
 import { recipientOptions, threadAgent } from "./lib/thread-agent.js";
 import { subscribeSidebarRefresh } from "./sidebar-refresh.js";
 import {
@@ -107,10 +108,12 @@ export function App() {
   );
   const skillsAdmin = useSkillsAdmin(client, visibleAdmin.skills || visibleAdmin.agents);
   // Names are needed wherever delegations or "Used by" lists render.
+  const pickingAgents = view === "inbox" || view === "todos";
   const agentsAdmin = useAgentsAdmin(
     client,
-    visibleAdmin.agents || visibleAdmin.skills || view === "inbox",
+    visibleAdmin.agents || visibleAdmin.skills || pickingAgents,
     visibleAdmin.agents,
+    pickingAgents ? 10_000 : undefined,
   );
   const agentNames = useMemo(
     () => new Map(agentsAdmin.agents.agents.map((entry) => [entry.id, entry.name])),
@@ -259,13 +262,9 @@ export function App() {
   }, [noteAgentThreads, noteBackgroundThreads, noteGraphThreads]);
 
   // The thread-change stream also reports Todo edits, including the orchestrator's.
-  const onThreadsLoaded = useCallback(
-    (rows: ThreadInfo[]) => {
-      seedThreadMetadata(rows);
-      refreshTodos().catch((error: unknown) => console.error("todo refresh failed", error));
-    },
-    [refreshTodos, seedThreadMetadata],
-  );
+  const onMetadataChanged = useCallback(() => {
+    refreshTodos().catch((error: unknown) => console.error("todo refresh failed", error));
+  }, [refreshTodos]);
   // Outside the Inbox no Sidebar follows the stream, so the Todos view follows it itself.
   const viewingTodos = view === "todos";
   useEffect(() => {
@@ -276,6 +275,13 @@ export function App() {
       (message, error) => console.error(message, error),
     );
   }, [client, refreshTodos, seedThreadMetadata, viewingTodos]);
+
+  useEffect(() => {
+    const known = knownWorkThreads(todos.todos);
+    noteAgentThreads(known.agents);
+    noteGraphThreads(known.graphs);
+    noteBackgroundThreads([...known.agents, ...known.graphs].map((entry) => entry.threadId));
+  }, [todos.todos, noteAgentThreads, noteBackgroundThreads, noteGraphThreads]);
 
   // Only the active pane renders; every thread's run remains owned by the store.
   // A thread is in this set once opened from a persisted source, meaning it should
@@ -761,7 +767,8 @@ export function App() {
                   onOpenThread={(threadId) => openThread(threadId, true)}
                   onOpenSearchHit={onOpenSearchHit}
                   onDeleted={onThreadDeleted}
-                  onThreadsLoaded={onThreadsLoaded}
+                  onThreadsLoaded={seedThreadMetadata}
+                  onMetadataChanged={onMetadataChanged}
                   threadTitles={threadTitles}
                   flaggedThreadIds={flaggedThreads}
                   backgroundThreadIds={backgroundThreadIds}

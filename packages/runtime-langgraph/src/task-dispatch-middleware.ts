@@ -50,9 +50,9 @@ export function taskToolDescription(subagents: readonly RosterEntry[]): string {
  * locality, since those notes sit in the schema the model is filling out.
  *
  * `generalPurposeAgent: false` because DeepAgents' auto-added one heads the
- * roster claiming "access to all tools as the main agent" while holding only the
- * filesystem — we pass no `tools` to `createDeepAgent`, so its `defaultTools` are
- * empty, and it gets no skill, no `eval`, and none of the per-subagent guardrails.
+ * roster claiming "access to all tools as the main agent", would inherit the root's
+ * `tools` (the Todo tools, which only the root agent may hold), and gets no skill,
+ * no `eval`, and none of the per-subagent guardrails.
  * The base agent already holds the same filesystem tools directly. With no
  * subagents there is nothing to route to, so the tool itself goes away.
  */

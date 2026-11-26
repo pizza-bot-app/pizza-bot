@@ -61,10 +61,19 @@ const CHECK_IN_REASONS: Record<NonNullable<TodoEvent["reason"]>, string> = {
 };
 
 /** "Tue 9:00 AM" style, in the viewer's zone. */
-export function whenLabel(iso: string): string {
+const SIX_DAYS_MS = 6 * 24 * 60 * 60 * 1000;
+
+/** A weekday and time within the coming week; a date as well beyond it, so "Tue" is never ambiguous. */
+export function whenLabel(iso: string, now = Date.now()): string {
   const at = Date.parse(iso);
   if (!Number.isFinite(at)) return iso;
-  return new Date(at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+  const far = Math.abs(at - now) > SIX_DAYS_MS;
+  return new Date(at).toLocaleString(undefined, {
+    weekday: "short",
+    ...(far ? { month: "short", day: "numeric" } : {}),
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 const SNOOZE_NOTE = /^until (\S+?)(?:: ([\s\S]*))?$/;
@@ -216,3 +225,36 @@ export function parseCheckInLimit(value: string): number | null | undefined {
   const limit = Number(trimmed);
   return limit >= 1 && limit <= 1000 ? limit : undefined;
 }
+
+export interface KnownWorkThreads {
+  agents: Array<{ threadId: string; agentId: string }>;
+  graphs: Array<{ threadId: string; graphId: string }>;
+}
+
+const WORK_EVENT_KINDS = new Set<TodoEvent["kind"]>(["check-in", "asked", "failed"]);
+
+/**
+ * Every work thread the Todos name, current or from an earlier check-in, so one
+ * opened from search or a link is still shown read-only.
+ */
+export function knownWorkThreads(todos: readonly Todo[]): KnownWorkThreads {
+  const agents = new Map<string, string>();
+  const graphs = new Map<string, string>();
+  const note = (threadId: string, owner: string) => {
+    const graphId = graphIdOf(owner);
+    if (graphId) graphs.set(threadId, graphId);
+    else if (owner !== "user") agents.set(threadId, owner);
+  };
+  for (const todo of todos) {
+    for (const event of todo.history) {
+      if (event.threadId && WORK_EVENT_KINDS.has(event.kind)) note(event.threadId, event.actor);
+    }
+    const owner = ownerValue(todo);
+    if (todo.backgroundThreadId && owner) note(todo.backgroundThreadId, owner);
+  }
+  return {
+    agents: [...agents].map(([threadId, agentId]) => ({ threadId, agentId })),
+    graphs: [...graphs].map(([threadId, graphId]) => ({ threadId, graphId })),
+  };
+}
+

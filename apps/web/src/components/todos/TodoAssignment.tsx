@@ -55,7 +55,7 @@ export function workflowOptions(
     .map((graph) => ({ id: `graph:${graph.id}`, name: graph.name }));
   const current = owner ? graphIdOf(owner) : undefined;
   if (current && !graphs.some((graph) => graph.id === current)) {
-    options.push({ id: owner!, name: current, disabledReason: L.agentUnavailable });
+    options.push({ id: owner!, name: current, disabledReason: L.workflowUnavailable });
   }
   return options;
 }

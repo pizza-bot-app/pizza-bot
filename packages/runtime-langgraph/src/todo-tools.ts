@@ -9,12 +9,16 @@ import {
   type TodoAccess,
 } from "@pizza-bot/core";
 
+const LIST_LIMIT = 50;
+const NOTES_PREVIEW = 300;
+
 const dueDate = z
   .string()
   .describe("Calendar date as YYYY-MM-DD in the user's local zone; use the current date from context.");
 
 const listSchema = z.object({
   includeCompleted: z.boolean().optional().describe("Also return completed Todos. Defaults to false."),
+  limit: z.number().int().min(1).max(LIST_LIMIT).optional().describe(`At most this many, newest first. Defaults to ${LIST_LIMIT}.`),
 });
 
 const createSchema = z.object({
@@ -52,7 +56,9 @@ function view(todo: Todo): Record<string, unknown> {
   return {
     id: todo.id,
     title: todo.title,
-    ...(todo.notes ? { notes: todo.notes } : {}),
+    ...(todo.notes
+      ? { notes: todo.notes.length > NOTES_PREVIEW ? `${todo.notes.slice(0, NOTES_PREVIEW)}…` : todo.notes }
+      : {}),
     ...(todo.dueDate ? { dueDate: todo.dueDate } : {}),
     importance: todo.importance,
     completed: todo.completed,
@@ -69,8 +75,11 @@ function invalid(error: z.ZodError): Error {
 
 export function todoTools(todos: TodoAccess) {
   const listTodos = tool(
-    (input: z.infer<typeof listSchema>) =>
-      JSON.stringify(todos.list({ includeCompleted: input.includeCompleted ?? false }).map(view)),
+    (input: z.infer<typeof listSchema>) => {
+      const all = todos.list({ includeCompleted: input.includeCompleted ?? false });
+      const shown = all.slice(0, input.limit ?? LIST_LIMIT).map(view);
+      return JSON.stringify(all.length > shown.length ? { todos: shown, omitted: all.length - shown.length } : shown);
+    },
     {
       name: "list_todos",
       description:

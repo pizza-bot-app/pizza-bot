@@ -469,6 +469,9 @@ export async function createAgentRootAgent(
         backend,
       )
     : undefined;
+  if (roster?.some((subagent) => (subagent as { interruptOn?: unknown }).interruptOn) && !deps.checkpointer) {
+    throw new Error(`${who} delegates to an agent that declares interruptOn; a checkpointer is required for HITL.`);
+  }
   // Always mounted: with an empty roster it replaces DeepAgents' default by name, removing `task`.
   middleware.push(taskDispatchMiddleware({ model: deps.model, subagents: roster ?? [] }));
   if (hasEvalTool(agent.declaredTools)) {

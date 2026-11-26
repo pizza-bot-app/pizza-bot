@@ -7,6 +7,7 @@ import { HotkeyProvider } from "../../hotkeys/index.js";
 import { TodosModule } from "./TodosModule.js";
 import { TodoDetail } from "./TodoDetail.js";
 import { FlagThreadButton } from "./FlagThreadButton.js";
+import { workflowOptions } from "./TodoAssignment.js";
 
 const TODAY = "2026-11-26";
 
@@ -81,6 +82,18 @@ describe("TodosModule", () => {
     expect(html).toMatch(/>Completed<\/button>/);
   });
 
+  it("switches views with pressed buttons and keeps row controls out of a listbox", () => {
+    const html = wrap(
+      <TodosModule todos={todos} threadTitles={new Map()} today={TODAY} {...handlers} focusId="Book flights" />,
+    );
+    expect(html).toContain('role="group" aria-label="Todos views"');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).not.toContain('role="tab"');
+    expect(html).not.toContain('role="listbox"');
+    expect(html).not.toContain('role="option"');
+    expect(html).toMatch(/<button type="button" class="resource-row-main todo-row-select" aria-current="true">/);
+  });
+
   it("opens on a focused todo", () => {
     const html = wrap(
       <TodosModule
@@ -120,6 +133,7 @@ describe("TodoDetail", () => {
     expect(html).toContain('value="Check numbers"');
     expect(html).toContain('aria-checked="true" aria-label="Mark step “Check numbers” not done"');
     expect(html).toContain('value="2026-11-26"');
+    expect(html).toContain('min="1900-01-01" max="2999-12-31"');
     expect(html).toMatch(/class="todo-due">Today</);
     expect(html).toContain("Budget thread");
     expect(html).toContain('aria-label="Unlink “Budget thread”"');
@@ -333,7 +347,7 @@ describe("FlagThreadButton", () => {
     const html = wrap(
       <FlagThreadButton todo={undefined} onFlag={vi.fn()} onOpenTodo={vi.fn()} />,
     );
-    expect(html).toContain('aria-pressed="false"');
+    expect(html).not.toContain("aria-pressed");
     expect(html).toContain("Add to Todos</button>");
   });
 
@@ -341,8 +355,18 @@ describe("FlagThreadButton", () => {
     const html = wrap(
       <FlagThreadButton todo={todo("Reply to Dana")} compact onFlag={vi.fn()} onOpenTodo={vi.fn()} />,
     );
-    expect(html).toContain('aria-pressed="true"');
+    expect(html).not.toContain("aria-pressed");
     expect(html).toContain('aria-label="In Todos: open “Reply to Dana”"');
     expect(html).not.toContain("In Todos</button>");
   });
 });
+
+describe("workflowOptions", () => {
+  it("keeps a deleted workflow owner listed with workflow wording", () => {
+    expect(workflowOptions([{ id: "filer", name: "Expense filer" }], "graph:gone")).toEqual([
+      { id: "graph:filer", name: "Expense filer" },
+      { id: "graph:gone", name: "gone", disabledReason: "workflow no longer exists" },
+    ]);
+  });
+});
+

@@ -1,10 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  isTodoDueDate,
   type Todo,
   type TodoAssignment as TodoAssignmentPatch,
   type TodoPatch,
-  type TodoStep,
 } from "@pizza-bot/core";
 import { errorMessage, type AgentCatalogEntryInfo } from "@/api-client";
 import {
@@ -31,6 +29,15 @@ import { graphIdOf, ownerValue, workOwnerOf, type WorkOwner } from "../../lib/to
 import { L } from "../../lexicon.js";
 import { TodoAssignment, type TodoGraphOption } from "./TodoAssignment.js";
 import { TodoTimeline } from "./TodoTimeline.js";
+import {
+  applyStepEdit,
+  serialQueue,
+  stepDrafts,
+  stepsPatch,
+  type StepDraft,
+  type StepEdit,
+} from "../../lib/todo-steps.js";
+import { dueDateCommit, DUE_DATE_MAX, DUE_DATE_MIN } from "../../lib/todo-views.js";
 
 /** Identifies a work thread (an agent's, or a graph run) so it opens correctly while unlisted. */
 export type WorkThreadHint = WorkOwner & { title: string };
@@ -64,14 +71,7 @@ export function ownerDisplayName(
   return agents.find((agent) => agent.id === id)?.name ?? id;
 }
 
-type StepDraft = Pick<TodoStep, "title" | "completed"> & { id?: string };
-
-const stepsPatch = (steps: readonly StepDraft[]) =>
-  steps.map((step) => ({
-    ...(step.id ? { id: step.id } : {}),
-    title: step.title,
-    completed: step.completed,
-  }));
+let localStepKey = 0;
 
 export function TodoDetail({
   todo,
@@ -103,6 +103,28 @@ export function TodoDetail({
   useEffect(() => setTitle(todo.title), [todo.title]);
   useEffect(() => setNotes(todo.notes), [todo.notes]);
 
+  // Each step PATCH replaces the whole list, so edits apply locally first and save one at a
+  // time from the latest local list; the server's list is adopted only when none are in flight.
+  const [steps, setSteps] = useState<StepDraft[]>(() => stepDrafts(todo.steps));
+  const stepsRef = useRef(steps);
+  const serverSteps = useRef(todo.steps);
+  serverSteps.current = todo.steps;
+  const stepSaves = useRef(serialQueue()).current;
+  useEffect(() => {
+    if (stepSaves.pending > 0) return;
+    const next = stepDrafts(todo.steps);
+    stepsRef.current = next;
+    setSteps(next);
+  }, [todo.steps, stepSaves]);
+
+  const [dueDraft, setDueDraft] = useState(todo.dueDate ?? "");
+  useEffect(() => setDueDraft(todo.dueDate ?? ""), [todo.dueDate]);
+  const saveDueDate = () => {
+    const commit = dueDateCommit(dueDraft, todo.dueDate);
+    if (commit === "revert") setDueDraft(todo.dueDate ?? "");
+    else if (commit !== "unchanged") void onUpdate({ dueDate: commit });
+  };
+
   const important = todo.importance === "high";
 
   const saveTitle = () => {
@@ -115,14 +137,26 @@ export function TodoDetail({
     if (notes !== todo.notes) void onUpdate({ notes });
   };
 
-  const saveSteps = (steps: readonly StepDraft[]) =>
-    void onUpdate({ steps: stepsPatch(steps) });
+  const editSteps = (edit: StepEdit) => {
+    const next = applyStepEdit(stepsRef.current, edit);
+    stepsRef.current = next;
+    setSteps(next);
+    void stepSaves
+      .run(() => onUpdate({ steps: stepsPatch(stepsRef.current) }))
+      .catch(() => undefined)
+      .finally(() => {
+        if (stepSaves.pending > 0) return;
+        const latest = stepDrafts(serverSteps.current);
+        stepsRef.current = latest;
+        setSteps(latest);
+      });
+  };
 
   const addStep = (event: FormEvent) => {
     event.preventDefault();
     const stepTitle = newStep.trim();
     if (!stepTitle) return;
-    saveSteps([...todo.steps, { title: stepTitle, completed: false }]);
+    editSteps({ kind: "add", key: `local-${localStepKey++}`, title: stepTitle });
     setNewStep("");
   };
 
@@ -231,21 +265,15 @@ export function TodoDetail({
         <h3 className="todo-detail-section-title">
           <ListChecks size={14} /> Steps
         </h3>
-        {todo.steps.length > 0 && (
+        {steps.length > 0 && (
           <ul className="todo-steps">
-            {todo.steps.map((step) => (
+            {steps.map((step) => (
               <TodoStepRow
-                key={step.id}
+                key={step.key}
                 step={step}
-                onToggle={() =>
-                  saveSteps(
-                    todo.steps.map((s) => (s.id === step.id ? { ...s, completed: !s.completed } : s)),
-                  )
-                }
-                onRename={(stepTitle) =>
-                  saveSteps(todo.steps.map((s) => (s.id === step.id ? { ...s, title: stepTitle } : s)))
-                }
-                onRemove={() => saveSteps(todo.steps.filter((s) => s.id !== step.id))}
+                onToggle={() => editSteps({ kind: "toggle", key: step.key })}
+                onRename={(stepTitle) => editSteps({ kind: "rename", key: step.key, title: stepTitle })}
+                onRemove={() => editSteps({ kind: "remove", key: step.key })}
               />
             ))}
           </ul>
@@ -272,11 +300,14 @@ export function TodoDetail({
             type="date"
             className="field-input"
             aria-label="Due date"
-            value={todo.dueDate ?? ""}
-            onChange={(event) => {
-              const value = event.target.value;
-              if (!value) void onUpdate({ dueDate: null });
-              else if (isTodoDueDate(value)) void onUpdate({ dueDate: value });
+            min={DUE_DATE_MIN}
+            max={DUE_DATE_MAX}
+            value={dueDraft}
+            onChange={(event) => setDueDraft(event.target.value)}
+            onBlur={saveDueDate}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              else if (event.key === "Escape") setDueDraft(todo.dueDate ?? "");
             }}
           />
           {todo.dueDate !== undefined && (
@@ -393,7 +424,7 @@ function TodoStepRow({
   onRename,
   onRemove,
 }: {
-  step: TodoStep;
+  step: StepDraft;
   onToggle: () => void;
   onRename: (title: string) => void;
   onRemove: () => void;

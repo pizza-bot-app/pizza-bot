@@ -76,6 +76,7 @@ function recordingAccess() {
     },
     notifyUser: async (threadId, message) => {
       calls.push(["notify", threadId, message]);
+      return "delivered";
     },
     reassign: async (threadId, toAgentId, note) => {
       calls.push(["reassign", threadId, { toAgentId, note }]);
@@ -136,6 +137,10 @@ describe("ambient check-in tools", () => {
     expect(pending).toContain("ask_user");
     expect(pending).toContain("Window or aisle?");
     expect(pending).toContain('"allowedDecisions":["respond"]');
+    // The host reads the question from this shape (agent-host askUserQuestion).
+    const request = (state.interrupts?.[0]?.value as { actionRequests?: Array<{ name: string; args: { question?: string } }> })
+      .actionRequests?.[0];
+    expect(request).toMatchObject({ name: "ask_user", args: { question: "Window or aisle?" } });
     expect(calls).toEqual([]);
   });
 

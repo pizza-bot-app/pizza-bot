@@ -135,6 +135,7 @@ export const L = {
   recipientLabel: "To",
   recipientPickerLabel: "Send this conversation to",
   agentUnavailable: "unavailable",
+  workflowUnavailable: "workflow no longer exists",
   agentMissingDescription: "This agent is no longer in your catalog, so it can't reply.",
   agentHomeThread: "Home conversation",
   messageAgent: "Message",

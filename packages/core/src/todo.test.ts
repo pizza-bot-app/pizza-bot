@@ -9,6 +9,8 @@ describe("isTodoDueDate", () => {
     expect(isTodoDueDate("2026-13-01")).toBe(false);
     expect(isTodoDueDate("2026-1-01")).toBe(false);
     expect(isTodoDueDate("2026-01-01T00:00:00Z")).toBe(false);
+    expect(isTodoDueDate("0002-11-26")).toBe(false);
+    expect(isTodoDueDate("3000-01-01")).toBe(false);
   });
 });
 

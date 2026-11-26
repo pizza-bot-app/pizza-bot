@@ -36,7 +36,6 @@ export function FlagThreadButton({ todo, compact = false, onFlag, onOpenTodo }: 
       className={`rail-toggle todo-flag${todo ? " active" : ""}${compact ? " icon-only" : ""}`}
       title={todo ? `Open “${todo.title}” in ${L.todosSection}` : label}
       aria-label={todo ? `${label}: open “${todo.title}”` : label}
-      aria-pressed={todo !== undefined}
       disabled={busy}
       onClick={() => (todo ? onOpenTodo(todo.id) : void flag())}
     >

@@ -21,6 +21,7 @@ function testApp() {
     agentStatus: (id) => (id === "researcher" ? { name: "Researcher", description: "Finds sources.", ready: true } : undefined),
     readyAgents: () => [],
     listGraphs: async () => [],
+    awaitsInput: async () => false,
     postToThread: async () => {},
     timezone: "UTC",
   });

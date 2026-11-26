@@ -68,6 +68,8 @@ export interface SidebarProps {
   onOpenSearchHit?: (hit: SearchHit) => void;
   onDeleted: (threadId: string) => void;
   onThreadsLoaded?: (rows: ThreadInfo[]) => void;
+  /** The server reported a metadata change (threads, folders, or Todos), not a routine reload. */
+  onMetadataChanged?: () => void;
   threadTitles?: ReadonlyMap<string, string>;
   /** Threads linked to an incomplete Todo. */
   flaggedThreadIds?: ReadonlySet<string>;
@@ -93,6 +95,7 @@ export function Sidebar({
   onOpenSearchHit,
   onDeleted,
   onThreadsLoaded,
+  onMetadataChanged,
   threadTitles,
   flaggedThreadIds,
   backgroundThreadIds,
@@ -159,9 +162,16 @@ export function Sidebar({
     [refresh],
   );
 
+  const onMetadataChangedRef = useRef(onMetadataChanged);
+  onMetadataChangedRef.current = onMetadataChanged;
   useEffect(() => {
-    return subscribeSidebarRefresh(client, refresh, (message, error) =>
-      console.error(message, error),
+    return subscribeSidebarRefresh(
+      client,
+      () => {
+        onMetadataChangedRef.current?.();
+        return refresh();
+      },
+      (message, error) => console.error(message, error),
     );
   }, [client, refresh]);
 

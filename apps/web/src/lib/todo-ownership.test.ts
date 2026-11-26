@@ -4,6 +4,7 @@ import {
   activeSnooze,
   checkInChoice,
   graphIdOf,
+  knownWorkThreads,
   localDateTimeToIso,
   nextCheckInLabel,
   ownerValue,
@@ -193,6 +194,51 @@ describe("parseCheckInLimit", () => {
     expect(parseCheckInLimit("1001")).toBeUndefined();
     expect(parseCheckInLimit("2.5")).toBeUndefined();
     expect(parseCheckInLimit("ten")).toBeUndefined();
+  });
+});
+
+describe("whenLabel dates", () => {
+  it("adds the date when the time is more than six days away", () => {
+    const now = Date.parse("2026-11-26T12:00:00.000Z");
+    const soon = whenLabel("2026-11-28T09:00:00.000Z", now);
+    const far = whenLabel("2026-12-17T09:00:00.000Z", now);
+    expect(soon).not.toMatch(/Dec|Nov/);
+    expect(far).toMatch(/Dec/);
+    expect(far).toMatch(/17/);
+  });
+});
+
+describe("knownWorkThreads", () => {
+  it("collects current and earlier work threads with their agent or graph", () => {
+    const base = { notes: "", importance: "normal", steps: [], completed: false, threadIds: [], notify: "immediate", createdAt: "", updatedAt: "" } as const;
+    const todos = [
+      {
+        ...base,
+        id: "a",
+        title: "Flights",
+        owner: "booker",
+        backgroundThreadId: "bg-2",
+        history: [
+          { id: "1", at: "", kind: "check-in", actor: "researcher", threadId: "bg-1", reason: "cron" },
+          { id: "2", at: "", kind: "notified", actor: "researcher", threadId: "home" },
+          { id: "3", at: "", kind: "check-in", actor: "booker", threadId: "bg-2", reason: "handoff" },
+        ],
+      },
+      {
+        ...base,
+        id: "b",
+        title: "Expenses",
+        ownerGraph: "filer",
+        backgroundThreadId: "run-1",
+        history: [{ id: "4", at: "", kind: "check-in", actor: "graph:filer", threadId: "run-1", reason: "manual" }],
+      },
+    ] as unknown as Todo[];
+    const known = knownWorkThreads(todos);
+    expect(known.agents).toEqual([
+      { threadId: "bg-1", agentId: "researcher" },
+      { threadId: "bg-2", agentId: "booker" },
+    ]);
+    expect(known.graphs).toEqual([{ threadId: "run-1", graphId: "filer" }]);
   });
 });
 

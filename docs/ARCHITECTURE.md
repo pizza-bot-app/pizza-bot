@@ -538,16 +538,27 @@ Refinements on top of check-ins:
   queue for the next run.
 - **Questions surface.** An `ask_user` pause also posts the question to the agent's
   home thread, so it reads like a message from a colleague.
+- **Home-thread writes** (`notify_user`, surfaced questions, digests) run one at a
+  time per agent and are refused while the home thread runs or waits on a decision,
+  because writing past a pending interrupt would discard it.
+- **Work threads stay work logs.** `run.start` on a background thread is refused
+  (`409 work_thread`) and search leaves them out; the check-in prompt carries the
+  Todo and its timeline inside a `<todo-record>` block that the ambient prompt
+  marks as data, never instructions.
 - **Subtasks.** `request_todo` creates a child Todo (`parentTodoId`) owned by
-  another agent and wakes it; the parent keeps its Todo, sees its children in each
-  check-in prompt, and is woken with reason `subtask` when one finishes. Nesting is
-  capped at `TODO_MAX_DEPTH` and open children at `TODO_MAX_OPEN_SUBTASKS`.
+  another agent, on its parent's schedule, and wakes it; the parent keeps its Todo,
+  sees its children in each check-in prompt, and is woken with reason `subtask`
+  when one finishes. A wake that arrives while the Todo's last check-in is busy is
+  delivered when that run ends. Nesting is capped at `TODO_MAX_DEPTH`, open
+  children at `TODO_MAX_OPEN_SUBTASKS`, and requests since the user last assigned
+  the Todo at `TODO_MAX_SUBTASKS`.
 - **Workflows own Todos.** An owner of `graph:<id>` (stored in the same owner
   column) is checked in on by running that graph with `input.todo`, each run in a
   new background graph thread. The spec's `todoOutcome` names the state key that
   settles the Todo when the run succeeds (`done`/`complete`/`completed`/`true`
   completes it, `failed` records a failure, other text is a progress note). Agents
-  can hand a Todo to a workflow, which is a final destination; a graph that owns a
+  can hand a Todo only to a workflow whose spec names a `todoOutcome`; a workflow
+  is a final destination; a graph that owns a
   Todo cannot be deleted. A restarted check-in occurrence is closed rather than
   replayed, so a check-in's side effects never repeat.
 

@@ -32,6 +32,9 @@ export function langGraphRoutes(host: AgentHost): Hono {
       if (!(await host.agentDefinition(agentId))) {
         return c.json({ error: "agent not found" }, 404);
       }
+      if ((await host.agentCatalog()).find((entry) => entry.id === agentId)?.enabled === false) {
+        return c.json({ error: "that agent is turned off; turn it on in Agents first" }, 409);
+      }
       const existing = host.threadStore.get(threadId);
       if (existing && existing.agentId !== agentId) {
         return c.json({ error: "the thread already exists with a different agent" }, 409);

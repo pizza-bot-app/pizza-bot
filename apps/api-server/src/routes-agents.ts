@@ -137,6 +137,9 @@ export function agentRoutes(host: AgentHost): Hono {
     const id = c.req.param("id");
     const agent = await host.agentDefinition(id);
     if (!agent) return c.json({ error: "agent not found" }, 404);
+    if ((await host.agentCatalog()).find((entry) => entry.id === id)?.enabled === false) {
+      return c.json({ error: `${agent.name} is turned off; turn it on in Agents first.` }, 409);
+    }
     const existing = host.threadStore.agentHome(id);
     if (existing) return c.json(existing);
     const home = host.threadStore.create({

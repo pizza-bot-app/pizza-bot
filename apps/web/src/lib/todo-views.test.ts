@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Todo } from "@pizza-bot/core";
 import {
+  dueDateCommit,
   dueLabel,
   flaggedThreadIds,
+  msUntilLocalMidnight,
   isOverdue,
   localToday,
   openTodoForThread,
@@ -123,3 +125,27 @@ describe("todo labels and links", () => {
     expect(openTodoForThread(todos, "t3")).toBeUndefined();
   });
 });
+
+describe("dueDateCommit", () => {
+  it("saves a complete in-range date, clears an emptied one, and ignores no change", () => {
+    expect(dueDateCommit("2026-12-01", undefined)).toBe("2026-12-01");
+    expect(dueDateCommit("", "2026-12-01")).toBeNull();
+    expect(dueDateCommit("2026-12-01", "2026-12-01")).toBe("unchanged");
+    expect(dueDateCommit("", undefined)).toBe("unchanged");
+  });
+
+  it("reverts what typing a year passes through, and out-of-range years", () => {
+    expect(dueDateCommit("0002-11-26", "2026-11-26")).toBe("revert");
+    expect(dueDateCommit("0202-11-26", "2026-11-26")).toBe("revert");
+    expect(dueDateCommit("3000-01-01", undefined)).toBe("revert");
+    expect(dueDateCommit("2026-02-30", undefined)).toBe("revert");
+  });
+});
+
+describe("msUntilLocalMidnight", () => {
+  it("counts down to the next local midnight", () => {
+    expect(msUntilLocalMidnight(new Date(2026, 10, 26, 23, 59, 0))).toBe(60_000);
+    expect(msUntilLocalMidnight(new Date(2026, 10, 26, 0, 0, 0))).toBe(24 * 60 * 60 * 1000);
+  });
+});
+

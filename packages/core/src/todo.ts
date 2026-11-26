@@ -89,9 +89,11 @@ export const TODO_THREADS_MAX = 50;
 
 const DUE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-/** True for a real calendar date in `YYYY-MM-DD` form (rejects `2026-02-30`). */
+/** True for a real calendar date in `YYYY-MM-DD` form from 1900 to 2999 (rejects `2026-02-30`). */
 export function isTodoDueDate(value: string): boolean {
   if (!DUE_DATE_PATTERN.test(value)) return false;
+  const year = Number(value.slice(0, 4));
+  if (year < 1900 || year > 2999) return false;
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value);
 }
@@ -135,6 +137,8 @@ export const TODO_DIGEST_CRON = "0 17 * * *";
 /** Immediate notifications one agent may send the user in a rolling day. */
 export const TODO_NOTIFY_LIMIT_PER_DAY = 5;
 export const TODO_MAX_OPEN_SUBTASKS = 10;
+/** Subtasks an agent may request since the user last assigned the Todo, so wake-request loops end. */
+export const TODO_MAX_SUBTASKS = 20;
 export const TODO_MAX_DEPTH = 3;
 export const TODO_GRAPH_OWNER_PREFIX = "graph:";
 
@@ -164,7 +168,8 @@ export type TodoStepInput = z.infer<typeof stepInput>;
 export interface AmbientTodoAccess {
   todoForThread(threadId: string): Todo | undefined;
   recordProgress(threadId: string, update: { note: string } & Pick<TodoPatch, "completed" | "steps">): Todo;
-  notifyUser(threadId: string, message: string): Promise<void>;
+  /** `queued` when the Todo batches notifications into the daily digest. */
+  notifyUser(threadId: string, message: string): Promise<"delivered" | "queued">;
   /** `toAgentId` may be `graph:<id>`: a graph is a final destination. */
   reassign(threadId: string, toAgentId: string, note: string): Promise<Todo>;
   snooze(threadId: string, until: string, note: string): Todo;

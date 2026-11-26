@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Todo, TodoAssignment, TodoCreateInput, TodoPatch } from "@pizza-bot/core";
 import { errorMessage, type AgentCatalogEntryInfo } from "@/api-client";
 import {
@@ -26,6 +26,7 @@ import {
   dueLabel,
   isOverdue,
   localToday,
+  msUntilLocalMidnight,
   stepProgress,
   todoViewCounts,
   todosInView,
@@ -100,7 +101,12 @@ export function TodosModule({
 }: TodosModuleProps) {
   const notify = useAppToast();
   const isMobile = useIsMobile();
-  const today = todayOverride ?? localToday();
+  const [clockToday, setClockToday] = useState(() => localToday());
+  useEffect(() => {
+    const timer = setTimeout(() => setClockToday(localToday()), msUntilLocalMidnight() + 1_000);
+    return () => clearTimeout(timer);
+  }, [clockToday]);
+  const today = todayOverride ?? clockToday;
   const [view, setView] = useState<TodoView>("all");
   const [selectedId, setSelectedId] = useState<string | null>(focusId ?? null);
   const [draft, setDraft] = useState("");
@@ -156,12 +162,12 @@ export function TodosModule({
       >
         <div className="resource-list todo-list">
           <div className="resource-list-header todo-list-header">
-            <div className="segmented todo-views" role="tablist" aria-label={`${L.todos} views`}>
+            <div className="segmented todo-views" role="group" aria-label={`${L.todos} views`}>
               {TODO_VIEWS.map((key) => (
                 <button
                   key={key}
-                  role="tab"
-                  aria-selected={view === key}
+                  type="button"
+                  aria-pressed={view === key}
                   className={`segmented-btn${view === key ? " active" : ""}`}
                   onClick={() => setView(key)}
                 >
@@ -197,11 +203,9 @@ export function TodosModule({
             ) : (
               <ul
                 className="resource-rows"
-                role="listbox"
                 aria-label={`${VIEW_LABELS[view]} ${L.todos.toLowerCase()}`}
-                aria-activedescendant={listNavigation.activeDescendant}
                 data-hotkey-zone={SELECTABLE_LIST_ZONE}
-                tabIndex={0}
+                tabIndex={-1}
                 ref={listNavigation.setListElement}
               >
                 {rows.map((todo) => {
@@ -212,11 +216,9 @@ export function TodosModule({
                     key={todo.id}
                     id={listNavigation.rowId(todo.id)}
                     ref={(element) => listNavigation.setRowElement(todo.id, element)}
-                    role="option"
-                    aria-selected={todo.id === selectedId}
-                    onClick={() => listNavigation.selectItem(todo.id)}
                   >
                     <TodoRow
+                      onSelect={() => listNavigation.selectItem(todo.id)}
                       todo={todo}
                       today={today}
                       active={todo.id === selectedId}
@@ -288,9 +290,11 @@ function TodoRow({
   ownerIsGraph = false,
   parentTitle,
   waiting,
+  onSelect,
   onToggleComplete,
   onToggleImportant,
 }: {
+  onSelect: () => void;
   todo: Todo;
   today: string;
   active: boolean;
@@ -326,7 +330,12 @@ function TodoRow({
       >
         {todo.completed ? <CircleCheck size={18} /> : <Circle size={18} />}
       </button>
-      <span className="resource-row-main">
+      <button
+        type="button"
+        className="resource-row-main todo-row-select"
+        aria-current={active ? "true" : undefined}
+        onClick={onSelect}
+      >
         <span className="resource-row-name todo-row-title">{todo.title}</span>
         {parentTitle && <span className="todo-row-parent">↳ {parentTitle}</span>}
         {hasMeta && (
@@ -371,7 +380,7 @@ function TodoRow({
             )}
           </span>
         )}
-      </span>
+      </button>
       <button
         type="button"
         className={`todo-star${important ? " active" : ""}`}

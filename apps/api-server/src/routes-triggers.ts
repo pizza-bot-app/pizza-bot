@@ -22,7 +22,11 @@ const triggerFieldsSchema = z.object({
 });
 
 const triggerCreateSchema = triggerFieldsSchema.extend({
-  id: z.string().regex(ID_RE).optional(),
+  id: z
+    .string()
+    .regex(ID_RE)
+    .refine((id) => !id.startsWith("todo_"), "ids starting with todo_ are reserved for Todo check-ins")
+    .optional(),
 });
 
 const triggerPatchSchema = triggerFieldsSchema.partial().strict();

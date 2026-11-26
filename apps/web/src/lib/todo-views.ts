@@ -1,5 +1,5 @@
 /** Todo smart views: pure predicates and ordering over calendar dates in the viewer's zone. */
-import type { Todo } from "@pizza-bot/core";
+import { isTodoDueDate, type Todo } from "@pizza-bot/core";
 
 export type TodoView = "today" | "planned" | "important" | "all" | "completed";
 
@@ -98,3 +98,24 @@ export function flaggedThreadIds(todos: readonly Todo[]): Set<string> {
 export function openTodoForThread(todos: readonly Todo[], threadId: string): Todo | undefined {
   return todos.find((todo) => !todo.completed && todo.threadIds.includes(threadId));
 }
+
+export const DUE_DATE_MIN = "1900-01-01";
+export const DUE_DATE_MAX = "2999-12-31";
+
+/**
+ * What saving a typed due date does: a date to store, `null` to clear it, or
+ * nothing. A partial or out-of-range entry reverts to the stored date.
+ */
+export function dueDateCommit(draft: string, current: string | undefined): string | null | "unchanged" | "revert" {
+  if (draft === (current ?? "")) return "unchanged";
+  if (!draft) return null;
+  if (!isTodoDueDate(draft) || draft < DUE_DATE_MIN || draft > DUE_DATE_MAX) return "revert";
+  return draft;
+}
+
+/** Milliseconds until the next local midnight, when "today" changes. */
+export function msUntilLocalMidnight(now: Date = new Date()): number {
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return next.getTime() - now.getTime();
+}
+
