@@ -1,6 +1,6 @@
 {
   "name": "@pizza-bot/plugin-google-workspace",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "Gmail and Google Calendar MCP server and skills.",

@@ -1,6 +1,6 @@
 {
   "name": "@pizza-bot/api-server",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "Hono server for the Pizza Bot thread protocol and checkpoint-shaped state API.",
