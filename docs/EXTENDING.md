@@ -96,6 +96,33 @@ enabled and connected, every mounted skill is enabled, and its model resolves.
 Loading or unavailable agents stay visible but are left out of the `task` roster
 until they recover.
 
+### Ground a gated tool's arguments
+
+When a gated tool sends prose built from what the agent looked up, `verifiedArgs`
+asks the model to cite where each claim came from:
+
+```yaml
+tools:
+  - mcp:billing:get_invoice
+  - mcp:billing:send_reply
+interruptOn:
+  "mcp:billing:send_reply":
+    allowedDecisions:
+      - approve
+      - edit
+      - reject
+    verifiedArgs:
+      - body
+```
+
+Every other tool the agent calls is recorded as evidence, with its output
+numbered line by line. When the agent drafts `send_reply`, it quotes each claim
+in `body` and names the evidence lines that support it. The approval card marks
+each claim, and clicking one shows the lines it cites. A claim citing lines that
+don't exist, or a figure those lines don't state, is marked red. Turn on
+Settings → Claim checking to have a model grade the rest. An argument the tool's
+schema doesn't have is ignored.
+
 ### Write the description for two readers
 
 The `description` is the only part of an agent Pizza Bot sees before delegating,
