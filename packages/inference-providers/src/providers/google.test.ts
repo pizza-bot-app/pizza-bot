@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GoogleLangChainModelProvider,
   googleModelDescriptor,
@@ -378,54 +378,170 @@ describe("Google Vertex AI routing", () => {
   });
 });
 
-describe("Google Vertex AI Express region hint", () => {
-  const notFound = {
+describe("Google Vertex AI Express model-not-found recovery", () => {
+  const notFound = (project?: string) => ({
     error: {
       code: 404,
       status: "NOT_FOUND",
-      message: "Publisher model `projects/1/locations/us-central1/publishers/google/models/gemini-4-neon` was not found or your project does not have access to it.",
+      message: `Publisher model \`${project ? `projects/${project}/` : ""}locations/us-central1/publishers/google/models/gemini-4-neon\` was not found or your project does not have access to it.`,
     },
+  });
+  const reply = {
+    candidates: [{ content: { role: "model", parts: [{ text: "hi" }] }, finishReason: "STOP" }],
+  };
+  const urlOf = (call: unknown[]) => {
+    const request = call[0] as Request | string | URL;
+    return request instanceof Request ? request.url : String(request);
   };
 
+  function vertexProvider(options: { project?: string } = {}) {
+    return new GoogleLangChainModelProvider({
+      apiKey: "test-key",
+      platform: "gcp",
+      ...options,
+      models: [{ id: "gemini-4-neon", provider: "google", displayName: "Gemini 4 Neon" }],
+    });
+  }
+
+  async function call(
+    provider: GoogleLangChainModelProvider,
+    mode: "invoke" | "stream",
+  ): Promise<void> {
+    const model = await provider.buildModel("gemini-4-neon");
+    if (mode === "invoke") {
+      await model.invoke("hello");
+    } else {
+      for await (const chunk of await model.stream("hello")) void chunk;
+    }
+  }
+
   async function failure(
-    options: { project?: string },
+    provider: GoogleLangChainModelProvider,
     mode: "invoke" | "stream",
   ): Promise<Error & { code?: string }> {
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => Response.json(notFound, { status: 404 })));
     try {
-      const provider = new GoogleLangChainModelProvider({
-        apiKey: "test-key",
-        platform: "gcp",
-        ...options,
-        models: [{ id: "gemini-4-neon", provider: "google", displayName: "Gemini 4 Neon" }],
-      });
-      const model = await provider.buildModel("gemini-4-neon");
-      if (mode === "invoke") {
-        await model.invoke("hello");
-      } else {
-        for await (const chunk of await model.stream("hello")) void chunk;
-      }
+      await call(provider, mode);
     } catch (error) {
       return error as Error & { code?: string };
-    } finally {
-      vi.unstubAllGlobals();
     }
     throw new Error("expected the model call to fail");
   }
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
   it.each(["invoke", "stream"] as const)(
-    "points an Express model-not-found failure at the project setting (%s)",
+    "retries on the key's own project when Express cannot find the model (%s)",
     async (mode) => {
-      const error = await failure({}, mode);
+      const fetchFn = vi.fn()
+        .mockResolvedValueOnce(Response.json(notFound("195922579897"), { status: 404 }))
+        .mockImplementation(async () => Response.json(reply));
+      vi.stubGlobal("fetch", fetchFn);
+
+      await call(vertexProvider(), mode);
+
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+      expect(urlOf(fetchFn.mock.calls[1]!)).toMatch(
+        /^https:\/\/aiplatform\.googleapis\.com\/v1\/projects\/195922579897\/locations\/global\/publishers\/google\/models\/gemini-4-neon:/,
+      );
+    },
+  );
+
+  it("keeps later models on the learned project until the settings change", async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(Response.json(notFound("195922579897"), { status: 404 }))
+      .mockImplementation(async () => Response.json(reply));
+    vi.stubGlobal("fetch", fetchFn);
+    const provider = vertexProvider();
+
+    await call(provider, "invoke");
+    await call(provider, "invoke");
+    expect(urlOf(fetchFn.mock.calls[2]!)).toMatch(/\/projects\/195922579897\/locations\/global\//);
+    expect(provider.authSchema[0]?.fields.find((f) => f.key === "platform")?.options)
+      .toContainEqual({ value: "gcp", label: "Vertex AI" });
+
+    provider.configure({ method: "api-key", values: { apiKey: "test-key", platform: "gcp" } });
+    await call(provider, "invoke");
+    expect(urlOf(fetchFn.mock.calls[3]!)).toMatch(/\/v1\/publishers\/google\/models\//);
+  });
+
+  it("reports the project endpoint's own failure when the retry fails too", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () =>
+      Response.json(notFound("195922579897"), { status: 404 })));
+
+    const error = await failure(vertexProvider(), "invoke");
+    expect(error.message).not.toMatch(/Vertex AI Express serves only/);
+  });
+
+  it.each(["invoke", "stream"] as const)(
+    "points a failure without a project number at the project setting (%s)",
+    async (mode) => {
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(async () =>
+        Response.json(notFound(), { status: 404 })));
+
+      const error = await failure(vertexProvider(), mode);
       expect(error.message).toMatch(/was not found.*set a Vertex AI project ID/s);
       expect(error.code).toBe("MODEL_UNAVAILABLE");
     },
   );
 
   it("leaves the failure alone once a project is set", async () => {
-    const error = await failure({ project: "my-project" }, "invoke");
+    const fetchFn = vi.fn().mockImplementation(async () =>
+      Response.json(notFound("195922579897"), { status: 404 }));
+    vi.stubGlobal("fetch", fetchFn);
+
+    const error = await failure(vertexProvider({ project: "my-project" }), "invoke");
     expect(error.message).not.toMatch(/Vertex AI project ID/);
     expect(error.code).toBeUndefined();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Google Vertex AI environment fallback", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("routes Vertex AI through GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION", async () => {
+    vi.stubEnv("GOOGLE_CLOUD_PROJECT", "env-project");
+    vi.stubEnv("GOOGLE_CLOUD_LOCATION", "us-east1");
+    const fetchFn = vi.fn().mockResolvedValue(Response.json({
+      candidates: [{ content: { role: "model", parts: [{ text: "hi" }] }, finishReason: "STOP" }],
+    }));
+    vi.stubGlobal("fetch", fetchFn);
+    const provider = new GoogleLangChainModelProvider({
+      apiKey: "test-key",
+      platform: "gcp",
+      models: [{ id: "gemini-4-neon", provider: "google", displayName: "Gemini 4 Neon" }],
+    });
+
+    await (await provider.buildModel("gemini-4-neon")).invoke("hello");
+    const request = fetchFn.mock.calls[0]?.[0] as Request | string | URL;
+    expect(request instanceof Request ? request.url : String(request)).toMatch(
+      /^https:\/\/us-east1-aiplatform\.googleapis\.com\/v1\/projects\/env-project\/locations\/us-east1\//,
+    );
+  });
+
+  it("does not let an ambient project pull an AI Studio key onto Vertex AI", async () => {
+    vi.stubEnv("GOOGLE_CLOUD_PROJECT", "env-project");
+    const fetchFn = vi.fn().mockImplementation((_input: URL | string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve(new Response("{}", { status: 200 }))
+        : Promise.resolve(Response.json({
+            models: [{ name: "models/gemini-2.5-flash", supportedGenerationMethods: ["generateContent"] }],
+          })));
+    const provider = new GoogleLangChainModelProvider({
+      apiKey: "test-key",
+      aiApiBase: "https://google-ai.example",
+      fetch: fetchFn,
+    });
+
+    await provider.listModels();
+    expect(provider.authSchema[0]?.fields.find((f) => f.key === "platform")?.options)
+      .toContainEqual({ value: "auto", label: "Auto-detect (using Google AI Studio)" });
   });
 });
 

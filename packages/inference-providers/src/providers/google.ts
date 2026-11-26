@@ -142,7 +142,8 @@ export class GoogleLangChainModelProvider implements ModelProvider {
   private maxOutputTokens: number;
   private platform: GooglePlatformSetting;
   private project: string | undefined;
-  private location: string;
+  private location: string | undefined;
+  private learnedProject: string | undefined;
   private detectedPlatform: GooglePlatform | undefined;
   private aiStudioGeneration: Promise<boolean> | undefined;
 
@@ -190,7 +191,7 @@ export class GoogleLangChainModelProvider implements ModelProvider {
       positiveInteger(opts.maxOutputTokens) ?? DEFAULT_MAX_OUTPUT_TOKENS;
     this.platform = validPlatform(opts.platform) ?? "auto";
     this.project = nonEmpty(opts.project);
-    this.location = nonEmpty(opts.location) ?? DEFAULT_VERTEX_LOCATION;
+    this.location = nonEmpty(opts.location);
     for (const descriptor of opts.models ?? []) {
       this.descriptors.set(descriptor.id, descriptor);
     }
@@ -203,7 +204,8 @@ export class GoogleLangChainModelProvider implements ModelProvider {
       positiveInteger(cfg.values.maxOutputTokens) ?? DEFAULT_MAX_OUTPUT_TOKENS;
     this.platform = validPlatform(cfg.values.platform) ?? "auto";
     this.project = nonEmpty(cfg.values.project);
-    this.location = nonEmpty(cfg.values.location) ?? DEFAULT_VERTEX_LOCATION;
+    this.location = nonEmpty(cfg.values.location);
+    this.learnedProject = undefined;
     this.detectedPlatform = undefined;
     this.aiStudioGeneration = undefined;
     if (!this.models) this.descriptors.clear();
@@ -266,22 +268,39 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     // Vertex AI Express URLs carry no project or location, and Google serves them
     // from us-central1, where models offered only on `global` or a multi-region
     // are not found. The same API key authenticates the project-qualified URL.
-    const vertexProject = platform === "gcp" ? this.vertexProject() : undefined;
+    let vertexProject = platform === "gcp" ? this.vertexProject() : undefined;
+    const location = this.vertexLocation();
     if (vertexProject) {
       // Both values are spliced into the endpoint's hostname and path, which receive the API key.
       assertVertexSegment("project ID", vertexProject);
-      assertVertexSegment("location", this.location);
+      assertVertexSegment("location", location);
     }
+    const expressOnly = platform === "gcp" && !vertexProject;
+    // Express names the key's own project in its not-found error, so the first
+    // such failure moves this model, and the provider's later ones, onto it.
+    const routeToProject = (error: unknown): boolean => {
+      const project = expressOnly && !vertexProject ? expressProjectNumber(error) : undefined;
+      if (!project) return false;
+      assertVertexSegment("location", location);
+      vertexProject = project;
+      this.learnedProject = project;
+      return true;
+    };
     const normalizeError = (error: unknown): unknown =>
-      platform === "gcp" && !vertexProject ? withExpressRegionHint(error) : error;
+      expressOnly && !vertexProject ? withExpressRegionHint(error) : error;
     class ThoughtSignatureSafeChatGoogle extends ChatGoogle {
       constructor(fields: ConstructorParameters<typeof ChatGoogle>[0]) {
         super(fields);
-        if (vertexProject) this.apiClient.getProjectId = async () => vertexProject;
+        const projectId = this.apiClient.getProjectId.bind(this.apiClient);
+        this.apiClient.getProjectId = async () => vertexProject ?? projectId();
       }
 
       override get isVertexExpress() {
         return vertexProject ? false : super.isVertexExpress;
+      }
+
+      override get location() {
+        return vertexProject ? location : super.location;
       }
 
       override get profile() {
@@ -299,15 +318,14 @@ export class GoogleLangChainModelProvider implements ModelProvider {
         options: this["ParsedCallOptions"],
         runManager?: CallbackManagerForLLMRun,
       ): Promise<ChatResult> {
+        const attempt = () =>
+          super._generate(prepareGoogleMessages(messages), options, runManager);
         try {
-          return await super._generate(
-            prepareGoogleMessages(messages),
-            options,
-            runManager,
-          );
+          return await attempt();
         } catch (error) {
-          throw normalizeError(error);
+          if (!routeToProject(error)) throw normalizeError(error);
         }
+        return attempt();
       }
 
       override async *_streamResponseChunks(
@@ -315,15 +333,11 @@ export class GoogleLangChainModelProvider implements ModelProvider {
         options: this["ParsedCallOptions"],
         runManager?: CallbackManagerForLLMRun,
       ): AsyncGenerator<ChatGenerationChunk> {
-        try {
-          yield* super._streamResponseChunks(
-            prepareGoogleMessages(messages),
-            options,
-            runManager,
-          );
-        } catch (error) {
-          throw normalizeError(error);
-        }
+        yield* withProjectRetry(
+          () => super._streamResponseChunks(prepareGoogleMessages(messages), options, runManager),
+          routeToProject,
+          normalizeError,
+        );
       }
 
       override async *_streamChatModelEvents(
@@ -331,17 +345,13 @@ export class GoogleLangChainModelProvider implements ModelProvider {
         options: this["ParsedCallOptions"],
         runManager?: CallbackManagerForLLMRun,
       ): AsyncGenerator<ChatModelStreamEvent> {
-        try {
-          yield* convertGoogleChunksToEvents(
-            super._streamResponseChunks(
-              prepareGoogleMessages(messages),
-              options,
-              runManager,
-            ),
-          );
-        } catch (error) {
-          throw normalizeError(error);
-        }
+        yield* convertGoogleChunksToEvents(
+          withProjectRetry(
+            () => super._streamResponseChunks(prepareGoogleMessages(messages), options, runManager),
+            routeToProject,
+            normalizeError,
+          ),
+        );
       }
     }
 
@@ -349,7 +359,6 @@ export class GoogleLangChainModelProvider implements ModelProvider {
       model: modelId,
       apiKey,
       platformType: platform,
-      ...(vertexProject ? { location: this.location } : {}),
       ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
     });
   }
@@ -364,8 +373,17 @@ export class GoogleLangChainModelProvider implements ModelProvider {
     return requested === "auto" ? this.detectedPlatform : requested;
   }
 
+  /** Only consulted on Vertex AI: an ambient project must not pull an AI Studio key onto Vertex. */
   private vertexProject(): string | undefined {
-    return this.project;
+    return this.project ?? nonEmpty(process.env.GOOGLE_CLOUD_PROJECT) ?? this.learnedProject;
+  }
+
+  private vertexLocation(): string {
+    return (
+      this.location ??
+      nonEmpty(process.env.GOOGLE_CLOUD_LOCATION) ??
+      DEFAULT_VERTEX_LOCATION
+    );
   }
 
   private async platformForBuild(apiKey: string): Promise<GooglePlatform> {
@@ -610,6 +628,32 @@ function probeModelId(models: readonly ModelDescriptor[]): string | undefined {
     if (match) return match.id;
   }
   return models[0]?.id;
+}
+
+function expressProjectNumber(error: unknown): string | undefined {
+  if (!(error instanceof Error) || !/publisher model .* was not found/i.test(error.message)) {
+    return undefined;
+  }
+  return /projects\/(\d+)\/locations\//.exec(error.message)?.[1];
+}
+
+/** Retries once on the key's project, but never after output has reached the caller. */
+async function* withProjectRetry<T>(
+  stream: () => AsyncGenerator<T>,
+  routeToProject: (error: unknown) => boolean,
+  normalizeError: (error: unknown) => unknown,
+): AsyncGenerator<T> {
+  let yielded = false;
+  try {
+    for await (const chunk of stream()) {
+      yielded = true;
+      yield chunk;
+    }
+    return;
+  } catch (error) {
+    if (yielded || !routeToProject(error)) throw normalizeError(error);
+  }
+  yield* stream();
 }
 
 /**
