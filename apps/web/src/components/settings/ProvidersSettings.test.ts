@@ -6,6 +6,7 @@ import type { ProviderAuthMethod } from "@pizza-bot/core";
 import {
   getProviderStatus,
   FieldInput,
+  syncedMethodId,
   syncedValues,
   secretKeysWithStoredValue,
   secretReferenceValidationError,
@@ -281,5 +282,15 @@ describe("syncedValues", () => {
         { platform: "auto", project: "" },
       ),
     ).toEqual({ platform: "auto", project: "" });
+  });
+});
+
+describe("syncedMethodId", () => {
+  it("follows an auth method changed on the server", () => {
+    expect(syncedMethodId("api-key", "api-key", "profile")).toBe("profile");
+  });
+
+  it("keeps a method the user switched to locally", () => {
+    expect(syncedMethodId("access-keys", "api-key", "profile")).toBe("access-keys");
   });
 });

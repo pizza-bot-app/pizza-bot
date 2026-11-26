@@ -246,7 +246,15 @@ function ProviderRow({
   const configured = provider.config !== undefined;
   const status = getProviderStatus(provider, catalog);
 
-  const [methodId, setMethodId] = useState(provider.config?.method ?? methods[0]?.id ?? "");
+  const serverMethodId = provider.config?.method ?? methods[0]?.id ?? "";
+  const [methodId, setMethodId] = useState(serverMethodId);
+  const lastServerMethodId = useRef(serverMethodId);
+  useEffect(() => {
+    const previous = lastServerMethodId.current;
+    if (previous === serverMethodId) return;
+    lastServerMethodId.current = serverMethodId;
+    setMethodId((current) => syncedMethodId(current, previous, serverMethodId));
+  }, [serverMethodId]);
   const method = methods.find((m) => m.id === methodId) ?? methods[0];
 
   const seed = useMemo(() => seedValues(method, provider.config), [method, provider.config]);
@@ -713,6 +721,11 @@ async function materializeSecret(providerId: string, fieldKey: string, typed: st
 function envRefName(providerId: string, fieldKey: string): string {
   const sanitize = (s: string) => s.replace(/[^A-Za-z0-9]/g, "_").toUpperCase();
   return `PIZZA_SECRET_${sanitize(providerId)}_${sanitize(fieldKey)}`;
+}
+
+/** The server's auth method wins unless the user has switched methods locally. */
+export function syncedMethodId(current: string, previousServer: string, nextServer: string): string {
+  return current === previousServer ? nextServer : current;
 }
 
 /** Fields the user has not edited follow the server; edited ones keep the draft. */

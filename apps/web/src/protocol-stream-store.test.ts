@@ -546,6 +546,39 @@ describe("ProtocolStreamStore steering-enqueue", () => {
     });
   });
 
+  it("queues a retry while the browser is at its parallel-run limit", async () => {
+    store = new ProtocolStreamStore(12, 1);
+    await store.send("failed", "what can you do?");
+    await flush();
+    const failed = last;
+    failed.rootError = new Error("Publisher model was not found");
+    failed.isLoading = false;
+    failed.fireCompleted();
+    failed.notify();
+    await store.send("busy", "long task");
+    await flush();
+    const busy = last;
+    const retries = () =>
+      controllers.flatMap((c) => c.submits).filter((s) => JSON.stringify(s.input) === '{"messages":[]}');
+
+    await store.retry("failed", "google:gemini-4-hydrogen");
+    await store.retry("failed", "google:gemini-4-hydrogen");
+
+    expect(retries()).toHaveLength(0);
+    expect(store.getSlice("failed").queued).toEqual(["Retry"]);
+
+    busy.fireCompleted();
+    await flush();
+
+    expect(retries()).toEqual([
+      {
+        input: { messages: [] },
+        opts: { config: { configurable: { model: "google:gemini-4-hydrogen" } } },
+      },
+    ]);
+    expect(store.getSlice("failed").queued).toEqual([]);
+  });
+
   it("does not retry while a run is streaming", async () => {
     await store.send(TID, "first");
     await flush();
