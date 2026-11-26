@@ -241,10 +241,10 @@ describe("parseSkillImport", () => {
         name: "review-change",
         description: "Review a code change.",
         body: "# Review\r\n\r\nInspect the diff.\r\n",
-        declaredTools: ["mcp:github:submit_review"],
-        interruptOn: { "mcp:github:submit_review": { allowedDecisions: ["approve", "reject"] } },
         files: [{ path: "SKILL.md", content: bytes }],
       });
+      expect(skill).not.toHaveProperty("declaredTools");
+      expect(skill).not.toHaveProperty("interruptOn");
     },
   );
 
@@ -297,8 +297,6 @@ describe("parseSkillImport", () => {
         name: "review-change",
         description: "Review changes: carefully.",
         body: "# Review\r\n\r\nInspect the diff.\r\n",
-        declaredTools: ["mcp:github:submit_review"],
-        interruptOn: { "mcp:github:submit_review": { allowedDecisions: ["approve", "reject"] } },
         files: [{ path: "SKILL.md", content: new TextEncoder().encode(content) }],
       });
     });

@@ -161,17 +161,17 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
     expect(missing.status).toBe(404);
   }, 20_000);
 
-  it("enforces skill and MCP enablement dependencies for plugin contributions", async () => {
+  it("enforces agent and MCP enablement dependencies for plugin contributions", async () => {
     const initial = (await (await app.request("/mcp-servers")).json()) as {
       servers: Array<{
         id: string;
         enabled: boolean;
-        dependentSkills: Array<{ id: string; enabled: boolean }>;
+        dependentAgents: Array<{ id: string; enabled: boolean }>;
       }>;
     };
     expect(initial.servers.find((server) => server.id === "mcp-status")).toMatchObject({
       enabled: true,
-      dependentSkills: [{ id: "health-report", enabled: true }],
+      dependentAgents: [{ id: "health-report", enabled: true }],
     });
 
     const blockedServer = await app.request("/mcp-servers/mcp-status/enabled", {
@@ -185,13 +185,13 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
       blockers: [{ id: "health-report" }],
     });
 
-    const disabledSkill = await app.request("/skills/health-report/enabled", {
+    const disabledAgent = await app.request("/agents/health-report/enabled", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ enabled: false }),
     });
-    expect(disabledSkill.status).toBe(200);
-    expect(await disabledSkill.json()).toMatchObject({
+    expect(disabledAgent.status).toBe(200);
+    expect(await disabledAgent.json()).toMatchObject({
       id: "health-report",
       enabled: false,
       status: "disabled",
@@ -209,21 +209,20 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
       status: "disabled",
     });
 
-    const blockedSkill = await app.request("/skills/health-report/enabled", {
+    const blockedAgent = await app.request("/agents/health-report/enabled", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ enabled: true }),
     });
-    expect(blockedSkill.status).toBe(409);
-    expect(await blockedSkill.json()).toMatchObject({
+    expect(blockedAgent.status).toBe(409);
+    expect(await blockedAgent.json()).toMatchObject({
       error: "dependency_disabled",
       blockers: [{ id: "mcp-status", reason: "disabled" }],
     });
 
     expect(
-      (host as unknown as { graphs: { skills(): Map<string, unknown> } }).graphs
-        .skills()
-        ?.has("health-report") ?? false,
+      (host as unknown as { graphs: { dependencies: { agents?: Map<string, unknown> } } }).graphs
+        .dependencies.agents?.has("health-report") ?? false,
     ).toBe(false);
 
     expect(
@@ -237,7 +236,7 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
     ).toBe(200);
     expect(
       (
-        await app.request("/skills/health-report/enabled", {
+        await app.request("/agents/health-report/enabled", {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ enabled: true }),
@@ -246,37 +245,37 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
     ).toBe(200);
   }, 30_000);
 
-  it("identifies a missing dependency when an explicitly disabled skill is re-enabled", async () => {
-    const created = await app.request("/skills", {
+  it("identifies a missing dependency when an explicitly disabled agent is re-enabled", async () => {
+    const created = await app.request("/agents", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         id: "ghost-review",
         name: "Ghost review",
         description: "Reviews a server that is not configured.",
-        body: "Review the status.",
+        systemPrompt: "Review the status.",
         declaredTools: ["mcp:ghost:*"],
       }),
     });
     expect(created.status).toBe(201);
     expect(
       (
-        (await (await app.request("/skills")).json()) as {
-          skills: Array<{ id: string; enabled: boolean; status: string }>;
+        (await (await app.request("/agents")).json()) as {
+          agents: Array<{ id: string; enabled: boolean; status: string }>;
         }
-      ).skills.find((skill) => skill.id === "ghost-review"),
+      ).agents.find((agent) => agent.id === "ghost-review"),
     ).toMatchObject({ enabled: true, status: "unavailable" });
 
     expect(
       (
-        await app.request("/skills/ghost-review/enabled", {
+        await app.request("/agents/ghost-review/enabled", {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ enabled: false }),
         })
       ).status,
     ).toBe(200);
-    const response = await app.request("/skills/ghost-review/enabled", {
+    const response = await app.request("/agents/ghost-review/enabled", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ enabled: true }),
@@ -289,22 +288,22 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
     });
   });
 
-  it("blocks direct update and deletion of a user server required by an enabled skill", async () => {
+  it("blocks direct update and deletion of a user server required by an enabled agent", async () => {
     expect(
       (await post({ id: "echo", command: "node", args: [STATUS_SERVER] })).status,
     ).toBe(201);
-    const skill = await app.request("/skills", {
+    const agent = await app.request("/agents", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         id: "echo-review",
         name: "Echo review",
         description: "Reviews echo status.",
-        body: "Review the status.",
+        systemPrompt: "Review the status.",
         declaredTools: ["mcp:echo:*"],
       }),
     });
-    expect(skill.status).toBe(201);
+    expect(agent.status).toBe(201);
 
     const patch = await app.request("/mcp-servers/echo", {
       method: "PATCH",
@@ -422,18 +421,18 @@ describe("mcp-server routes: GET/POST/PATCH/DELETE /mcp-servers", () => {
       args: ["/no/such/server.js"],
       enabled: false,
     });
-    const skill = await app.request("/skills", {
+    const agent = await app.request("/agents", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         id: "later-review",
         name: "Later review",
         description: "Reviews the later server.",
-        body: "Review the status.",
+        systemPrompt: "Review the status.",
         declaredTools: ["mcp:later:*"],
       }),
     });
-    expect(skill.status).toBe(201);
+    expect(agent.status).toBe(201);
 
     const response = await app.request("/mcp-servers/later", {
       method: "PATCH",

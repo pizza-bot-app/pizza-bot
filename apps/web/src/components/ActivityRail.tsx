@@ -3,6 +3,7 @@ import { CheckCircle2, ChevronDown, ChevronRight, Clock, Loader2, X, XCircle } f
 import type { DelegationInfo, UIMessageLike, UIPartLike } from "@/projection";
 import { Avatar } from "./Avatar.js";
 import { useSubagentTranscript } from "../use-thread-slice.js";
+import { useAgentName } from "./agent-names.js";
 
 export function ActivityRail({
   delegations,
@@ -110,7 +111,8 @@ function DelegationBatch({
   const items = batch.items;
   const rel = (items[0]?.depth ?? 0) - baseDepth;
   const indent = rel > 0 ? { marginLeft: rel * 12 } : undefined;
-  const names = [...new Set(items.map((i) => i.subagent))];
+  const agentName = useAgentName();
+  const names = [...new Set(items.map((i) => agentName(i.subagent)))];
   const label = names.join(" · ");
   const showCount = items.length !== names.length;
   const awaiting = items.some((i) => i.status === "awaiting-input");
@@ -196,6 +198,7 @@ function DelegationGroup({
   const rel = (g.depth ?? 0) - baseDepth;
   const indent = !inBatch && rel > 0 ? { marginLeft: rel * 12 } : undefined;
   const toggle = () => setOpen((v) => !v);
+  const agentName = useAgentName();
 
   return (
     <li className="delegation-group" style={indent}>
@@ -224,8 +227,8 @@ function DelegationGroup({
         ) : (
           <span className="delegation-caret-spacer" />
         )}
-        <Avatar label={g.subagent} size={16} />
-        <span className="delegation-subagent">{g.subagent}</span>
+        <Avatar label={agentName(g.subagent)} size={16} />
+        <span className="delegation-subagent">{agentName(g.subagent)}</span>
         {duration && <span className="delegation-duration">{duration}</span>}
         <CallIndicator status={g.status} />
       </div>

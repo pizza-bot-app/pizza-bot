@@ -13,7 +13,7 @@ export interface PluginContribution<T> {
   value: T;
 }
 
-export type ContributionKind = "skill" | "MCP server";
+export type ContributionKind = "skill" | "agent" | "MCP server";
 
 export class PluginContributionCollisionError extends Error {
   constructor(
@@ -33,6 +33,7 @@ export class PluginContributionCollisionError extends Error {
 
 export class ContributionRegistry {
   readonly skills = new Map<string, PluginContribution<string>>();
+  readonly agents = new Map<string, PluginContribution<string>>();
   readonly mcpServers = new Map<string, PluginContribution<McpServerEntry>>();
   private readonly pluginNames = new Set<string>();
 
@@ -50,6 +51,10 @@ export class ContributionRegistry {
 
   registerSkill(pluginName: string, root: string, id: string, path: string): void {
     this.registerUnique(this.skills, "skill", pluginName, root, id, path);
+  }
+
+  registerAgent(pluginName: string, root: string, id: string, path: string): void {
+    this.registerUnique(this.agents, "agent", pluginName, root, id, path);
   }
 
   registerMcpServer(
@@ -80,6 +85,7 @@ export class ContributionRegistry {
 
     for (const pluginName of incoming.pluginNames) this.pluginNames.add(pluginName);
     mergeMap(this.skills, incoming.skills);
+    mergeMap(this.agents, incoming.agents);
     mergeMap(this.mcpServers, incoming.mcpServers);
   }
 
@@ -117,6 +123,7 @@ export class ContributionRegistry {
       ]
     > = [
       ["skill", this.skills, incoming.skills],
+      ["agent", this.agents, incoming.agents],
       ["MCP server", this.mcpServers, incoming.mcpServers],
     ];
     for (const [kind, current, next] of pairs) {

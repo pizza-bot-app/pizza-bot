@@ -9,7 +9,7 @@ This guide walks through giving Pizza Bot access to your Gmail and Google Calend
 | Gmail | `search_threads`, `get_thread`, `list_labels`, `create_draft` | Reads mail and creates drafts. There is no send, delete, or modify tool. |
 | Calendar | `list_calendars`, `list_events`, `get_event`, `find_free_time`, `create_event` | `create_event` does not email attendees unless `sendUpdates: "all"` is passed. |
 
-Two skills sit on top of the tools: `email` and `calendar`. Both treat message and event text as untrusted input.
+A `google-workspace` agent holds the tools and mounts two skills, `email` and `calendar`. Both treat message and event text as untrusted input.
 
 **Time required:** about 15 minutes, almost all of it in the Google Cloud Console.
 
@@ -178,7 +178,7 @@ If you set `PIZZA_DATA_ROOT`, use `<PIZZA_DATA_ROOT>/google-workspace/` instead.
 
 ## 8. Enable and sign in
 
-The plugin ships disabled. In Pizza Bot, enable the `google-workspace` MCP server. It should report 9 tools, and the `email` and `calendar` skills turn on with it.
+The plugin ships disabled. In Pizza Bot, enable the `google-workspace` MCP server. It should report 9 tools, and the `google-workspace` agent turns on with it.
 
 Then ask Pizza Bot something like "What's on my calendar today?" The first request opens Google's sign-in in your browser, and Pizza Bot replies that it is waiting for you to finish. The reply includes the link in case no browser tab opened.
 
@@ -347,9 +347,9 @@ Then try these prompts. Each should show a **Delegate to calendar** or **Delegat
 
 | Prompt | Expected |
 |---|---|
-| "What's on my calendar for the next two days? Also tell me roughly when I have a free 30-minute window." | `calendar` skill; an event list and free windows |
-| "List just the sender and subject of my 3 most recent email threads. Don't quote any message bodies." | `email` skill; three senders and subjects |
-| "Create a Gmail draft addressed to me with the subject 'Pizza Bot test draft'. Do not send it." | `email` skill; a draft ID. Check Gmail Drafts, and note the Sent folder stays empty. |
+| "What's on my calendar for the next two days? Also tell me roughly when I have a free 30-minute window." | `google-workspace` agent with the `calendar` skill; an event list and free windows |
+| "List just the sender and subject of my 3 most recent email threads. Don't quote any message bodies." | `google-workspace` agent with the `email` skill; three senders and subjects |
+| "Create a Gmail draft addressed to me with the subject 'Pizza Bot test draft'. Do not send it." | `google-workspace` agent with the `email` skill; a draft ID. Check Gmail Drafts, and note the Sent folder stays empty. |
 
 When finished, stop both servers and delete the scratch folder.
 
@@ -357,7 +357,7 @@ When finished, stop both servers and delete the scratch folder.
 
 ## Removing access
 
-- Turn it off in Pizza Bot: disable the `email` and `calendar` skills, then the `google-workspace` MCP server. To turn it back on, enable the server and then both skills.
+- Turn it off in Pizza Bot: disable the `google-workspace` agent, then the `google-workspace` MCP server. To turn it back on, enable the server and then the agent.
 - Delete the stored credentials: `npm run auth -w @pizza-bot/plugin-google-workspace -- --logout`. On a container backend, remove the `GOOGLE_OAUTH_*` variables instead.
 - Revoke the grant on Google's side at <https://myaccount.google.com/permissions>.
 - Delete the OAuth client or the whole project in the Cloud Console.

@@ -218,7 +218,7 @@ describe("AgentHost.reloadMcpServers", () => {
     expect(await host.toolCatalog()).not.toHaveProperty("disabled");
   }, 30_000);
 
-  it("defaults a skill without a preference to its MCP server's enabled state", async () => {
+  it("defaults an agent without a preference to its MCP server's enabled state", async () => {
     const pluginMcpFile = join(pluginsDir, "example-mcp-status", ".mcp.json");
     writeFileSync(
       pluginMcpFile,
@@ -236,51 +236,55 @@ describe("AgentHost.reloadMcpServers", () => {
     await host.reloadPlugins();
 
     expect(
-      (await host.skillCatalog()).find((skill) => skill.id === "health-report"),
+      (await host.agentCatalog()).find((agent) => agent.id === "health-report"),
     ).toMatchObject({ enabled: false, status: "disabled" });
     expect(
       (await host.listMcpServers()).find((server) => server.id === "mcp-status"),
-    ).toMatchObject({ enabled: false, status: "disabled" });
+    ).toMatchObject({
+      enabled: false,
+      status: "disabled",
+      dependentAgents: [{ id: "health-report", enabled: false, source: "plugin" }],
+    });
 
     await host.setMcpServerEnabled("mcp-status", true);
 
     expect(
-      (await host.skillCatalog()).find((skill) => skill.id === "health-report"),
+      (await host.agentCatalog()).find((agent) => agent.id === "health-report"),
     ).toMatchObject({ enabled: true, status: "ready" });
     expect(
       host.capabilityPreferences.get({
-        kind: "skill",
+        kind: "agent",
         source: "plugin:mcp-status",
         id: "health-report",
       }),
     ).toBeUndefined();
   }, 30_000);
 
-  it("recovers a skill after a malformed MCP config is repaired", async () => {
+  it("recovers an agent after a malformed MCP config is repaired", async () => {
     writeConfig({ echo: { command: "node", args: [STATUS_SERVER] } });
     await host.reloadMcpServers();
     const app = buildApp(host);
-    const created = await app.request("/skills", {
+    const created = await app.request("/agents", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         id: "echo-review",
         name: "Echo review",
         description: "Reviews echo status.",
-        body: "Review the status.",
+        systemPrompt: "Review the status.",
         declaredTools: ["mcp:echo:*"],
       }),
     });
     expect(created.status).toBe(201);
     expect(
-      (await host.skillCatalog()).find((skill) => skill.id === "echo-review"),
+      (await host.agentCatalog()).find((agent) => agent.id === "echo-review"),
     ).toMatchObject({ enabled: true, status: "ready" });
 
     writeFileSync(configFile, "{");
     await host.reloadMcpServers();
 
     expect(
-      (await host.skillCatalog()).find((skill) => skill.id === "echo-review"),
+      (await host.agentCatalog()).find((agent) => agent.id === "echo-review"),
     ).toMatchObject({
       enabled: true,
       status: "unavailable",
@@ -289,7 +293,7 @@ describe("AgentHost.reloadMcpServers", () => {
     });
     expect(
       host.capabilityPreferences.get({
-        kind: "skill",
+        kind: "agent",
         source: "user",
         id: "echo-review",
       }),
@@ -299,11 +303,11 @@ describe("AgentHost.reloadMcpServers", () => {
     await host.reloadMcpServers();
 
     expect(
-      (await host.skillCatalog()).find((skill) => skill.id === "echo-review"),
+      (await host.agentCatalog()).find((agent) => agent.id === "echo-review"),
     ).toMatchObject({ enabled: true, status: "ready" });
   }, 30_000);
 
-  it("allows turns while an MCP skill loads, then marks it ready after discovery", async () => {
+  it("allows turns while an MCP agent loads, then marks it ready after discovery", async () => {
     await host.close();
     const pluginMcpFile = join(pluginsDir, "example-mcp-status", ".mcp.json");
     writeFileSync(
@@ -323,7 +327,7 @@ describe("AgentHost.reloadMcpServers", () => {
     await host.whenReady();
 
     expect(
-      (await host.skillCatalog()).find((skill) => skill.id === "health-report"),
+      (await host.agentCatalog()).find((agent) => agent.id === "health-report"),
     ).toMatchObject({ status: "loading" });
 
     const resolveTurn = (
@@ -343,7 +347,7 @@ describe("AgentHost.reloadMcpServers", () => {
     await vi.waitFor(
       async () => {
         expect(
-          (await host.skillCatalog()).find((skill) => skill.id === "health-report"),
+          (await host.agentCatalog()).find((agent) => agent.id === "health-report"),
         ).toMatchObject({ status: "ready" });
       },
       { timeout: 5_000, interval: 50 },
@@ -376,11 +380,11 @@ describe("AgentHost.reloadMcpServers", () => {
     await starting;
     expect(start).toHaveBeenCalledOnce();
     expect(
-      (await host.skillCatalog()).find((skill) => skill.id === "health-report"),
+      (await host.agentCatalog()).find((agent) => agent.id === "health-report"),
     ).toMatchObject({ status: "ready" });
   }, 10_000);
 
-  it("marks a skill unavailable when discovery exhausts its retries", async () => {
+  it("marks an agent unavailable when discovery exhausts its retries", async () => {
     await host.close();
     const pluginMcpFile = join(pluginsDir, "example-mcp-status", ".mcp.json");
     writeFileSync(
@@ -397,7 +401,7 @@ describe("AgentHost.reloadMcpServers", () => {
 
     host = await AgentHost.create({ dataRoot, pluginsDir });
     expect(
-      (await host.skillCatalog()).find((skill) => skill.id === "health-report"),
+      (await host.agentCatalog()).find((agent) => agent.id === "health-report"),
     ).toMatchObject({ status: "unavailable" });
   }, 10_000);
 
