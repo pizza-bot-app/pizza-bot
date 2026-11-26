@@ -6,6 +6,10 @@
   **Settings > Providers**.
 - Confirm that the provider credentials are available to the backend in use.
 - Check the Logs screen for the provider or runtime error.
+- If a Google Gemini model fails on Vertex AI with
+  `Publisher model ... us-central1 ... was not found`, set **Vertex AI project
+  ID** and leave **Vertex AI location** at `global` under **Settings >
+  Providers > Google** (Vertex AI Express serves only `us-central1`).
 
 ## A skill is unavailable
 

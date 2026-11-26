@@ -110,7 +110,11 @@ Bedrock API key, with an optional region
 override; otherwise `AWS_REGION` or `us-west-2` is used. Bedrock combines its
 native catalog with the regional Mantle catalog and routes models through
 Converse, OpenAI Responses or Chat Completions, or Anthropic Messages according
-to their advertised API family.
+to their advertised API family. Google Gemini auto-detects Google AI Studio vs
+Vertex AI Express from the API key, and accepts an optional **Vertex AI project
+ID** and **Vertex AI location** (default `global`) to route Vertex requests
+through a project-qualified endpoint for models served only on global or
+multi-region endpoints (such as Gemini 4).
 OpenAI and Anthropic also accept custom base URLs for compatible endpoints;
 OpenAI can explicitly select Responses or Chat Completions, and Anthropic
 supports `x-api-key` or bearer authentication. Requesty accepts a base URL
