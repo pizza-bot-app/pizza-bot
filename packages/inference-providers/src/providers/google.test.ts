@@ -296,7 +296,7 @@ describe("Google Gemini model discovery", () => {
     const fields = new GoogleLangChainModelProvider().authSchema[0]?.fields ?? [];
     const hintOf = (key: string) => fields.find((field) => field.key === key)?.hint;
 
-    expect(hintOf("project")).toMatch(/Gemini 4.*project ID or number/s);
+    expect(hintOf("project")).toMatch(/project ID or number.*Gemini 4/s);
     expect(hintOf("location")).toMatch(/global/);
   });
 });

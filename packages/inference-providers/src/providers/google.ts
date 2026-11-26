@@ -110,7 +110,7 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
         type: "text",
         required: false,
         hint:
-          "Needed for models Vertex AI Express does not serve, such as Gemini 4. Enter the Google Cloud project ID or number. Under Auto-detect, setting it selects Vertex AI.",
+          "Google Cloud project ID or number for Vertex AI. Optional: when Vertex AI Express does not serve a model, such as Gemini 4, the key's own project is used. Under Auto-detect, setting it selects Vertex AI.",
       },
       {
         key: "location",
@@ -118,7 +118,7 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
         type: "text",
         required: false,
         default: DEFAULT_VERTEX_LOCATION,
-        hint: "Used only with a project ID. global serves the most models.",
+        hint: "Region for project-qualified Vertex AI requests. global serves the most models.",
       },
       {
         key: "maxOutputTokens",
