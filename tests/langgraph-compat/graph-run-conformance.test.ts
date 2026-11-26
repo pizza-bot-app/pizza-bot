@@ -96,4 +96,63 @@ describe("compiled GraphSpec protocol stream (offline)", () => {
     expect(state.values).toMatchObject({ reply: "Delegation completed." });
     expect(state.next).toEqual([]);
   });
+
+  it("resumes only the approval it names while a parallel human step waits", async () => {
+    const checkpointer = new MemorySaver();
+    const agent = await createPizzaBotAgent(PIZZA_BOT_AGENT.systemPrompt, {
+      model: new ScriptedModel([
+        new AIMessage({
+          content: "",
+          tool_calls: [{ id: "task-1", name: "task", args: { description: "send", subagent_type: "specialist" }, type: "tool_call" }],
+        }),
+        new AIMessage({ content: "", tool_calls: [{ id: "send-1", name: "mailer__send", args: {}, type: "tool_call" }] }),
+        new AIMessage({ content: "Sent." }),
+        new AIMessage({ content: "Delegation completed." }),
+      ]),
+      tools: { "mcp:mailer:send": tool(() => "sent", { name: "mailer__send", description: "send", schema: z.object({}) }) },
+      catalog: { mailer: ["send"] },
+      agents,
+      checkpointer,
+    });
+    const parsed = parseGraphSpec({
+      id: "both",
+      name: "Both",
+      nodes: [
+        { id: "assistant", type: "agent", prompt: "Send it", output: "reply" },
+        { id: "ask", type: "human", prompt: "Proceed?", output: "decision" },
+      ],
+      edges: [
+        { from: "start", to: "assistant" },
+        { from: "start", to: "ask" },
+        { from: "assistant", to: "end" },
+        { from: "ask", to: "end" },
+      ],
+    });
+    if (!parsed.ok) throw new Error(parsed.errors.join("; "));
+    const graph = compileGraphSpec(parsed.spec, {
+      checkpointer,
+      agentFor: async () => agent,
+      modelFor: async () => { throw new Error("unused"); },
+      tool: () => undefined,
+    });
+    const threadId = `graph_parallel_${Math.random().toString(36).slice(2)}`;
+    for await (const _ of graph.streamProtocol({ graphInput: {} }, { threadId })) {
+      // drain
+    }
+    const interrupts = (await graph.getState(threadId)).tasks.flatMap((task) => task.interrupts ?? []);
+    const approval = interrupts.find((it) => (it.value as { type?: string }).type !== "graph.human");
+    expect(interrupts).toHaveLength(2);
+    expect(approval).toBeDefined();
+
+    for await (const _ of graph.streamProtocol(
+      { command: { interruptId: approval!.id, decisions: [{ decision: "approve" }] } },
+      { threadId },
+    )) {
+      // drain
+    }
+    const state = await graph.getState(threadId);
+    expect(state.values).toMatchObject({ reply: "Delegation completed." });
+    expect((state.values as { decision?: unknown }).decision).toBeUndefined();
+    expect(state.next).toEqual(["ask"]);
+  });
 });

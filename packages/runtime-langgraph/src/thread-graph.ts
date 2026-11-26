@@ -116,15 +116,11 @@ export class LangGraphThreadGraph implements AgentHandle {
       const snap = await this.compiled.getState(config);
       const pending = (snap.tasks ?? []).flatMap((task) => task.interrupts ?? []);
       const target = pending.find((it) => it.id === input.command.interruptId);
-      if ("response" in input.command) {
-        // LangGraph reads a resume map keyed by anything but real interrupt ids as a
-        // single value, which would answer every pending human step at once.
-        if (!target) throw new Error(`No pending step has interrupt id ${input.command.interruptId}.`);
-      } else if (
-        isHumanRequest(target?.value) ||
-        (!target && pending.some((it) => isHumanRequest(it.value)))
-      ) {
-        // An approval decision is not an answer; a pending human node would store it as one.
+      // LangGraph reads a resume map keyed by anything but real interrupt ids as one
+      // value for every pending interrupt, so each resume must name a pending one.
+      if (!target) throw new Error(`No pending step has interrupt id ${input.command.interruptId}.`);
+      if (!("response" in input.command) && isHumanRequest(target.value)) {
+        // An approval decision is not an answer; the human node would store it as one.
         throw new Error("A graph human step takes a response, not an approval decision.");
       }
     }
@@ -132,7 +128,11 @@ export class LangGraphThreadGraph implements AgentHandle {
       "graphInput" in input &&
       input.continueFromCheckpoint === true &&
       Boolean((await this.compiled.getState(config)).config?.configurable?.checkpoint_id);
-    yield* streamProtocolEvents(this.compiled, continuing ? null : toLangGraphInput(input), opts);
+    yield* streamProtocolEvents(
+      this.compiled,
+      continuing ? null : toLangGraphInput(input, { keyDecisions: true }),
+      opts,
+    );
   }
 
   async getState(threadId: string, checkpointId?: string): Promise<ThreadState> {
