@@ -28,6 +28,8 @@ export interface ProtocolRunEnd {
   runId: string;
   status: RunStatus;
   inputType: "messages" | "resume";
+  /** The failure's message when the run's stream threw. */
+  error?: string;
 }
 
 export interface ProtocolCancelResult {
@@ -339,6 +341,7 @@ export class ProtocolRunManager {
     let failed = false;
     let interrupted = false;
     let sawTerminalRoot = false;
+    let error: string | undefined;
     try {
       for await (const ev of this.streamFn(input, opts)) {
         if (opts.signal?.aborted) break;
@@ -353,6 +356,7 @@ export class ProtocolRunManager {
     } catch (err) {
       if (!opts.signal?.aborted) {
         failed = true;
+        error = err instanceof Error ? err.message : String(err);
         this.log.error("Run failed", err, {
           event: "run.failed",
           threadId: state.threadId,
@@ -402,7 +406,7 @@ export class ProtocolRunManager {
         ),
       );
     }
-    this.finish(state, status);
+    this.finish(state, status, error);
   }
 
   private append(state: RunState, ev: ReplayableProtocolEvent): void {
@@ -414,7 +418,7 @@ export class ProtocolRunManager {
     this.wake(state);
   }
 
-  private finish(state: RunState, status: RunStatus): void {
+  private finish(state: RunState, status: RunStatus, error?: string): void {
     state.done = true;
     this.activeRuns.delete(state);
     this.wake(state);
@@ -424,6 +428,7 @@ export class ProtocolRunManager {
         runId: state.runId,
         status,
         inputType: state.inputType,
+        ...(error !== undefined ? { error } : {}),
       };
       this.log.info("Run ended", {
         event: "run.ended",

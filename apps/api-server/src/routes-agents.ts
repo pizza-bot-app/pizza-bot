@@ -95,6 +95,9 @@ function agentPath(agentsDir: string, id: string): string {
   return join(agentsDir, `${id}${AGENT_FILE_EXT}`);
 }
 
+let homeThreadCounter = 0;
+const newHomeThreadId = () => `thread_agent_${Date.now().toString(36)}_${homeThreadCounter++}`;
+
 export function agentRoutes(host: AgentHost): Hono {
   const app = fileResourceRoutes<string, AgentFields>({
     base: "/agents",
@@ -128,6 +131,25 @@ export function agentRoutes(host: AgentHost): Hono {
   app.get("/agents/:id", async (c) => {
     const entry = await host.agentDefinition(c.req.param("id"));
     return entry ? c.json(entry satisfies AgentDefinitionWire) : c.json({ error: "not_found" }, 404);
+  });
+
+  app.post("/agents/:id/home", async (c) => {
+    const id = c.req.param("id");
+    const agent = await host.agentDefinition(id);
+    if (!agent) return c.json({ error: "agent not found" }, 404);
+    if ((await host.agentCatalog()).find((entry) => entry.id === id)?.enabled === false) {
+      return c.json({ error: `${agent.name} is turned off; turn it on in Agents first.` }, 409);
+    }
+    const existing = host.threadStore.agentHome(id);
+    if (existing) return c.json(existing);
+    const home = host.threadStore.create({
+      threadId: newHomeThreadId(),
+      title: agent.name,
+      agentId: id,
+      agentHome: true,
+      pinned: true,
+    });
+    return c.json(home, 201);
   });
 
   app.post("/agents/generate", async (c) => {

@@ -35,6 +35,8 @@ export interface AgentsModuleProps {
   onGetDefinition: (id: string) => Promise<AgentDefinition | undefined>;
   onGenerate: (prompt: string) => Promise<AgentDraft>;
   onOpenPlugin?: (pluginName: string) => void;
+  /** Opens the agent's own conversation in the Inbox. */
+  onMessage?: (id: string) => Promise<void>;
 }
 
 type AgentEntry = AgentCatalogInfo["agents"][number];
@@ -122,6 +124,7 @@ function AgentDetail({
   onGetDefinition,
   onGenerate,
   onOpenPlugin,
+  onMessage,
 }: ResourceDetailArgs<AgentEntry> & AgentsModuleProps) {
   const [savedRevision, setSavedRevision] = useState(0);
   const definition = useKeyedDoc(
@@ -232,6 +235,7 @@ function AgentDetail({
         />
       }
       onEdit={() => setSelection({ mode: "edit", id: selected.id })}
+      {...(onMessage ? { onMessage: () => onMessage(selected.id) } : {})}
       onOpenPlugin={onOpenPlugin}
       onBack={backToList}
     />

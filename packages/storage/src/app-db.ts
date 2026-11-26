@@ -12,6 +12,7 @@ import { CapabilityPreferencesStore } from "./capability-preferences.js";
 import { LocalFolderStore } from "./local-folders.js";
 import { ensurePrivateDirectory, ensurePrivateFile } from "./private-files.js";
 import { FolderStore } from "./folders.js";
+import { TodoStore } from "./todos.js";
 
 /** `close()` is the sole owner of the shared handle's lifecycle. */
 export interface AppDatabase {
@@ -19,6 +20,7 @@ export interface AppDatabase {
   triggers: TriggerStore;
   threadStore: ThreadStore;
   folders: FolderStore;
+  todos: TodoStore;
   search: SearchStore;
   settings: SettingsStore;
   providerConfigs: ProviderConfigStore;
@@ -46,6 +48,7 @@ export function openAppDatabase(dbPath: string, attachmentsDir?: string): AppDat
   return {
     db,
     folders,
+    todos: new TodoStore(db),
     triggers: new TriggerStore(db),
     threadStore: new ThreadStore(db),
     search: new SearchStore(db),

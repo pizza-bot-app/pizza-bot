@@ -15,3 +15,4 @@ export * from "./thread-activity.js";
 export * from "./local-folder.js";
 export * from "./graph-spec.js";
 export * from "./graph-template.js";
+export * from "./todo.js";

@@ -203,6 +203,7 @@ export function threadRoutes(host: AgentHost): Hono {
       };
       const unsubscribeThreads = host.threadStore.subscribe(onChange);
       const unsubscribeFolders = host.folderStore.subscribe(onChange);
+      const unsubscribeTodos = host.todoStore.subscribe(onChange);
       const onAbort = () => wake?.();
       signal.addEventListener("abort", onAbort, { once: true });
 
@@ -226,6 +227,7 @@ export function threadRoutes(host: AgentHost): Hono {
         signal.removeEventListener("abort", onAbort);
         unsubscribeThreads();
         unsubscribeFolders();
+        unsubscribeTodos();
       }
     });
   });
@@ -237,7 +239,8 @@ export function threadRoutes(host: AgentHost): Hono {
     const limit = Number.isFinite(requested)
       ? Math.min(Math.max(Math.trunc(requested), 1), SEARCH_LIMIT_MAX)
       : SEARCH_LIMIT_DEFAULT;
-    return c.json(host.search.search(q, limit));
+    // Todo check-in transcripts are an agent's work log, not conversations.
+    return c.json(host.search.search(q, limit, host.threadStore.backgroundIds()));
   });
 
   app.patch("/threads/:thread_id", async (c) => {
@@ -294,7 +297,8 @@ export function threadRoutes(host: AgentHost): Hono {
     if (source?.graphId) {
       return c.json({ error: "graph runs cannot be forked into a conversation" }, 409);
     }
-    const state = await host.agent.getState(sourceThreadId);
+    const graph = await host.threadGraph(sourceThreadId);
+    const state = await graph.getState(sourceThreadId);
     const history = ((state.values as { messages?: ForkMessage[] } | undefined)?.messages ?? []);
     if (history.length === 0) {
       return c.json({ error: "source thread has no history" }, 404);
@@ -322,7 +326,7 @@ export function threadRoutes(host: AgentHost): Hono {
 
     const forkId = newThreadId();
     // The messages reducer is additive and the new checkpoint starts empty.
-    await host.agent.updateState(forkId, { messages: slice });
+    await graph.updateStateAsFinished(forkId, { messages: slice });
 
     const record = host.threadStore.create({
       threadId: forkId,
@@ -332,6 +336,7 @@ export function threadRoutes(host: AgentHost): Hono {
       parentCheckpointId: state.checkpointId,
       ...(source?.modelId ? { modelId: source.modelId } : {}),
       ...(source?.folderId ? { folderId: source.folderId } : {}),
+      ...(source?.agentId ? { agentId: source.agentId } : {}),
     });
     // Make the fork searchable before its first run triggers normal maintenance.
     host.search.reindexThread(forkId, slice as import("@pizza-bot/storage").IndexableMessage[]);

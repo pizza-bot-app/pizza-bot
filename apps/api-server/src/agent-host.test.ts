@@ -11,6 +11,7 @@ import { basename, join } from "node:path";
 import type { ProtocolEvent } from "@langchain/langgraph";
 import {
   PIZZA_BOT_AGENT,
+  parseGraphSpec,
   type RunInput,
   type RunOptions,
   type ThreadState,
@@ -550,6 +551,261 @@ writeFileSync(
   });
 });
 
+describe("AgentHost agent threads", () => {
+  let dataRoot: string;
+  let pluginsDir: string;
+  let host: AgentHost;
+
+  beforeEach(async () => {
+    dataRoot = mkdtempSync(join(tmpdir(), "agent-threads-data-"));
+    pluginsDir = mkdtempSync(join(tmpdir(), "agent-threads-plugins-"));
+    mkdirSync(join(dataRoot, "agents"), { recursive: true });
+    writeFileSync(
+      join(dataRoot, "agents", "researcher.md"),
+      "---\nname: researcher\ndescription: Finds sources.\n---\n\nYou research topics.\n",
+    );
+    writeFileSync(
+      join(dataRoot, "agents", "orphaned.md"),
+      "---\nname: orphaned\ndescription: Pins a model nobody provides.\nmodel: ghost:nope\n---\n\nYou work.\n",
+    );
+    host = await AgentHost.create({ dataRoot, pluginsDir });
+  });
+
+  afterEach(async () => {
+    await host.close();
+    for (const d of [dataRoot, pluginsDir]) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+
+  it("reads an agent thread through its agent, and an unavailable agent's thread through the assistant", async () => {
+    host.threadStore.create({ threadId: "with-agent", agentId: "researcher" });
+    host.threadStore.create({ threadId: "with-ghost", agentId: "ghost" });
+    host.threadStore.create({ threadId: "plain" });
+
+    const agentGraph = await host.threadGraph("with-agent");
+    expect(agentGraph).not.toBe(host.agent);
+    expect(await host.threadGraph("with-ghost")).toBe(host.agent);
+    expect(await host.threadGraph("plain")).toBe(host.agent);
+  });
+
+  it("announces and indexes a message posted to an agent's home thread", async () => {
+    await host.agentFor();
+    const todo = host.todoService.create({ title: "Compare flights" });
+    host.todoStore.enqueueDigest("researcher", todo.id, "Fares to Lisbon dropped to 412 euros.");
+
+    await host.todoService.flushDigests();
+
+    const home = host.threadStore.agentHome("researcher")!;
+    const activity = host.threadActivity.listAfter(0).filter((event) => event.threadId === home.threadId);
+    expect(activity).toMatchObject([{ outcome: "message", threadTitle: "researcher" }]);
+    expect(host.search.search("Lisbon").map((hit) => hit.threadId)).toEqual([home.threadId]);
+  });
+
+  it("still opens a thread whose agent pins a model that cannot load", async () => {
+    host.threadStore.create({ threadId: "with-orphan", agentId: "orphaned" });
+
+    const graph = await host.threadGraph("with-orphan");
+    expect(graph).toBe(host.agent);
+    await expect(graph.getState("with-orphan")).resolves.toBeDefined();
+  });
+
+  it("keeps a pending decision on a thread whose agent cannot load", async () => {
+    await host.agentFor();
+    host.threadStore.create({ threadId: "waiting", agentId: "orphaned" });
+    host.threadStore.update("waiting", { awaitingAction: true });
+
+    host.protocolRuns.start("waiting", {
+      messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "hello" }] }],
+    });
+    await vi.waitFor(() => expect(host.threadStore.get("waiting")?.unread).toBe(true), { timeout: 10_000 });
+
+    expect(host.threadStore.get("waiting")?.awaitingAction).toBe(true);
+  });
+
+  it("reads a Todo check-in thread through the agent's background graph", async () => {
+    host.threadStore.create({ threadId: "chat", agentId: "researcher" });
+    host.threadStore.create({ threadId: "bg", agentId: "researcher", background: true, todoId: "t1" });
+    const chat = await host.threadGraph("chat");
+    const background = await host.threadGraph("bg");
+    expect(background).not.toBe(chat);
+    expect(background).not.toBe(host.agent);
+  });
+});
+
+describe("AgentHost turn routing", () => {
+  const DEFAULT_MODEL = "bedrock:global.anthropic.claude-sonnet-5";
+  const PINNED_MODEL = "bedrock:global.anthropic.claude-opus-5";
+  let dataRoot: string;
+  let pluginsDir: string;
+  let host: AgentHost;
+
+  beforeEach(async () => {
+    dataRoot = mkdtempSync(join(tmpdir(), "turn-routing-data-"));
+    pluginsDir = mkdtempSync(join(tmpdir(), "turn-routing-plugins-"));
+    mkdirSync(join(dataRoot, "agents"), { recursive: true });
+    writeFileSync(
+      join(dataRoot, "agents", "pinned.md"),
+      `---\nname: pinned\ndescription: Runs on its own model.\nmodel: ${PINNED_MODEL}\n---\n\nYou work.\n`,
+    );
+    writeFileSync(
+      join(dataRoot, "agents", "plain.md"),
+      "---\nname: plain\ndescription: Runs on the conversation's model.\n---\n\nYou work.\n",
+    );
+    host = await AgentHost.create({ dataRoot, pluginsDir });
+    await host.agentFor();
+  });
+
+  afterEach(async () => {
+    await host.close();
+    for (const d of [dataRoot, pluginsDir]) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+
+  // The model is chosen and recorded before the first model call, so the run can be
+  // cancelled as soon as the thread shows it; no provider is contacted for the assertion.
+  async function startAndReadModel(threadId: string, model: string): Promise<string | undefined> {
+    host.protocolRuns.start(
+      threadId,
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "hello" }] }] },
+      { configurable: { model } },
+    );
+    await vi.waitFor(() => expect(host.threadStore.get(threadId)?.modelId).toBeDefined(), { timeout: 10_000 });
+    await host.protocolRuns.cancelAndWait(threadId);
+    return host.threadStore.get(threadId)?.modelId;
+  }
+
+  it("runs an agent that pins a model on that model, whatever the composer asked for", async () => {
+    host.threadStore.create({ threadId: "t-pinned", agentId: "pinned" });
+    expect(await startAndReadModel("t-pinned", DEFAULT_MODEL)).toBe(PINNED_MODEL);
+  });
+
+  it("runs an agent without a pin, and the assistant, on the requested model", async () => {
+    host.threadStore.create({ threadId: "t-plain", agentId: "plain" });
+    expect(await startAndReadModel("t-plain", PINNED_MODEL)).toBe(PINNED_MODEL);
+    host.threadStore.create({ threadId: "t-assistant" });
+    expect(await startAndReadModel("t-assistant", PINNED_MODEL)).toBe(PINNED_MODEL);
+  });
+
+  it("refuses to compile a turn for an agent that is not ready", async () => {
+    host.threadStore.create({ threadId: "t-ghost", agentId: "ghost" });
+    const ended = new Promise<{ status: string; error?: string }>((resolve) => {
+      const off = host.protocolRuns.onEnd((end) => {
+        if (end.threadId !== "t-ghost") return;
+        off();
+        resolve(end);
+      });
+    });
+    host.protocolRuns.start(
+      "t-ghost",
+      { messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "hello" }] }] },
+      {},
+    );
+    expect(await ended).toMatchObject({ status: "error", error: expect.stringContaining('Agent "ghost"') });
+  });
+});
+
+describe("AgentHost Todo check-in run ends", () => {
+  let dataRoot: string;
+  let pluginsDir: string;
+  let host: AgentHost;
+
+  beforeEach(async () => {
+    dataRoot = mkdtempSync(join(tmpdir(), "checkin-wiring-data-"));
+    pluginsDir = mkdtempSync(join(tmpdir(), "checkin-wiring-plugins-"));
+    host = await AgentHost.create({ dataRoot, pluginsDir });
+    await host.agentFor();
+    host.settings.patch({ enableAutomations: true });
+  });
+
+  afterEach(async () => {
+    await host.close();
+    for (const d of [dataRoot, pluginsDir]) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+
+  /** A workflow-owned Todo checked in on now; no model is involved, so the run is deterministic. */
+  async function checkInWorkflow(spec: Record<string, unknown>) {
+    const parsed = parseGraphSpec(spec);
+    if (!parsed.ok) throw new Error(parsed.errors.join("; "));
+    await host.graphRegistry.put(parsed.spec);
+    await host.todoService.refreshGraphs();
+    const todo = host.todoService.create({ title: "File the November expenses" });
+    await host.todoService.assign(todo.id, { owner: `graph:${parsed.spec.id}`, checkIn: null });
+    const { threadId } = host.todoService.checkInNow(todo.id);
+    return { todoId: todo.id, threadId };
+  }
+
+  function history(todoId: string) {
+    return host.todoService.get(todoId)!.history;
+  }
+
+  function activityFor(threadId: string) {
+    return host.threadActivity.listAfter(0).filter((event) => event.threadId === threadId);
+  }
+
+  it("settles a workflow's Todo from its outcome and keeps the finished check-in quiet", async () => {
+    const { todoId, threadId } = await checkInWorkflow({
+      id: "filer",
+      name: "Filer",
+      todoOutcome: "outcome",
+      nodes: [{ id: "file", type: "transform", set: { outcome: "done" } }],
+      edges: [{ from: "start", to: "file" }, { from: "file", to: "end" }],
+    });
+    await vi.waitFor(() => expect(host.todoService.get(todoId)?.completed).toBe(true), { timeout: 10_000 });
+    expect(history(todoId).at(-1)).toMatchObject({ kind: "completed", actor: "graph:filer" });
+    expect(host.threadStore.get(threadId)).toMatchObject({ background: true, todoId });
+    expect(activityFor(threadId)).toEqual([]);
+  });
+
+  it("removes a deleted Todo's work threads, so its workflow can be deleted", async () => {
+    const { todoId, threadId } = await checkInWorkflow({
+      id: "filer",
+      name: "Filer",
+      todoOutcome: "outcome",
+      nodes: [{ id: "file", type: "transform", set: { outcome: "done" } }],
+      edges: [{ from: "start", to: "file" }, { from: "file", to: "end" }],
+    });
+    await vi.waitFor(() => expect(host.todoService.get(todoId)?.completed).toBe(true), { timeout: 10_000 });
+
+    host.todoService.delete(todoId);
+
+    await vi.waitFor(async () => {
+      expect(host.threadStore.listByGraph("filer")).toEqual([]);
+      const checkpoint = await host.persistence.checkpointer.getTuple({ configurable: { thread_id: threadId, checkpoint_ns: "" } });
+      expect(checkpoint).toBeUndefined();
+    });
+  });
+
+  it("records a pause as a question, marks the work thread for action, and reports it", async () => {
+    const { todoId, threadId } = await checkInWorkflow({
+      id: "approver",
+      name: "Approver",
+      todoOutcome: "answer",
+      nodes: [{ id: "ask", type: "human", prompt: "Approve the expense?", output: "answer" }],
+      edges: [{ from: "start", to: "ask" }, { from: "ask", to: "end" }],
+    });
+    await vi.waitFor(() => expect(history(todoId).at(-1)?.kind).toBe("asked"), { timeout: 10_000 });
+    expect(history(todoId).at(-1)).toMatchObject({ actor: "graph:approver", threadId });
+    expect(host.threadStore.get(threadId)?.awaitingAction).toBe(true);
+    expect(host.threadStore.list().map((thread) => thread.threadId)).toContain(threadId);
+    await vi.waitFor(() => expect(activityFor(threadId).map((event) => event.outcome)).toEqual(["interrupted"]));
+  });
+
+  it("records a failed check-in with the run's error and keeps it out of the activity stream", async () => {
+    const { todoId, threadId } = await checkInWorkflow({
+      id: "broken",
+      name: "Broken",
+      nodes: [{ id: "call", type: "tool", tool: "mcp:gone:x", output: "out" }],
+      edges: [{ from: "start", to: "call" }, { from: "call", to: "end" }],
+    });
+    await vi.waitFor(() => expect(history(todoId).at(-1)?.kind).toBe("failed"), { timeout: 10_000 });
+    expect(history(todoId).at(-1)).toMatchObject({
+      actor: "graph:broken",
+      threadId,
+      note: "Tool mcp:gone:x is not connected.",
+    });
+    expect(host.todoService.get(todoId)?.completed).toBe(false);
+    expect(activityFor(threadId)).toEqual([]);
+  });
+});
+
 describe("AgentHost.deleteThread", () => {
   let dataRoot: string;
   let pluginsDir: string;
@@ -599,6 +855,15 @@ describe("AgentHost.deleteThread", () => {
     await host.deleteThread("t1");
     expect(host.triggers.getOccurrence("occ")).toMatchObject({ status: "dead", lastError: "thread deleted" });
     expect(host.triggers.listWaitingOccurrences()).toEqual([]);
+  });
+
+  it("unlinks the deleted thread from its Todos but keeps the Todos", async () => {
+    host.threadStore.create({ threadId: "t1", title: "Order" });
+    host.threadStore.create({ threadId: "t2", title: "Receipt" });
+    const todo = host.todoStore.create({ title: "Expense the order", threadIds: ["t1", "t2"] });
+
+    await host.deleteThread("t1");
+    expect(host.todoStore.get(todo.id)?.threadIds).toEqual(["t2"]);
   });
 
   it("reports deleted:false before the checkpoint schema has been initialized", async () => {

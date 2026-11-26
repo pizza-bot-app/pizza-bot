@@ -16,6 +16,10 @@ import type {
   LocalFolderBrowseResult,
   LocalFolderList,
   GraphSpec,
+  Todo,
+  TodoAssignment,
+  TodoCreateInput,
+  TodoPatch,
 } from "@pizza-bot/core";
 import type { ThreadStateValues } from "@pizza-bot/core";
 import {
@@ -166,13 +170,24 @@ export class ApiClient {
     return this.json("list threads", "/threads/list");
   }
 
-  async createThread(threadId: string, folderId?: string): Promise<void> {
+  async createThread(threadId: string, folderId?: string, agentId?: string): Promise<void> {
+    const metadata = {
+      ...(folderId ? { folder_id: folderId } : {}),
+      ...(agentId ? { agent_id: agentId } : {}),
+    };
     await this.send("create thread", "/threads", {
       method: "POST",
       body: {
         thread_id: threadId,
-        ...(folderId ? { metadata: { folder_id: folderId } } : {}),
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       },
+    });
+  }
+
+  /** The agent's pinned home thread, created on first use. */
+  async openAgentHome(agentId: string): Promise<ThreadInfo> {
+    return this.json("open agent conversation", `/agents/${encodeURIComponent(agentId)}/home`, {
+      method: "POST",
     });
   }
 
@@ -200,6 +215,41 @@ export class ApiClient {
         method: "DELETE",
       }),
     );
+  }
+
+  async listTodos(): Promise<Todo[]> {
+    return this.json("list todos", "/todos");
+  }
+
+  async createTodo(input: TodoCreateInput): Promise<Todo> {
+    return this.json("create todo", "/todos", { method: "POST", body: input });
+  }
+
+  async updateTodo(todoId: string, patch: TodoPatch & TodoAssignment): Promise<Todo> {
+    return this.json("update todo", `/todos/${encodeURIComponent(todoId)}`, {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+
+  async deleteTodo(todoId: string): Promise<boolean> {
+    return deletedFlag(
+      await this.json("delete todo", `/todos/${encodeURIComponent(todoId)}`, {
+        method: "DELETE",
+      }),
+    );
+  }
+
+  async linkTodoThread(todoId: string, threadId: string): Promise<Todo> {
+    return this.json("link todo thread", todoThreadPath(todoId, threadId), { method: "PUT" });
+  }
+
+  async unlinkTodoThread(todoId: string, threadId: string): Promise<Todo> {
+    return this.json("unlink todo thread", todoThreadPath(todoId, threadId), { method: "DELETE" });
+  }
+
+  async checkInTodo(todoId: string): Promise<{ threadId: string; runId: string }> {
+    return this.json("check in", `/todos/${encodeURIComponent(todoId)}/check-in`, { method: "POST" });
   }
 
   async watchThreadChanges(
@@ -655,6 +705,10 @@ export class ApiClient {
   }
 }
 
+function todoThreadPath(todoId: string, threadId: string): string {
+  return `/todos/${encodeURIComponent(todoId)}/threads/${encodeURIComponent(threadId)}`;
+}
+
 async function fetchWithTimeout(
   doFetch: typeof fetch,
   url: string,
@@ -801,6 +855,13 @@ export interface ThreadInfo {
   modelId?: string;
   /** Set for a graph run; the thread renders as a graph, not a conversation. */
   graphId?: string;
+  /** The agent this thread talks to; absent means Pizza Bot. Fixed at creation. */
+  agentId?: string;
+  /** The agent's pinned home thread. */
+  agentHome?: boolean;
+  /** An agent's work thread for a Todo; listed only while it awaits the user. */
+  background?: true;
+  todoId?: string;
   lastMessage?: string;
   lastMessageRole?: string;
 }

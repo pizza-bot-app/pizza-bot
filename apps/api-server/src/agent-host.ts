@@ -1,6 +1,8 @@
 import {
   BUILTIN_EVAL_TOOL_DESCRIPTION,
   BUILTIN_EVAL_TOOL_REF,
+  BUILTIN_TOOL_REFS,
+  TODO_DIGEST_CRON,
   ModelRegistry,
   ModelUnavailableError,
   projectAgentReadiness,
@@ -44,6 +46,7 @@ import {
   TriggerStore,
   ThreadStore,
   FolderStore,
+  TodoStore,
   SearchStore,
   SettingsStore,
   ProviderConfigStore,
@@ -95,6 +98,8 @@ import {
   resolveMemoriesDir,
   resolveMcpConfig,
 } from "./plugins-dir.js";
+import { randomUUID } from "node:crypto";
+import { CronJob } from "cron";
 import { lstat, mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { ProtocolRunManager } from "./protocol-run-manager.js";
@@ -102,6 +107,7 @@ import { GraphRegistry } from "./graph-registry.js";
 import type { ImportedPlugin } from "./plugin-import.js";
 import { protocolRunLauncher } from "./protocol-run-launcher.js";
 import { TriggerService } from "./trigger-service.js";
+import { TodoService, type AgentStatus } from "./todo-service.js";
 import { SystemMessage, HumanMessage, type AIMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { GraphManager } from "./graph-manager.js";
@@ -137,6 +143,16 @@ function interruptIdsOf(state: ThreadState): string[] {
       ),
     ]),
   ];
+}
+
+/** The question an `ask_user` pause carries, wherever the approval payload nests it. */
+function askUserQuestion(interrupts: ReadonlyArray<{ value: unknown }> | undefined): string | undefined {
+  for (const pending of interrupts ?? []) {
+    const value = pending.value as { actionRequests?: Array<{ name?: string; args?: { question?: unknown } }> };
+    const request = value?.actionRequests?.find((candidate) => candidate.name === "ask_user");
+    if (typeof request?.args?.question === "string") return request.args.question;
+  }
+  return undefined;
 }
 
 function terminalActivityOutcome(
@@ -374,6 +390,9 @@ export class AgentHost {
 
   readonly threadStore: ThreadStore;
   readonly folderStore: FolderStore;
+  readonly todoStore: TodoStore;
+  readonly todoService: TodoService;
+  private digestJob: CronJob | undefined;
   readonly search: SearchStore;
   readonly settings: SettingsStore;
   readonly providerConfigs: ProviderConfigStore;
@@ -437,6 +456,7 @@ export class AgentHost {
     this.triggers = this.appDb.triggers;
     this.threadStore = this.appDb.threadStore;
     this.folderStore = this.appDb.folders;
+    this.todoStore = this.appDb.todos;
     this.search = this.appDb.search;
     this.settings = this.appDb.settings;
     this.providerConfigs = this.appDb.providerConfigs;
@@ -450,6 +470,61 @@ export class AgentHost {
     this.triggerService = new TriggerService(protocolRunLauncher(this.protocolRuns), this.triggers, {
       isEnabled: () => this.settings.get().enableAutomations,
       awaitsInput: async (threadId) => stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId)),
+      todoCheckIn: (trigger, occurrence) => this.todoService.resolveCheckIn(trigger, occurrence),
+    });
+    this.todoService = new TodoService({
+      todos: this.todoStore,
+      threads: this.threadStore,
+      triggers: this.triggers,
+      scheduler: () => this.triggerService,
+      isRunning: (threadId) => this.protocolRuns.isRunning(threadId),
+      cancelRun: (threadId) => {
+        this.protocolRuns.cancel(threadId);
+      },
+      automationsEnabled: () => this.settings.get().enableAutomations,
+      agentStatus: (agentId) => this.agentStatus(agentId),
+      readyAgents: () =>
+        (this.graphs?.agentAvailability() ?? [])
+          .filter((state) => state.status === "ready")
+          .flatMap((state) => {
+            const status = this.agentStatus(state.id);
+            return status ? [{ id: state.id, ...status }] : [];
+          }),
+      listGraphs: async () =>
+        (await this.graphRegistry.list()).graphs.map((spec) => ({
+          id: spec.id,
+          name: spec.name,
+          ...(spec.description ? { description: spec.description } : {}),
+          settlesTodos: spec.todoOutcome !== undefined,
+        })),
+      awaitsInput: async (threadId) => stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId)),
+      postToThread: async (threadId, text) => {
+        const graph = await this.threadGraph(threadId);
+        await graph.updateStateAsFinished(threadId, {
+          messages: [{ role: "assistant", content: text, id: `msg_notify_${randomUUID()}` }],
+        });
+      },
+      announce: async (threadId, { notify }) => {
+        await this.runMaintenance.reindexThread(threadId);
+        if (!notify) return;
+        const messageId = `msg_${randomUUID()}`;
+        this.threadActivity.append({
+          eventId: `${threadId}:${messageId}`,
+          threadId,
+          runId: messageId,
+          outcome: "message",
+          interruptIds: [],
+          threadTitle: threadActivityTitle(this.threadStore.get(threadId)),
+        });
+      },
+      deleteThreads: (threadIds) => {
+        for (const threadId of threadIds) {
+          this.deleteThread(threadId).catch((error: unknown) => {
+            console.warn(`[todos] removing work thread ${threadId} failed:`, error);
+          });
+        }
+      },
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
     this.runMaintenance = new RunMaintenance({
       threadStore: this.threadStore,
@@ -471,7 +546,7 @@ export class AgentHost {
       },
       log: (m) => console.log(m),
     });
-    this.protocolEndUnsub = this.protocolRuns.onEnd(({ threadId, runId, status, inputType }) => {
+    this.protocolEndUnsub = this.protocolRuns.onEnd(({ threadId, runId, status, inputType, error }) => {
       const outcome = terminalActivityOutcome(status);
       if (!outcome) return;
       void this.queueThreadMaintenance(threadId, async () => {
@@ -483,8 +558,26 @@ export class AgentHost {
             interruptIds = await this.readThreadInterruptIds(threadId);
             this.threadStore.ensure({ threadId });
             this.threadStore.update(threadId, { unread: true, awaitingAction: true });
+            if (this.threadStore.get(threadId)?.background) {
+              await this.isolated("record a check-in pause", async () => {
+                const state = await (await this.threadGraph(threadId)).getState(threadId);
+                await this.todoService.recordPause(threadId, askUserQuestion(state.interrupts));
+              });
+            }
             await this.runMaintenance.reindexThread(threadId);
             return;
+          }
+          const ended = this.threadStore.get(threadId);
+          if (ended?.background) {
+            if (status === "success" && ended.graphId) {
+              const graphId = ended.graphId;
+              await this.isolated("settle a workflow check-in", () => this.settleGraphCheckIn(threadId, graphId));
+            }
+            if (status === "error" || status === "timeout") {
+              await this.isolated("record a failed check-in", async () =>
+                this.todoService.recordFailure(threadId, error ?? (status === "timeout" ? "The check-in timed out." : "The check-in failed.")),
+              );
+            }
           }
           await this.runMaintenance.onRunEnd(threadId);
           const awaitingAction = await this.readThreadAwaitingAction(
@@ -499,17 +592,19 @@ export class AgentHost {
             this.threadStore.update(threadId, { awaitingAction });
           }
         } finally {
-          const threadTitle = threadActivityTitle(
-            this.threadStore.get(threadId),
-          );
-          this.threadActivity.append({
-            eventId: `${threadId}:${runId}`,
-            threadId,
-            runId,
-            outcome,
-            interruptIds,
-            threadTitle,
-          });
+          const thread = this.threadStore.get(threadId);
+          // A check-in that finished on its own is not news; one waiting on the user is.
+          if (thread?.background && outcome !== "interrupted") this.todoService.runEnded(threadId);
+          if (!thread?.background || outcome === "interrupted") {
+            this.threadActivity.append({
+              eventId: `${threadId}:${runId}`,
+              threadId,
+              runId,
+              outcome,
+              interruptIds,
+              threadTitle: threadActivityTitle(thread),
+            });
+          }
         }
       });
     });
@@ -564,6 +659,7 @@ export class AgentHost {
       // Startup recovery would otherwise relaunch a paused trigger run on the deleted thread.
       this.triggers.killWaitingOccurrencesForThread(threadId, "thread deleted", new Date().toISOString());
       this.search.deleteThread(threadId);
+      this.todoStore.forgetThread(threadId);
       // SqliteSaver.deleteThread skips its lazy schema setup on an unopened database.
       await this.persistence.checkpointer.getTuple({
         configurable: { thread_id: threadId, checkpoint_ns: "" },
@@ -628,10 +724,14 @@ export class AgentHost {
     threadId: string,
     resumeFallback: boolean,
   ): Promise<boolean> {
+    const thread = this.threadStore.get(threadId);
+    const recorded = resumeFallback || (thread?.awaitingAction ?? false);
+    // The assistant's graph, which reads an unready agent's thread, cannot see its pending approvals.
+    if (thread?.agentId && !this.graphs?.hasRootAgent(thread.agentId)) return recorded;
     try {
       return stateAwaitsAction(await (await this.threadGraph(threadId)).getState(threadId));
     } catch {
-      return resumeFallback || (this.threadStore.get(threadId)?.awaitingAction ?? false);
+      return recorded;
     }
   }
 
@@ -821,7 +921,37 @@ export class AgentHost {
 
   async startAutomations(): Promise<void> {
     await this.whenInitialMcpSettled();
-    if (!this.closing) this.triggerService.start();
+    if (this.closing) return;
+    await this.todoService.refreshGraphs().catch((error: unknown) => console.warn("[todos] graph list failed:", error));
+    if (this.closing) return;
+    this.triggerService.start();
+    this.digestJob ??= CronJob.from({
+      cronTime: TODO_DIGEST_CRON,
+      onTick: () => {
+        if (!this.closing && this.settings.get().enableAutomations) {
+          void this.isolated("post Todo digests", () => this.todoService.flushDigests());
+        }
+      },
+      start: true,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+  }
+
+  /** Runs a Todo side step of run-end handling so its failure cannot skip the rest. */
+  private async isolated(what: string, step: () => Promise<void> | void): Promise<void> {
+    try {
+      await step();
+    } catch (error) {
+      console.warn(`[todos] failed to ${what}:`, error);
+    }
+  }
+
+  /** A graph that owns a Todo settles it from the `todoOutcome` state key its spec names. */
+  private async settleGraphCheckIn(threadId: string, graphId: string): Promise<void> {
+    const { spec, graph } = await this.compiledGraph(graphId);
+    if (!spec.todoOutcome) return;
+    const state = await graph.getState(threadId);
+    this.todoService.recordGraphOutcome(threadId, (state.values as Record<string, unknown>)[spec.todoOutcome]);
   }
 
   private async whenInitialMcpSettled(): Promise<void> {
@@ -841,6 +971,33 @@ export class AgentHost {
     }
     const { agent, cleaned } = await this.resolveTurn(opts);
     yield* agent.streamProtocol(input, cleaned);
+  }
+
+  /**
+   * An agent thread's graph, on the thread's model. Only an agent that is missing or
+   * not ready reads through the assistant; any other failure surfaces, since the
+   * assistant's graph cannot see the agent's pending approvals.
+   */
+  private async agentThreadGraph(
+    agentId: string,
+    background: boolean,
+    modelId: string | undefined,
+  ): Promise<LangGraphThreadGraph> {
+    if (!this.graphs!.hasRootAgent(agentId)) return this.agent;
+    return (await this.graphs!.rootAgentFor(agentId, modelId, background ? this.todoService : undefined)).agent;
+  }
+
+  /** Enabled agents only, with whether they can run now. */
+  private agentStatus(agentId: string): AgentStatus | undefined {
+    const state = this.graphs?.agentAvailability().find((candidate) => candidate.id === agentId);
+    const definition = this.agentInventory.get(agentId);
+    if (!state || !definition) return undefined;
+    return {
+      name: state.name,
+      description: definition.description,
+      ready: state.status === "ready",
+      ...(state.detail ? { detail: state.detail } : {}),
+    };
   }
 
   private async *streamGraphRun(
@@ -874,11 +1031,13 @@ export class AgentHost {
     yield* graph.streamProtocol(input, cleaned);
   }
 
-  /** The graph whose checkpoints a thread holds: its graph run, or the assistant. */
+  /** The graph whose checkpoints a thread holds: its graph run, its agent, or the assistant. */
   async threadGraph(threadId: string): Promise<LangGraphThreadGraph> {
     await this.warmup;
-    const graphId = this.threadStore.get(threadId)?.graphId;
-    return graphId ? (await this.compiledGraph(graphId)).graph : this.agent;
+    const thread = this.threadStore.get(threadId);
+    if (thread?.graphId) return (await this.compiledGraph(thread.graphId)).graph;
+    if (thread?.agentId) return this.agentThreadGraph(thread.agentId, thread.background === true, thread.modelId);
+    return this.agent;
   }
 
   private async compiledGraph(graphId: string): Promise<{ spec: GraphSpec; graph: LangGraphThreadGraph }> {
@@ -889,7 +1048,8 @@ export class AgentHost {
     if (cached?.fingerprint === fingerprint) return { spec, graph: cached.graph };
     const graph = compileGraphSpec(spec, {
       ...(this.persistence.checkpointer ? { checkpointer: this.persistence.checkpointer } : {}),
-      agentFor: (modelId) => this.agentFor(modelId),
+      agentFor: async (modelId, agentId) =>
+        agentId ? (await this.graphs!.rootAgentFor(agentId, modelId ?? this.modelId)).agent : this.agentFor(modelId),
       modelFor: (modelId) => this.graphs!.buildModel(modelId ?? this.modelId),
       tool: (ref) => this.mcpTools[ref] as StructuredToolInterface | undefined,
     });
@@ -906,9 +1066,15 @@ export class AgentHost {
       typeof requestedModel === "string" && requestedModel.length > 0
         ? requestedModel
         : undefined;
-    const pinnedModel = this.threadStore.get(opts.threadId)?.modelId;
-    const modelId = explicitModel ?? pinnedModel ?? this.modelId;
-    const agent = await this.agentFor(modelId);
+    const existing = this.threadStore.get(opts.threadId);
+    const requestedModelId = explicitModel ?? existing?.modelId ?? this.modelId;
+    const { agent, modelId } = existing?.agentId
+      ? await this.graphs!.rootAgentFor(
+          existing.agentId,
+          requestedModelId,
+          existing.background ? this.todoService : undefined,
+        )
+      : { agent: await this.agentFor(requestedModelId), modelId: requestedModelId };
     const thread = this.threadStore.ensure({ threadId: opts.threadId, modelId });
     if (thread.modelId !== modelId) {
       this.threadStore.update(opts.threadId, { modelId });
@@ -1127,7 +1293,7 @@ export class AgentHost {
         catalog,
         tools: new Set(Object.keys(tools)),
         mcpServers,
-        builtins: new Set([BUILTIN_EVAL_TOOL_REF]),
+        builtins: new Set(BUILTIN_TOOL_REFS),
         skills: new Set(skills.keys()),
       }),
       skills,
@@ -2072,6 +2238,7 @@ export class AgentHost {
             }
           : {}),
         localFolders: () => host.localFolders.list(),
+        todos: host.todoService,
         ...(host.attachments ? { attachmentResolver: host.attachments.resolver } : {}),
         ...(Object.keys(tools).length > 0 ? { tools } : {}),
         ...(Object.keys(catalog).length > 0 ? { catalog } : {}),
@@ -2123,6 +2290,7 @@ export class AgentHost {
     for (const timer of this.mcpRecoveryTimers.values()) clearTimeout(timer);
     this.mcpRecoveryTimers.clear();
     this.triggerService.stop();
+    void this.digestJob?.stop();
     // Warmup may still be opening persistence or spawning MCP children.
     await this.warmup.catch(() => {});
     // Refuse new runs, abort in-flight ones, and drain them; run-end side effects

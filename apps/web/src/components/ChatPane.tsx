@@ -1,5 +1,5 @@
 import { useCallback, useState, type PointerEvent, type ReactNode } from "react";
-import type { AgentInfo, ModelsInfo, ApiClient } from "@/api-client";
+import type { ModelsInfo, ApiClient } from "@/api-client";
 import { useThreadSlice } from "../use-thread-slice.js";
 import type { PromptHistoryCycler } from "../use-prompt-history.js";
 import { ChatFeed } from "./ChatFeed.js";
@@ -10,6 +10,9 @@ import { RunErrorBanner } from "./RunErrorBanner.js";
 import { BlankTurnNotice } from "./BlankTurnNotice.js";
 import { CutOffRetryNotice } from "./CutOffRetryNotice.js";
 import { useHotkey } from "../hotkeys/index.js";
+import { RecipientField } from "./RecipientField.js";
+import { messageAgentLabel, workThreadNotice } from "../lexicon.js";
+import type { RecipientOption, ThreadAgent } from "../lib/thread-agent.js";
 
 const INTERACTIVE_CHAT_SELECTOR =
   "a, button, input, textarea, select, [contenteditable='true'], [role='button'], [role='listbox']";
@@ -18,7 +21,15 @@ export interface ChatPaneProps {
   threadId: string;
   hydrateOnMount?: boolean;
   onFork?: (threadId: string, messageIndex: number) => void;
-  agent?: AgentInfo;
+  agent?: ThreadAgent;
+  /** Shows the To: line; `options` with `onChange` make it a picker until the first message. */
+  recipient?: {
+    options?: readonly RecipientOption[];
+    value?: string;
+    onChange?: (agentId: string | undefined) => void;
+  };
+  /** Runs before the thread's first message is sent; a rejection cancels the send. */
+  beforeFirstSend?: () => Promise<void>;
   onRename?: (title: string) => Promise<void>;
   models: ModelsInfo;
   initialModel?: string;
@@ -32,6 +43,8 @@ export interface ChatPaneProps {
   headerActions?: ReactNode;
   searchTarget?: { messageId: string; token: number };
   onSearchTargetHandled?: (token: number) => void;
+  /** An agent's Todo work thread: read-only, with a way to the agent's own conversation. */
+  workThread?: { onOpenConversation: () => void };
 }
 
 export function ChatPane({
@@ -39,6 +52,8 @@ export function ChatPane({
   hydrateOnMount,
   onFork,
   agent,
+  recipient,
+  beforeFirstSend,
   onRename,
   models,
   initialModel,
@@ -52,6 +67,7 @@ export function ChatPane({
   headerActions,
   searchTarget,
   onSearchTargetHandled,
+  workThread,
 }: ChatPaneProps) {
   const { messages, status, errorText, errorCode, blankTurn, retryingCutOff, queued, send, steerNow, cancelQueued, stop, decide } =
     useThreadSlice(threadId, hydrateOnMount);
@@ -71,6 +87,15 @@ export function ChatPane({
     setPrefill(prompt);
     setPrefillToken((t) => t + 1);
   };
+
+  const sendFirstAware = useCallback<typeof send>(
+    async (...args) => {
+      if (messages.length === 0) await beforeFirstSend?.();
+      await send(...args);
+    },
+    [beforeFirstSend, messages.length, send],
+  );
+  const recipientEditable = messages.length === 0 && recipient?.onChange !== undefined;
 
   const headerTitle = title ?? agent?.name ?? "New Pizza Bot Conversation";
   return (
@@ -107,11 +132,23 @@ export function ChatPane({
       )}
       {status === "idle" && blankTurn && <BlankTurnNotice reason={blankTurn} />}
       {status === "streaming" && retryingCutOff && <CutOffRetryNotice />}
+      {workThread ? (
+        <WorkThreadNotice agentName={agent?.name ?? "the agent"} onOpenConversation={workThread.onOpenConversation} />
+      ) : (
+        <>
+      {recipient && (
+        <RecipientField
+          name={agent?.name ?? "Pizza Bot"}
+          {...(recipientEditable && recipient.options
+            ? { options: recipient.options, value: recipient.value, onChange: recipient.onChange }
+            : {})}
+        />
+      )}
       <Composer
         threadId={threadId}
         streaming={status === "streaming"}
         interrupted={status === "interrupted"}
-        onSend={send}
+        onSend={sendFirstAware}
         onSteerNow={steerNow}
         onStop={stop}
         queued={queued}
@@ -124,7 +161,28 @@ export function ChatPane({
         prefillToken={prefillToken}
         composerRef={composerRef}
         history={history}
+        {...(agent ? { recipientName: agent.name } : {})}
+        {...(agent?.model ? { pinnedModel: { id: agent.model, setBy: agent.name } } : {})}
       />
+        </>
+      )}
+    </div>
+  );
+}
+
+export function WorkThreadNotice({
+  agentName,
+  onOpenConversation,
+}: {
+  agentName: string;
+  onOpenConversation: () => void;
+}) {
+  return (
+    <div className="work-thread-notice" role="note">
+      <span>{workThreadNotice(agentName)}</span>
+      <button type="button" className="btn-secondary" onClick={onOpenConversation}>
+        {messageAgentLabel(agentName)}
+      </button>
     </div>
   );
 }

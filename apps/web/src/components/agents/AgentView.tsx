@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
 import type { AgentCatalogEntryInfo, AgentDefinition, ModelsInfo, SkillCatalogInfo, ToolCatalogInfo } from "@/api-client";
-import { BookOpen, Bot, Cable, Cpu, Hand, ScrollText, Wrench } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { BookOpen, Bot, Cable, Cpu, Hand, MessageSquare, ScrollText, Wrench } from "lucide-react";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
 import { CapabilityStatusDot, type CapabilityVisualState } from "../CapabilityControls.js";
 import { EditAction, PluginLink, ResourceSection, ResourceView } from "../ResourceView.js";
@@ -19,6 +19,7 @@ export function AgentView({
   statusLabel,
   enablement,
   onEdit,
+  onMessage,
   onOpenPlugin,
   onBack,
 }: {
@@ -31,6 +32,7 @@ export function AgentView({
   statusLabel: string;
   enablement?: ReactNode;
   onEdit: () => void;
+  onMessage?: () => Promise<void>;
   onOpenPlugin?: (pluginName: string) => void;
   onBack?: () => void;
 }) {
@@ -65,7 +67,12 @@ export function AgentView({
         </>
       }
       provenance={provenance}
-      headerAction={<EditAction label={shipped ? "Customize" : "Edit"} onEdit={onEdit} />}
+      headerAction={
+        <>
+          {onMessage && <MessageAgentAction onMessage={onMessage} />}
+          <EditAction label={shipped ? "Customize" : "Edit"} onEdit={onEdit} />
+        </>
+      }
       backLabel={L.agentsSection}
       onBack={onBack}
     >
@@ -131,5 +138,34 @@ export function AgentView({
         </ResourceSection>
       )}
     </ResourceView>
+  );
+}
+
+function MessageAgentAction({ onMessage }: { onMessage: () => Promise<void> }) {
+  const [opening, setOpening] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const open = async () => {
+    setOpening(true);
+    setFailed(false);
+    try {
+      await onMessage();
+    } catch (error) {
+      console.error("open agent conversation failed", error);
+      setFailed(true);
+    } finally {
+      setOpening(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="btn-secondary"
+      onClick={() => void open()}
+      disabled={opening}
+      title={failed ? "Couldn't open the conversation. Try again." : undefined}
+      aria-invalid={failed || undefined}
+    >
+      <MessageSquare size={14} /> {L.messageAgent}
+    </button>
   );
 }

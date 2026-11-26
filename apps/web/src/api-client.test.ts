@@ -256,6 +256,45 @@ describe("ApiClient", () => {
     });
   });
 
+  it("creates a thread addressed to an agent, with or without a folder", async () => {
+    const bodies: unknown[] = [];
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(init!.body as string));
+        return new Response(JSON.stringify({ thread_id: "t", status: "idle" }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    await client.createThread("t1", undefined, "researcher");
+    await client.createThread("t2", "projects", "researcher");
+    await client.createThread("t3");
+    expect(bodies).toEqual([
+      { thread_id: "t1", metadata: { agent_id: "researcher" } },
+      { thread_id: "t2", metadata: { folder_id: "projects", agent_id: "researcher" } },
+      { thread_id: "t3" },
+    ]);
+  });
+
+  it("opens an agent's home thread", async () => {
+    const captured: { url?: string; method?: string } = {};
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (url: string, init?: RequestInit) => {
+        captured.url = url;
+        captured.method = init?.method;
+        return new Response(
+          JSON.stringify({ threadId: "home-1", title: "Research", agentId: "re/search", agentHome: true }),
+          { status: 201 },
+        );
+      }) as unknown as typeof fetch,
+    });
+
+    const home = await client.openAgentHome("re/search");
+    expect(captured).toEqual({ url: "http://x/agents/re%2Fsearch/home", method: "POST" });
+    expect(home).toMatchObject({ threadId: "home-1", agentId: "re/search", agentHome: true });
+  });
+
   it("moves a thread back to Unfiled with an explicit null folder", async () => {
     const captured: { url?: string; method?: string; body?: unknown } = {};
     const client = new ApiClient({
@@ -414,6 +453,137 @@ describe("ApiClient", () => {
         body: undefined,
       },
     ]);
+  });
+
+  it("creates, edits, links, and deletes todos", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const todo = {
+      id: "t/1",
+      title: "Reply",
+      notes: "",
+      importance: "normal",
+      steps: [],
+      completed: false,
+      threadIds: ["th 1"],
+      createdAt: "now",
+      updatedAt: "now",
+    };
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          method: init?.method,
+          body: typeof init?.body === "string" ? init.body : undefined,
+        });
+        const body = init?.method === "DELETE" && !url.includes("/threads/")
+          ? { deleted: true }
+          : url === "http://x/todos" && !init?.method
+            ? [todo]
+            : todo;
+        return new Response(JSON.stringify(body), { status: init?.method === "POST" ? 201 : 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    expect(await client.listTodos()).toEqual([todo]);
+    expect(await client.createTodo({ title: "Reply", threadIds: ["th 1"] })).toEqual(todo);
+    expect(await client.updateTodo("t/1", { dueDate: null, completed: true })).toEqual(todo);
+    expect(await client.linkTodoThread("t/1", "th 1")).toEqual(todo);
+    expect(await client.unlinkTodoThread("t/1", "th 1")).toEqual(todo);
+    expect(await client.deleteTodo("t/1")).toBe(true);
+    expect(calls).toEqual([
+      { url: "http://x/todos", method: undefined, body: undefined },
+      {
+        url: "http://x/todos",
+        method: "POST",
+        body: JSON.stringify({ title: "Reply", threadIds: ["th 1"] }),
+      },
+      {
+        url: "http://x/todos/t%2F1",
+        method: "PATCH",
+        body: JSON.stringify({ dueDate: null, completed: true }),
+      },
+      { url: "http://x/todos/t%2F1/threads/th%201", method: "PUT", body: undefined },
+      { url: "http://x/todos/t%2F1/threads/th%201", method: "DELETE", body: undefined },
+      { url: "http://x/todos/t%2F1", method: "DELETE", body: undefined },
+    ]);
+  });
+
+  it("surfaces a rejected todo as an ApiError with the server's sentence", async () => {
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async () =>
+        new Response(JSON.stringify({ error: "title must not be empty" }), {
+          status: 400,
+        })) as unknown as typeof fetch,
+    });
+
+    const failure = await client.createTodo({ title: " " }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(errorMessage(failure)).toBe("title must not be empty");
+  });
+
+  it("assigns a todo, sets its check-in, and asks its owner to check in now", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          method: init?.method,
+          body: typeof init?.body === "string" ? init.body : undefined,
+        });
+        const body = url.endsWith("/check-in") ? { threadId: "bg", runId: "run-1" } : { id: "t/1" };
+        return new Response(JSON.stringify(body), { status: url.endsWith("/check-in") ? 202 : 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    await client.updateTodo("t/1", { owner: "researcher", checkIn: "0 9 * * 1-5" });
+    await client.updateTodo("t/1", { owner: null });
+    expect(await client.checkInTodo("t/1")).toEqual({ threadId: "bg", runId: "run-1" });
+    expect(calls).toEqual([
+      {
+        url: "http://x/todos/t%2F1",
+        method: "PATCH",
+        body: JSON.stringify({ owner: "researcher", checkIn: "0 9 * * 1-5" }),
+      },
+      { url: "http://x/todos/t%2F1", method: "PATCH", body: JSON.stringify({ owner: null }) },
+      { url: "http://x/todos/t%2F1/check-in", method: "POST", body: undefined },
+    ]);
+  });
+
+  it("sends a graph owner, a snooze, the updates mode, and a check-in limit", async () => {
+    const bodies: unknown[] = [];
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ id: "t1" }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+
+    await client.updateTodo("t1", { owner: "graph:triage" });
+    await client.updateTodo("t1", { snoozedUntil: "2026-12-01T09:00:00.000Z", notify: "digest", maxCheckIns: 5 });
+    await client.updateTodo("t1", { snoozedUntil: null, maxCheckIns: null });
+    expect(bodies).toEqual([
+      { owner: "graph:triage" },
+      { snoozedUntil: "2026-12-01T09:00:00.000Z", notify: "digest", maxCheckIns: 5 },
+      { snoozedUntil: null, maxCheckIns: null },
+    ]);
+  });
+
+  it("surfaces a refused check-in with the server's sentence", async () => {
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      fetch: (async () =>
+        new Response(
+          JSON.stringify({ error: "conflict", detail: "Researcher is already checking in on this todo." }),
+          { status: 409 },
+        )) as unknown as typeof fetch,
+    });
+
+    const failure = await client.checkInTodo("t1").catch((error: unknown) => error);
+    expect(errorMessage(failure)).toBe("Researcher is already checking in on this todo.");
   });
 
   it("watches authenticated thread-change events over SSE", async () => {

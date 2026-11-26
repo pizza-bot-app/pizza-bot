@@ -13,6 +13,7 @@ import type { AgentAvailability } from "./agent-readiness.js";
 import type { ToolCatalog } from "./wildcard.js";
 import type { AttachmentResolver } from "./attachment.js";
 import type { LocalFolder } from "./local-folder.js";
+import type { TodoAccess } from "./todo.js";
 
 export interface Logger {
   info(msg: string, ...args: unknown[]): void;
@@ -60,6 +61,8 @@ export interface RuntimeDeps {
    * state never contains file bytes. Absence disables inlining.
    */
   attachmentResolver?: AttachmentResolver;
+  /** The user's Todo list, exposed to the root agent only; absence withholds the Todo tools. */
+  todos?: TodoAccess;
   /** Per-run root-agent tool-call limit; -1 disables the limiter. */
   maxToolCalls?: number;
   /** Per-run subagent tool-call limit; -1 disables the limiter. */

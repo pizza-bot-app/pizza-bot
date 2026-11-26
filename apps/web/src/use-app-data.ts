@@ -15,7 +15,7 @@ import type {
   ProviderView,
   PluginInfo,
 } from "@/api-client";
-import type { TriggerDef } from "@pizza-bot/core";
+import type { Todo, TodoAssignment, TodoCreateInput, TodoPatch, TriggerDef } from "@pizza-bot/core";
 
 function useAdminData<D>(
   load: () => Promise<D>,
@@ -123,11 +123,12 @@ export function useSkillsAdmin(client: ApiClient, enabled = true) {
  * The agent list loads wherever display names are needed; the tool catalog the
  * editor picks from loads only while `editing`.
  */
-export function useAgentsAdmin(client: ApiClient, enabled = true, editing = enabled) {
+/** `intervalMs` keeps readiness current where it decides what can be chosen, e.g. the To: field. */
+export function useAgentsAdmin(client: ApiClient, enabled = true, editing = enabled, intervalMs?: number) {
   const { data: agents, refresh } = useAdminData(
     useCallback(() => client.listAgents(), [client]),
     { agents: [] } as AgentCatalogInfo,
-    undefined,
+    intervalMs,
     enabled,
   );
   const { data: tools } = useAdminData(
@@ -343,6 +344,32 @@ export function useTriggers(client: ApiClient, intervalMs = 5_000, enabled = tru
   const run = refreshAfter((id: string) => client.runTrigger(id), refresh);
 
   return { triggers, loading, refresh, create, update, remove, invoke, run };
+}
+
+/** Unpolled: callers refresh it from the thread-change stream, which also reports Todo edits. */
+export function useTodos(client: ApiClient) {
+  const { data: todos, loading, refresh } = useAdminData(
+    useCallback(() => client.listTodos(), [client]),
+    [] as Todo[],
+  );
+
+  const create = refreshAfter((input: TodoCreateInput) => client.createTodo(input), refresh);
+  const update = refreshAfter(
+    (id: string, patch: TodoPatch & TodoAssignment) => client.updateTodo(id, patch),
+    refresh,
+  );
+  const remove = refreshAfter((id: string) => client.deleteTodo(id), refresh);
+  const linkThread = refreshAfter(
+    (id: string, threadId: string) => client.linkTodoThread(id, threadId),
+    refresh,
+  );
+  const unlinkThread = refreshAfter(
+    (id: string, threadId: string) => client.unlinkTodoThread(id, threadId),
+    refresh,
+  );
+  const checkIn = refreshAfter((id: string) => client.checkInTodo(id), refresh);
+
+  return { todos, loading, refresh, create, update, remove, linkThread, unlinkThread, checkIn };
 }
 
 export function useGraphs(client: ApiClient, intervalMs = 5_000, enabled = true) {

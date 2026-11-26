@@ -634,3 +634,94 @@ describe("TriggerService: graph targets", () => {
     svc.stop();
   });
 });
+
+describe("TriggerService: Todo check-ins", () => {
+  it("runs a check-in on the Todo's thread with its prompt, by reason", () => {
+    const store = memStore();
+    store.create({ id: "todo_t1", kind: "cron", enabled: true, todoId: "t1" });
+    const m = mockLauncher();
+    const seen: string[] = [];
+    const svc = new TriggerService(m.launcher, store, {
+      log: () => {},
+      todoCheckIn: (trigger, occurrence) => {
+        seen.push(`${trigger.todoId}:${occurrence.reason}`);
+        return { threadId: "bg-1", prompt: "Check in on t1." };
+      },
+    });
+    svc.start();
+    expect(m.starts).toHaveLength(0);
+
+    expect(svc.runNow("todo_t1", "handoff")?.handle.threadId).toBe("bg-1");
+    expect(seen).toEqual(["t1:handoff"]);
+    const start = m.starts[0]!;
+    expect(start.threadId).toBe("bg-1");
+    expect(JSON.stringify(start.input)).toContain("Check in on t1.");
+    expect(start.opts?.configurable).toMatchObject({ todo_id: "t1", source: "trigger" });
+    expect(store.occurrences("todo_t1")[0]).toMatchObject({ reason: "handoff", threadId: "bg-1" });
+    svc.stop();
+  });
+
+  it("closes a skipped check-in with the reason and launches nothing", () => {
+    const store = memStore();
+    store.create({ id: "todo_t1", kind: "cron", enabled: true, todoId: "t1" });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, {
+      log: () => {},
+      todoCheckIn: () => ({ skip: "the Todo is complete" }),
+    });
+    expect(svc.runNow("todo_t1")).toBeUndefined();
+    expect(m.starts).toHaveLength(0);
+    expect(store.occurrences("todo_t1")[0]).toMatchObject({ status: "dead", lastError: "the Todo is complete" });
+  });
+
+  it("arms ordinary schedules beside a Todo checked in on only when asked", () => {
+    const store = memStore();
+    store.create({ id: "todo_t1", kind: "cron", enabled: true, todoId: "t1" });
+    store.create({ id: "hourly", kind: "cron", enabled: true, cron: "0 * * * *", lastRunAt: new Date().toISOString() });
+    const svc = new TriggerService(mockLauncher().launcher, store, { log: () => {} });
+    svc.start();
+    expect(svc.activeCronJobs()).toEqual(["hourly"]);
+    expect(svc.nextRunAt("hourly")).toEqual(expect.any(String));
+    expect(svc.nextRunAt("todo_t1")).toBeUndefined();
+    svc.stop();
+  });
+});
+
+describe("TriggerService: Todo check-ins owned by a graph", () => {
+  it("runs the graph with the Todo as input", () => {
+    const store = memStore();
+    store.create({ id: "todo_t1", kind: "cron", enabled: true, todoId: "t1" });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, {
+      log: () => {},
+      todoCheckIn: () => ({ threadId: "run-1", graphId: "triage", input: { todo: { id: "t1" }, reason: "manual" } }),
+    });
+    svc.runNow("todo_t1");
+    const start = m.starts[0]!;
+    expect(start.threadId).toBe("run-1");
+    expect(start.input).toMatchObject({ graphInput: { todo: { id: "t1" }, reason: "manual", trigger: { id: "todo_t1" } } });
+    expect(start.opts?.configurable).toMatchObject({ graph_id: "triage", todo_id: "t1" });
+  });
+
+  it("closes a check-in a restart interrupted instead of replaying it", () => {
+    const store = memStore();
+    store.create({ id: "todo_t1", kind: "cron", enabled: true, todoId: "t1" });
+    const at = new Date().toISOString();
+    store.createOccurrence({ id: "occ", triggerId: "todo_t1", scheduledAt: at, reason: "manual", now: at });
+    store.beginOccurrence("occ", at, 3);
+    let resolved = 0;
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, {
+      log: () => {},
+      todoCheckIn: () => {
+        resolved++;
+        return { threadId: "bg", prompt: "x" };
+      },
+    });
+    svc.start();
+    expect(resolved).toBe(0);
+    expect(m.starts).toHaveLength(0);
+    expect(store.getOccurrence("occ")).toMatchObject({ status: "dead", lastError: "interrupted by a restart; the next check-in continues" });
+    svc.stop();
+  });
+});

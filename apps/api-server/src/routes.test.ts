@@ -90,6 +90,7 @@ function fakeHost(
       },
     },
     threadStore: {
+      get: (threadId: string) => (threadId === "work-thread" ? { threadId, background: true } : undefined),
       update: (threadId: string) => ({
         threadId,
         title: "t",
@@ -397,6 +398,19 @@ describe("api-server: checkpoint-shaped state surface", () => {
 
     expect(live.tasks[0]?.interrupts[0]?.id).toBe("approval-1");
     expect(history[0]?.tasks?.[0]?.interrupts[0]?.id).toBe("approval-2");
+  });
+
+  it("refuses to start a chat run on a Todo work thread", async () => {
+    const starts: Array<{ threadId: string; configurable?: Record<string, unknown> }> = [];
+    const app = buildApp(fakeHost("ready", undefined, starts));
+    const res = await app.request("/threads/work-thread/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 1, method: "run.start", params: { input: "hello" } }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "work_thread" });
+    expect(starts).toEqual([]);
   });
 
   it("rejects a configurable thread ID that disagrees with the URL", async () => {

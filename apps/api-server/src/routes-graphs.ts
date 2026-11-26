@@ -22,6 +22,7 @@ export function graphRoutes(host: AgentHost): Hono {
     const parsed = parseGraphSpec({ ...body, id });
     if (!parsed.ok) return c.json({ error: "invalid", detail: parsed.errors }, 400);
     await host.graphRegistry.put(parsed.spec);
+    void host.todoService.refreshGraphs().catch(() => undefined);
     return c.json(parsed.spec);
   });
 
@@ -31,6 +32,10 @@ export function graphRoutes(host: AgentHost): Hono {
     if (targetedBy.length > 0) {
       return c.json({ error: "in_use", detail: `triggers ${targetedBy.join(", ")} run this graph` }, 409);
     }
+    const owns = host.todoService.list().filter((todo) => todo.ownerGraph === id).map((todo) => `"${todo.title}"`);
+    if (owns.length > 0) {
+      return c.json({ error: "in_use", detail: `this graph owns the Todo ${owns.join(", ")}; reassign it first` }, 409);
+    }
     // A graph thread resolves its state through its spec, so deleting the spec would strand its runs.
     const runs = host.threadStore.listByGraph(id).length;
     if (runs > 0) {
@@ -39,7 +44,9 @@ export function graphRoutes(host: AgentHost): Hono {
         : `${runs} runs of this graph still exist; delete them first`;
       return c.json({ error: "in_use", detail }, 409);
     }
-    return (await host.graphRegistry.delete(id))
+    const deleted = await host.graphRegistry.delete(id);
+    if (deleted) void host.todoService.refreshGraphs().catch(() => undefined);
+    return deleted
       ? c.json({ deleted: true })
       : c.json({ error: "not_found" }, 404);
   });

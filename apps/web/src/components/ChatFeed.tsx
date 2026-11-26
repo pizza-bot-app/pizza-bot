@@ -53,6 +53,7 @@ import {
 import { approvalEditState } from "./approval-edit.js";
 import { useAttachmentSrc } from "../attachment-src.js";
 import { useAgentName } from "./agent-names.js";
+import { L } from "../lexicon.js";
 
 function subagentTypeOf(input: unknown): string | undefined {
   if (input && typeof input === "object" && "subagent_type" in input) {
@@ -90,7 +91,8 @@ export function ChatFeed({
   onSurfacePointerDown,
 }: ChatFeedProps) {
   const assistantName = assistant?.name ?? "Pizza Bot";
-  const assistantAvatar = assistant?.avatar || "🍕";
+  // An agent without an avatar shows its initials; only the default assistant is 🍕.
+  const assistantAvatar = assistant ? assistant.avatar || undefined : "🍕";
   const searchTargetsRef = useRef(new Map<string, HTMLElement>());
   const registerSearchTarget = useCallback((messageId: string, element: HTMLElement | null) => {
     if (element) searchTargetsRef.current.set(messageId, element);
@@ -152,7 +154,7 @@ export function ChatFeed({
               >
                 {m.role === "assistant" && (
                   <div className="message-author">
-                    <Avatar label={assistantName} avatar={assistantAvatar} size={22} />
+                    <Avatar label={assistantName} {...(assistantAvatar ? { avatar: assistantAvatar } : {})} size={22} />
                     <span className="message-author-name">{assistantName}</span>
                   </div>
                 )}
@@ -161,6 +163,7 @@ export function ChatFeed({
                     <PartErrorBoundary key={i}>
                       <PartView
                         part={part}
+                        literalHtml={m.role === "user"}
                         client={client}
                         onDecision={onDecision}
                         searchTargetMessageId={searchTarget?.messageId}
@@ -192,12 +195,14 @@ export function ChatFeed({
 
 function PartView({
   part,
+  literalHtml,
   client,
   onDecision,
   searchTargetMessageId,
   registerSearchTarget,
 }: {
   part: UIPartLike;
+  literalHtml: boolean;
   client: ApiClient;
   onDecision?: (
     interruptId: string,
@@ -209,7 +214,7 @@ function PartView({
   searchTargetMessageId?: string;
   registerSearchTarget: (messageId: string, element: HTMLElement | null) => void;
 }) {
-  if (part.type === "text") return <MessageResponse>{part.text}</MessageResponse>;
+  if (part.type === "text") return <MessageResponse literalHtml={literalHtml}>{part.text}</MessageResponse>;
 
   if (part.type === "reasoning") {
     return (
@@ -364,6 +369,9 @@ export function InterruptConfirmation({
   const allowed = part.allowedDecisions ?? ["approve", "edit", "reject"];
   const canRespond = !isBatch && allowed.includes("respond");
   const canEdit = !isBatch && allowed.includes("edit");
+  // A batch is approved or rejected as a whole, whatever each call allows.
+  const canApprove = isBatch || allowed.includes("approve");
+  const canReject = isBatch || allowed.includes("reject");
   const editState = approvalEditState(originalDraft, draft);
 
   useEffect(() => {
@@ -388,6 +396,43 @@ export function InterruptConfirmation({
     onDecision?.(part.toolCallId, "respond", undefined, undefined, responseDraft.trim());
   };
 
+  if (!isBatch && allowed.length === 1 && allowed[0] === "respond") {
+    const question = questionText(part.input);
+    return (
+      <Confirmation
+        approval={{ id: part.toolCallId }}
+        state="approval-requested"
+        className="hitl-confirmation"
+      >
+        <ConfirmationTitle className="hitl-confirmation-title">
+          <span>{L.agentQuestion}</span>
+        </ConfirmationTitle>
+        <ConfirmationRequest>
+          {question !== undefined ? (
+            <p className="hitl-question">{question}</p>
+          ) : (
+            <ApprovalArguments value={part.input} />
+          )}
+          <div className="hitl-response-wrap">
+            <textarea
+              className="hitl-response-editor"
+              rows={3}
+              aria-label={L.agentQuestionPlaceholder}
+              value={responseDraft}
+              onChange={(e) => setResponseDraft(e.target.value)}
+              placeholder={L.agentQuestionPlaceholder}
+            />
+          </div>
+          <ConfirmationActions className="hitl-actions">
+            <ConfirmationAction disabled={!responseDraft.trim()} onClick={submitRespond}>
+              {L.agentQuestionSend}
+            </ConfirmationAction>
+          </ConfirmationActions>
+        </ConfirmationRequest>
+      </Confirmation>
+    );
+  }
+
   return (
     <Confirmation
       approval={{ id: part.toolCallId }}
@@ -402,7 +447,7 @@ export function InterruptConfirmation({
             </>
           ) : (
             <>
-              Approve <b>{toolLabel}</b>?
+              {canApprove ? "Approve" : "Review"} <b>{toolLabel}</b>?
             </>
           )}
         </span>
@@ -457,12 +502,14 @@ export function InterruptConfirmation({
               Revert changes
             </ConfirmationAction>
           )}
-          <ConfirmationAction
-            variant="outline"
-            onClick={() => onDecision?.(part.toolCallId, "reject")}
-          >
-            Reject
-          </ConfirmationAction>
+          {canReject && (
+            <ConfirmationAction
+              variant="outline"
+              onClick={() => onDecision?.(part.toolCallId, "reject")}
+            >
+              Reject
+            </ConfirmationAction>
+          )}
           {canRespond && !editing && (
             responding ? (
               <>
@@ -490,7 +537,7 @@ export function InterruptConfirmation({
               </ConfirmationAction>
             )
           )}
-          {!responding && (!editing || !editState.changed) && (
+          {canApprove && !responding && (!editing || !editState.changed) && (
             <ConfirmationAction onClick={() => onDecision?.(part.toolCallId, "approve")}>
               Approve
             </ConfirmationAction>
@@ -499,4 +546,11 @@ export function InterruptConfirmation({
       </ConfirmationRequest>
     </Confirmation>
   );
+}
+
+/** An agent question's text when the tool call carries one as `question`. */
+export function questionText(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const question = (input as { question?: unknown }).question;
+  return typeof question === "string" && question.trim() ? question : undefined;
 }

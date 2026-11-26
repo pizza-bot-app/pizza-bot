@@ -1,6 +1,7 @@
 /** Pure helpers shared by every tool list: grouping by source, filtering, and wildcard grants. */
 import {
   BUILTIN_EVAL_TOOL_REF,
+  BUILTIN_TASK_TOOL_REF,
   expandToolPattern,
   InvalidWildcardError,
   isWildcard,
@@ -66,6 +67,7 @@ function namesBySource(catalog: ToolCatalogInfo): ToolCatalog {
 
 export function describeGrantedTool(ref: string, catalog: ToolCatalogInfo): GrantedTool {
   if (ref === BUILTIN_EVAL_TOOL_REF) return { ref, name: "eval", source: BUILTIN_SOURCE };
+  if (ref === BUILTIN_TASK_TOOL_REF) return { ref, name: "task", source: BUILTIN_SOURCE };
   const [, server = "", name = ref] = ref.split(":");
   if (!isWildcard(ref)) return { ref, name, source: server };
   const granted = { ref, name: name === "*" ? "All tools" : name, source: server };

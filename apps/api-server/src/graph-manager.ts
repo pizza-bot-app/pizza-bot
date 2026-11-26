@@ -11,9 +11,10 @@ import {
   type RuntimeDeps,
   type AgentAvailability,
   type AgentCatalog,
+  type AmbientTodoAccess,
   type SkillCatalog,
 } from "@pizza-bot/core";
-import { createPizzaBotAgent, type LangGraphAgent } from "@pizza-bot/runtime-langgraph";
+import { createAgentRootAgent, createPizzaBotAgent, type LangGraphAgent } from "@pizza-bot/runtime-langgraph";
 import type { ToolCatalog } from "@pizza-bot/plugin-sdk";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
@@ -82,6 +83,7 @@ export class GraphManager {
   private agentImpl?: LangGraphAgent;
   private compiledAvailability: readonly AgentAvailability[] | undefined;
   private readonly cache = new Map<string, Promise<LangGraphAgent>>();
+  private readonly rootAgents = new Map<string, Promise<{ agent: LangGraphAgent; modelId: string }>>();
   private updates: Promise<void> = Promise.resolve();
   private appliedRuntimeSettings?: RuntimeSettingsSnapshot;
 
@@ -319,6 +321,56 @@ export class GraphManager {
     return built;
   }
 
+  /**
+   * An agent definition compiled as a thread's top-level agent. Its pinned model
+   * wins over `modelId`; the returned `modelId` is the one it runs on. With
+   * `ambient` it is compiled for a background Todo check-in.
+   */
+  async rootAgentFor(
+    agentId: string,
+    modelId?: string,
+    ambient?: AmbientTodoAccess,
+  ): Promise<{ agent: LangGraphAgent; modelId: string }> {
+    await this.ensureSettings();
+    const definition = this.dependencies.agents?.get(agentId);
+    if (!definition) throw new Error(this.unavailableAgentMessage(agentId));
+    const resolvedModelId = definition.model ?? modelId ?? this.modelId;
+    const key = JSON.stringify([agentId, resolvedModelId, ambient !== undefined]);
+    const cached = this.rootAgents.get(key);
+    if (cached) return cached;
+
+    const built = (async () => {
+      const model = await this.models.resolveModel(resolvedModelId);
+      const deps = await this.withAgentModels(this.dependencies);
+      const agent = await createAgentRootAgent(
+        definition,
+        this.depsForModel(deps, model),
+        ambient ? { ambient } : {},
+      );
+      return { agent, modelId: resolvedModelId };
+    })().catch((err) => {
+      if (this.rootAgents.get(key) === built) this.rootAgents.delete(key);
+      throw err;
+    });
+    this.rootAgents.set(key, built);
+    return built;
+  }
+
+  /** Whether the agent is enabled and ready to run as a thread's top-level agent. */
+  hasRootAgent(agentId: string): boolean {
+    if (!this.dependencies.agents?.has(agentId)) return false;
+    // `dependencies` still lists an agent whose pinned model failed to resolve.
+    const state = this.agentAvailability().find((agent) => agent.id === agentId);
+    return !state || state.status === "ready";
+  }
+
+  private unavailableAgentMessage(agentId: string): string {
+    const state = this.agentAvailability().find((agent) => agent.id === agentId);
+    if (!state) return `Agent "${agentId}" does not exist or is disabled.`;
+    const reason = state.status === "loading" ? "is still loading" : "is unavailable";
+    return `Agent "${state.name}" ${reason}${state.detail ? `: ${state.detail}` : "."}`;
+  }
+
   private async rebuild(dependencies = this.dependencies): Promise<void> {
     await this.applyCapabilities(await this.buildDefaultModel(), dependencies);
   }
@@ -340,6 +392,7 @@ export class GraphManager {
     this.appliedRuntimeSettings = runtimeSettings;
     this.cache.clear();
     this.cache.set(this.modelId, Promise.resolve(agent));
+    this.rootAgents.clear();
   }
 
   private readRuntimeSettings(dependencies: RuntimeDeps): RuntimeSettingsSnapshot {
@@ -371,6 +424,7 @@ export class GraphManager {
         pizzaBotSystemPrompt({
           memories: settings.memoriesEnabled,
           subagents: (dependencies.agents?.size ?? 0) > 0,
+          todos: dependencies.todos !== undefined,
         }),
         dependencies.agentAvailability,
       ),

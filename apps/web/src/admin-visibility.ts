@@ -1,5 +1,6 @@
 export type AppView =
   | "inbox"
+  | "todos"
   | "automations"
   | "graphs"
   | "memories"

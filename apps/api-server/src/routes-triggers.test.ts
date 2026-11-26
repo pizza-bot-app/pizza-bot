@@ -390,3 +390,24 @@ describe("trigger routes: graph targets", () => {
     expect(store.get("g1")?.graphId).toBeUndefined();
   });
 });
+
+describe("trigger routes: Todo check-in schedules", () => {
+  it("leaves a Todo's schedule to the Todo", async () => {
+    const store = memStore();
+    store.create({ id: "todo_t1", kind: "cron", cron: "0 9 * * *", todoId: "t1", enabled: true });
+    store.create({ id: "daily", kind: "cron", cron: "0 8 * * *", prompt: "Brief me", enabled: true });
+    const app = appWith(store, fakeService(store) as unknown as TriggerService);
+
+    const listed = (await (await app.request("/triggers")).json()) as Array<{ id: string }>;
+    expect(listed.map((trigger) => trigger.id)).toEqual(["daily"]);
+    expect((await app.request("/triggers/todo_t1")).status).toBe(404);
+    expect((await app.request("/triggers/todo_t1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    })).status).toBe(404);
+    expect((await app.request("/triggers/todo_t1", { method: "DELETE" })).status).toBe(404);
+    expect((await app.request("/triggers/todo_t1/run", { method: "POST" })).status).toBe(404);
+    expect(store.get("todo_t1")?.enabled).toBe(true);
+  });
+});

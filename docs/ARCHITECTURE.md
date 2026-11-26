@@ -172,6 +172,22 @@ in `core/src/protocol-types.ts`:
   `interruptOn` is set — `HumanInTheLoopMiddleware`. The clock context is also
   attached to subagents and is never checkpointed. Task planning middleware
   is intentionally excluded, including from model-specific harness profiles.
+- **Agent threads.** A thread created with an `agentId` (fixed at creation, like
+  `graphId`) runs that agent definition as its top-level agent through
+  `createAgentRootAgent`: the definition's prompt, tools, skills, and approvals,
+  on its pinned model or else the conversation's. It gets no persona addendum,
+  no Todo tools, and no `eval` unless it declares `builtin:eval`. Delegation is a
+  grant: `builtin:task` gives it a `task` tool over the other ready agents, and
+  without it the tool is absent. `GraphManager.rootAgentFor` caches one compiled
+  graph per agent and model, cleared with the assistant's on capability changes.
+  An agent's home thread is its single pinned `agentHome` thread
+  (`POST /agents/:id/home`). An unavailable agent's thread still reads its
+  history through the assistant; runs on it fail with the agent's status.
+- **Todo tools** (`list_todos`, `create_todo`, `update_todo`,
+  `runtime-langgraph/src/todo-tools.ts`) go to the root agent only, over the
+  `TodoAccess` seam in `RuntimeDeps`; subagents never receive them. A Todo created
+  in a run is linked to that run's thread. An agent that owns a Todo works on it
+  in background check-ins (§7).
 - **Runaway-call limits** are per agent invocation, with no combined parent/child
   budget. The orchestrator allows 40 model calls and its user-configured per-run
   tool-call limit (100 by default); each `task`-invoked subagent independently
@@ -369,7 +385,7 @@ Two systems, injected as `RuntimeDeps` (`packages/storage`):
   long-term memory; durable analog to the in-memory store).
 
 Everything the platform itself owns — thread metadata, user-defined thread
-folders, triggers, terminal run activity, capability enablement preferences, the
+folders, Todos and their thread links, triggers, terminal run activity, capability enablement preferences, the
 FTS message index, and attachment metadata — lives in one
 `app.sqlite`, opened once via `openAppDatabase()`: a **single**
 `better-sqlite3` handle (one WAL lock) shared by the stores, rather than one
@@ -485,6 +501,81 @@ crash recovery remains the startup-only path. Initial startup similarly waits
 for the bounded MCP connection pass to settle before arming schedules or
 recovering occurrences, so recovered runs receive the settled skill projection.
 
+### Todo check-ins
+
+A Todo owned by an agent has one trigger with a `todoId`, created and edited
+through the Todo (`TodoService` in the api-server), never through `/triggers`,
+which does not list it. Its cron is the most frequent check-in; with no cron the
+agent checks in only when asked (`POST /todos/:id/check-in`) or handed the Todo.
+Each firing resolves, through the `todoCheckIn` hook, to the owner's background
+thread for that Todo and a prompt describing the Todo, its timeline, and the
+agents it can hand off to; a check-in is skipped while the last one runs or waits
+on the user, and once the Todo is complete. The background thread has the owner's
+`agentId` and `background: true`, and runs the agent with the ambient tools
+(`runtime-langgraph/src/ambient-tools.ts`): `update_todo` writes the timeline,
+`notify_user` appends a message to the agent's home thread, marks it unread,
+indexes it for search, and appends a `message` thread activity (a desktop
+notification), `ask_user` pauses through `HumanInTheLoopMiddleware` with only `respond` allowed,
+and `reassign_todo` hands the Todo on. A handoff needs a note, refuses an agent
+that already handed this Todo on, is capped at `TODO_MAX_HANDOFFS` since the user
+last assigned it, and wakes the new owner at once with occurrence reason
+`handoff` in a new background thread. Background threads stay out of the Inbox
+list and the activity stream unless they wait on the user; a check-in that ends in
+an error is recorded on the Todo as a `failed` event with the error's message.
+`notify_user` and forks write state with `updateStateAsFinished`, which writes as
+the graph's terminal node so the thread has no pending step.
+
+Refinements on top of check-ins:
+
+- **Snooze.** `snoozedUntil` (set by the user, or by the agent's `snooze_until`
+  tool, at most 90 days out) skips scheduled check-ins; asked-for check-ins,
+  handoffs, and subtask wakes still run.
+- **Budget.** `maxCheckIns` caps check-ins since the user last assigned the Todo;
+  once used up, check-ins are skipped and one `paused` event is recorded.
+- **Notifications.** An agent may send at most `TODO_NOTIFY_LIMIT_PER_DAY`
+  immediate notifications in a rolling day. A Todo in `digest` mode queues them
+  instead, and a host cron (`TODO_DIGEST_CRON`, 5 pm local, while Automations is
+  on) posts one message per agent to its home thread; a busy home thread keeps the
+  queue for the next run.
+- **Questions surface.** An `ask_user` pause also posts the question to the agent's
+  home thread, so it reads like a message from a colleague. That post raises no
+  notification of its own; the paused work thread already does.
+- **Home-thread writes** (`notify_user`, surfaced questions, digests) run one at a
+  time per agent and are refused while the home thread runs or waits on a decision,
+  because writing past a pending interrupt would discard it. Notifications still
+  in flight count toward the daily limit, so parallel tool calls cannot exceed it.
+- **Work threads stay work logs.** `run.start` on a background thread is refused
+  (`409 work_thread`) and search leaves them out; the check-in prompt carries the
+  Todo and its timeline inside a `<todo-record>` block that the ambient prompt
+  marks as data, never instructions. The web renders user-authored messages
+  without raw HTML, so the delimiters show as text.
+- **Changing hands stops the check-in.** Taking a Todo back, reassigning it, or
+  deleting it cancels its running check-in, closes a paused one, and drops a wake
+  queued for it; a handoff through the run's own `reassign_todo` does not.
+- **Work-thread retention.** Deleting a Todo removes its work threads through the
+  host's thread delete path (checkpoints, search, activity). Each new work thread
+  prunes the Todo's older ones beyond the newest five, sparing any that run or wait
+  on the user, so a workflow-owned Todo cannot accumulate a thread per check-in.
+- **Subtasks.** `request_todo` creates a child Todo (`parentTodoId`) owned by
+  another agent, on its parent's schedule, and wakes it; the parent keeps its Todo,
+  sees its children in each check-in prompt, and is woken with reason `subtask`
+  when one finishes. A wake that arrives while the Todo's last check-in is busy is
+  delivered when that run ends. Nesting is capped at `TODO_MAX_DEPTH`, open
+  children at `TODO_MAX_OPEN_SUBTASKS`, and requests since the user last assigned
+  the Todo at `TODO_MAX_SUBTASKS`. A child starts with its parent's check-in
+  limit. While any Todo above it is complete or unowned, only asked-for check-ins
+  run and it cannot request subtasks; deleting a parent returns its open children
+  to the user. A child the user has assigned themselves is exempt.
+- **Workflows own Todos.** An owner of `graph:<id>` (stored in the same owner
+  column) is checked in on by running that graph with `input.todo`, each run in a
+  new background graph thread. The spec's `todoOutcome` names the state key that
+  settles the Todo when the run succeeds (`done`/`complete`/`completed`/`true`
+  completes it, `failed` records a failure, other text is a progress note). Agents
+  can hand a Todo only to a workflow whose spec names a `todoOutcome`; a workflow
+  is a final destination; a graph that owns a
+  Todo cannot be deleted. A restarted check-in occurrence is closed rather than
+  replayed, so a check-in's side effects never repeat.
+
 ### Graph runs
 
 A trigger either starts a conversation with its `prompt` or, when it names a
@@ -504,7 +595,8 @@ with no expressions, so a graph without `llm`/`agent` nodes is deterministic.
 - **Input.** The run starts from `input` state: `{ trigger, prompt?, body? }`
   for a trigger (a webhook body is delivered as JSON, not mined for a prompt), or
   the caller's object for `POST /graphs/:id/runs`.
-- **The agent node** runs the assistant inside the node with the node's config,
+- **The agent node** runs the assistant (or, with `agentId`, that agent definition as its
+  root agent) inside the node with the node's config,
   so its checkpoints, stream frames, and approval pauses nest under the
   `<node>:<task>` namespace and resume through the parent.
 - **The human node** calls `interrupt()` with a `GraphHumanRequest`. It resumes
@@ -633,6 +725,21 @@ Activity panel renders observed subagent delegations and transcript drill-downs,
 not model-maintained progress state.
 
 The inbox sidebar treats `All`, `Unread`, and `Action` as global smart views.
+A new conversation has a **To:** picker (Pizza Bot or an enabled agent) until
+its first message; choosing an agent creates the thread with `metadata.agent_id`.
+Agent threads show the agent's name in the Inbox and welcome state, and the Agents
+view's Message action opens the agent's home thread.
+
+A Todo's detail assigns it to an agent with a check-in schedule and shows its
+timeline. Background check-in threads appear only in the Action view, and an
+`ask_user` pause renders as a question card that takes a typed answer.
+
+**Todos** sit beside the Inbox with their own smart views (Today, Planned,
+Important, All, Completed). Flagging a thread creates a Todo linked to it, and the
+Inbox marks threads linked to an incomplete Todo. Todo edits ride the
+`/threads/events` change stream, so a Todo the assistant creates mid-run appears
+without polling.
+
 User folders are an orthogonal, single-folder organization layer over thread
 metadata; deleting a folder moves its threads to `Inbox`. The filter control
 shows or hides the folder panel and resets the active view to `All` when hidden,

@@ -35,6 +35,16 @@ describe("native notifications", () => {
     });
     expect(
       nativeNotificationCopy({
+        kind: "message",
+        threadId: "thread-1",
+        threadTitle: "Researcher",
+      }),
+    ).toEqual({
+      title: "New message",
+      body: "Researcher sent you a message.",
+    });
+    expect(
+      nativeNotificationCopy({
         kind: "run-failed",
         reason: "error",
         threadId: "thread-1",

@@ -15,6 +15,7 @@ interface TriggerRow {
   name: string | null;
   prompt: string | null;
   graph_id: string | null;
+  todo_id: string | null;
   enabled: number;
   cron: string | null;
   timezone: string | null;
@@ -107,6 +108,9 @@ export class TriggerStore {
     if (!columns.some((column) => column.name === "graph_id")) {
       this.db.exec("ALTER TABLE triggers ADD COLUMN graph_id TEXT");
     }
+    if (!columns.some((column) => column.name === "todo_id")) {
+      this.db.exec("ALTER TABLE triggers ADD COLUMN todo_id TEXT");
+    }
     const occurrenceColumns = this.db
       .prepare<[], { name: string }>("PRAGMA table_info(trigger_occurrences)")
       .all();
@@ -126,6 +130,7 @@ export class TriggerStore {
       name: blankToNull(def.name),
       prompt: def.prompt ?? null,
       graph_id: blankToNull(def.graphId),
+      todo_id: blankToNull(def.todoId),
       enabled: def.enabled === false ? 0 : 1,
       cron: def.cron ?? null,
       timezone: def.timezone ?? null,
@@ -137,10 +142,10 @@ export class TriggerStore {
     this.db
       .prepare(
         `INSERT INTO triggers
-           (id, kind, name, prompt, graph_id, enabled, cron, timezone, webhook_secret,
+           (id, kind, name, prompt, graph_id, todo_id, enabled, cron, timezone, webhook_secret,
             created_at, last_run_at, last_thread_id)
          VALUES
-           (@id, @kind, @name, @prompt, @graph_id, @enabled, @cron, @timezone, @webhook_secret,
+           (@id, @kind, @name, @prompt, @graph_id, @todo_id, @enabled, @cron, @timezone, @webhook_secret,
             @created_at, @last_run_at, @last_thread_id)`,
       )
       .run(row);
@@ -165,6 +170,14 @@ export class TriggerStore {
           .prepare<[], TriggerRow>("SELECT * FROM triggers WHERE enabled = 1 ORDER BY created_at DESC")
           .all();
     return rows.map(toTrigger);
+  }
+
+  /** The check-in schedule a Todo owns, if any. */
+  forTodo(todoId: string): TriggerDef | undefined {
+    const row = this.db
+      .prepare<[string], TriggerRow>("SELECT * FROM triggers WHERE todo_id = ? ORDER BY created_at LIMIT 1")
+      .get(todoId);
+    return row ? toTrigger(row) : undefined;
   }
 
   get(id: string): TriggerDef | undefined {
@@ -484,6 +497,7 @@ function toTrigger(row: TriggerRow): TriggerDef {
   if (row.name !== null) def.name = row.name;
   if (row.prompt !== null) def.prompt = row.prompt;
   if (row.graph_id !== null) def.graphId = row.graph_id;
+  if (row.todo_id !== null) def.todoId = row.todo_id;
   if (row.cron !== null) def.cron = row.cron;
   if (row.timezone !== null) def.timezone = row.timezone;
   if (row.webhook_secret !== null) def.hasWebhookSecret = true;

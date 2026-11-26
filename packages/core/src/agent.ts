@@ -9,6 +9,14 @@ export const PIZZA_BOT_MEMORY_PROMPT =
   "`/memories/<topic>.md`. Keep entries concise and factual; update or prune " +
   "stale ones rather than duplicating. Do NOT store secrets or one-off trivia.";
 
+/** Todo guidance is injected only when the Todo tools are registered. */
+export const PIZZA_BOT_TODO_PROMPT =
+  "The user keeps a Todo list in Pizza Bot, which you can read and edit with " +
+  "`list_todos`, `create_todo`, and `update_todo`. Add or change a Todo only when " +
+  "the user asks you to; if something they mention sounds worth tracking, you may " +
+  "offer to add it, but do not add it unasked. A Todo you create from a " +
+  "conversation is linked back to it.";
+
 const PIZZA_BOT_BASE_PROMPT = [
   "You are Pizza Bot, the assistant behind the user's agentic inbox.",
   "You work directly with a filesystem (`ls`/`read_file`/`write_file`/" +
@@ -70,12 +78,14 @@ const PIZZA_BOT_SUBAGENT_PROMPT = [
 export interface PizzaBotPromptOptions {
   memories: boolean;
   subagents: boolean;
+  todos?: boolean;
 }
 
 export function pizzaBotSystemPrompt(options: PizzaBotPromptOptions): string {
   return [
     ...PIZZA_BOT_BASE_PROMPT,
     ...(options.memories ? [PIZZA_BOT_MEMORY_PROMPT] : []),
+    ...(options.todos ? [PIZZA_BOT_TODO_PROMPT] : []),
     ...(options.subagents ? PIZZA_BOT_SUBAGENT_PROMPT : []),
     options.subagents
       ? "Keep your own words concise; that never justifies trimming a worker's report."

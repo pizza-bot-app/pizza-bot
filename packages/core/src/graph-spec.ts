@@ -52,6 +52,8 @@ const nodeSchema = z.discriminatedUnion("type", [
     type: z.literal("agent"),
     prompt: z.string().min(1),
     model: z.string().optional(),
+    /** Runs this agent definition instead of the assistant; its pinned model wins over `model`. */
+    agentId: z.string().min(1).max(64).optional(),
     output: key,
   }),
   z.object({ ...base, type: z.literal("human"), prompt: z.string().min(1), output: key }),
@@ -61,6 +63,8 @@ const specSchema = z.object({
   id: z.string().regex(GRAPH_ID_PATTERN, "must be lowercase letters, digits, - or _"),
   name: z.string().min(1).max(120),
   description: z.string().max(2000).optional(),
+  /** When the graph owns a Todo, the state key whose value at the end of a run settles it. */
+  todoOutcome: key.optional(),
   nodes: z.array(nodeSchema).min(1),
   edges: z.array(z.object({ from: z.string(), to: z.string() })),
 });
@@ -86,6 +90,10 @@ export function parseGraphSpec(raw: unknown): GraphSpecParse {
     };
   }
   const errors = graphTopologyErrors(parsed.data);
+  const outcome = parsed.data.todoOutcome;
+  if (outcome !== undefined && !graphStateKeys(parsed.data).includes(outcome)) {
+    errors.push(`todoOutcome: no node writes "${outcome}"`);
+  }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, spec: parsed.data };
 }
 
