@@ -1,6 +1,6 @@
 /** Loads plugin contributions and connects their MCP servers. */
 import type { StructuredToolInterface } from "@langchain/core/tools";
-import type { SkillCatalog } from "@pizza-bot/core";
+import type { AgentCatalog, SkillCatalog } from "@pizza-bot/core";
 import { MultiServerMCPClient, type Connection } from "@langchain/mcp-adapters";
 import type { PluginLoadStatus } from "@pizza-bot/plugin-api";
 import { basename, join } from "node:path";
@@ -9,6 +9,7 @@ import {
   UnsupportedPluginApiVersionError,
 } from "./loader.js";
 import { loadSkillCatalog } from "./skill-catalog.js";
+import { loadAgentCatalog } from "./agent-catalog.js";
 import { ContributionRegistry } from "./registry.js";
 import type {
   PluginManifest,
@@ -42,6 +43,7 @@ export interface LoadedPlugins {
   readonly tools: Record<string, StructuredToolInterface>;
   readonly catalog: ToolCatalog;
   readonly skills: SkillCatalog;
+  readonly agents: AgentCatalog;
   readonly materializations: Readonly<Record<string, PluginMaterializationStatus>>;
   /** The host must close the client to reap MCP subprocesses. */
   readonly client?: McpClientPool;
@@ -297,6 +299,7 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
   }
 
   const skills = await loadSkillCatalog(registry, log);
+  const agents = await loadAgentCatalog(registry, log);
 
   const pluginEntries = mcpEntriesFromRegistry(registry);
   const mergedEntries = { ...pluginEntries, ...(opts.extraMcpServers ?? {}) };
@@ -311,6 +314,7 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
       tools: {},
       catalog: {},
       skills,
+      agents,
       materializations,
     };
   }
@@ -335,6 +339,7 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadedPlugi
     tools,
     catalog,
     skills,
+    agents,
     materializations,
     ...(client ? { client } : {}),
   };

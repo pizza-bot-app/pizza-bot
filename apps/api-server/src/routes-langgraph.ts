@@ -40,7 +40,7 @@ export function langGraphRoutes(host: AgentHost): Hono {
     const body = await c.req.json().catch(() => ({}));
     const { values, as_node } = body as { values?: unknown; as_node?: string };
     const threadId = c.req.param("thread_id");
-    const cp = await host.agent.updateState(threadId, values, as_node);
+    const cp = await (await host.threadGraph(threadId)).updateState(threadId, values, as_node);
     return c.json({ checkpoint_id: cp.checkpointId, thread_id: cp.threadId });
   });
 
@@ -97,7 +97,8 @@ async function collectHistory(
   options: StateHistoryOptions & { limit: number },
 ): Promise<unknown[]> {
   const out: unknown[] = [];
-  for await (const s of host.agent.getStateHistory(threadId, options)) {
+  const graph = await host.threadGraph(threadId);
+  for await (const s of graph.getStateHistory(threadId, options)) {
     out.push(toProtocolState(s));
     if (out.length >= options.limit) break;
   }

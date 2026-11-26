@@ -1,40 +1,64 @@
 import { describe, expect, it } from "vitest";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import {
   BUILTIN_EVAL_TOOL_REF,
+  type AgentCatalog,
+  type AgentCatalogEntry,
+  type InterruptOnPolicy,
+  type RuntimeDeps,
   type SkillCatalog,
-  type SkillCatalogEntry,
-  type SkillInterruptOn,
 } from "@pizza-bot/core";
-import { codeInterpreterOptions, resolveSkillSubagents } from "./index.js";
+import { buildBackend } from "./backend.js";
+import { codeInterpreterOptions, resolveAgentSubagents } from "./index.js";
 
-function skill(
+const conversationModel = { id: "conversation" } as unknown as BaseChatModel;
+
+function agent(
   id: string,
   declaredTools: string[] = [],
-  interruptOn: SkillInterruptOn = {},
-): SkillCatalogEntry {
+  interruptOn: InterruptOnPolicy = {},
+  skills: string[] = [],
+): AgentCatalogEntry {
   return {
     id,
     name: id,
     description: `${id} description`,
+    systemPrompt: `Follow ${id}.`,
     source: "user",
     declaredTools,
+    skills,
     interruptOn,
-    files: [{
-      path: `/skills/${id}/SKILL.md`,
-      content: `---\nname: ${id}\ndescription: ${id} description\n---\n\nFollow ${id}.`,
-    }],
   };
 }
 
-function catalog(...entries: SkillCatalogEntry[]): SkillCatalog {
+function catalog(...entries: AgentCatalogEntry[]): AgentCatalog {
   return new Map(entries.map((entry) => [entry.id, entry]));
 }
 
-describe("resolveSkillSubagents", () => {
+function resolve(agents: AgentCatalog | undefined, deps: RuntimeDeps = {}) {
+  const full = { model: conversationModel, ...deps };
+  return resolveAgentSubagents(agents, full, buildBackend({ ...(full.skills ? { skills: full.skills } : {}) }));
+}
+
+const calendarSkills: SkillCatalog = new Map([[
+  "calendar",
+  {
+    id: "calendar",
+    name: "calendar",
+    description: "Read the calendar.",
+    source: "user",
+    files: [{
+      path: "/skills/calendar/SKILL.md",
+      content: "---\nname: calendar\ndescription: Read the calendar.\n---\n\nUse the tools.",
+    }],
+  },
+]]);
+
+describe("resolveAgentSubagents", () => {
   it("creates one explicitly tool-scoped worker per skill", async () => {
     const send = { name: "outlook__send" };
-    const resolved = await resolveSkillSubagents(
-      catalog(skill("mailer", ["mcp:outlook:send"]), skill("plain")),
+    const resolved = await resolve(
+      catalog(agent("mailer", ["mcp:outlook:send"]), agent("plain")),
       {
         tools: { "mcp:outlook:send": send },
         catalog: { outlook: ["send"] },
@@ -46,9 +70,11 @@ describe("resolveSkillSubagents", () => {
       name: "mailer",
       tools: [send],
       systemPrompt: "Follow mailer.",
+      model: conversationModel,
     });
     expect(resolved![1]).toMatchObject({ name: "plain", tools: [] });
     expect(resolved![0]!.middleware?.map((middleware) => middleware.name)).toEqual([
+      "FilesystemMiddleware",
       "ModelCallLimitMiddleware",
       "ToolCallLimitMiddleware",
       "subagentFinalization",
@@ -59,9 +85,9 @@ describe("resolveSkillSubagents", () => {
     ]);
   });
 
-  it("requalifies skill-owned HITL policy to executable tool names", async () => {
-    const resolved = await resolveSkillSubagents(
-      catalog(skill(
+  it("requalifies agent-owned HITL policy to executable tool names", async () => {
+    const resolved = await resolve(
+      catalog(agent(
         "mailer",
         ["mcp:outlook:send"],
         { "mcp:outlook:send": { allowedDecisions: ["approve", "edit", "reject"] } },
@@ -78,8 +104,8 @@ describe("resolveSkillSubagents", () => {
   });
 
   it("expands wildcard HITL policy to every granted executable tool", async () => {
-    const resolved = await resolveSkillSubagents(
-      catalog(skill(
+    const resolved = await resolve(
+      catalog(agent(
         "mailer",
         ["mcp:outlook:*"],
         { "mcp:outlook:*": { allowedDecisions: ["approve", "reject"] } },
@@ -100,8 +126,8 @@ describe("resolveSkillSubagents", () => {
   });
 
   it("asks first for a tool if any overlapping ref asks, keeping only the decisions they share", async () => {
-    const resolved = await resolveSkillSubagents(
-      catalog(skill(
+    const resolved = await resolve(
+      catalog(agent(
         "notes",
         ["mcp:notes:*", "mcp:notes:list_*", "mcp:notes:delete_note"],
         {
@@ -128,8 +154,8 @@ describe("resolveSkillSubagents", () => {
   });
 
   it("narrows true to the explicit decisions and never leaves an overlap with none", async () => {
-    const resolved = await resolveSkillSubagents(
-      catalog(skill(
+    const resolved = await resolve(
+      catalog(agent(
         "notes",
         ["mcp:notes:*"],
         {
@@ -157,13 +183,13 @@ describe("resolveSkillSubagents", () => {
     });
   });
 
-  it("adds eval only to a skill that declares it", async () => {
-    const resolved = await resolveSkillSubagents(
-      catalog(skill("analyst", [BUILTIN_EVAL_TOOL_REF])),
-      {},
+  it("adds eval only to an agent that declares it", async () => {
+    const resolved = await resolve(
+      catalog(agent("analyst", [BUILTIN_EVAL_TOOL_REF])),
     );
     expect(resolved![0]!.tools).toEqual([]);
     expect(resolved![0]!.middleware?.map((middleware) => middleware.name)).toEqual([
+      "FilesystemMiddleware",
       "ModelCallLimitMiddleware",
       "ToolCallLimitMiddleware",
       "subagentFinalization",
@@ -177,11 +203,11 @@ describe("resolveSkillSubagents", () => {
 
   it("never compiles a tool-dependent worker with missing or partial tools", async () => {
     const warnings: string[] = [];
-    const resolved = await resolveSkillSubagents(
+    const resolved = await resolve(
       catalog(
-        skill("missing", ["mcp:outlook:archive"]),
-        skill("partial", ["mcp:outlook:send", "mcp:outlook:delete"]),
-        skill("plain"),
+        agent("missing", ["mcp:outlook:archive"]),
+        agent("partial", ["mcp:outlook:send", "mcp:outlook:delete"]),
+        agent("plain"),
       ),
       {
         tools: { "mcp:outlook:send": { name: "outlook__send" } },
@@ -199,8 +225,35 @@ describe("resolveSkillSubagents", () => {
     expect(warnings).toHaveLength(2);
   });
 
-  it("returns no workers without skills", async () => {
-    await expect(resolveSkillSubagents(undefined, {})).resolves.toBeUndefined();
+  it("returns no workers without agents", async () => {
+    await expect(resolve(undefined)).resolves.toBeUndefined();
+  });
+
+  it("uses an agent's pinned model and inherits the conversation model otherwise", async () => {
+    const pinned = { id: "pinned" } as unknown as BaseChatModel;
+    const resolved = await resolve(catalog(agent("fast"), agent("plain")), {
+      agentModels: new Map([["fast", pinned]]),
+    });
+    expect(resolved?.map((worker) => [worker.name, worker.model])).toEqual([
+      ["fast", pinned],
+      ["plain", conversationModel],
+    ]);
+  });
+
+  it("mounts an agent's skills on its own skills middleware", async () => {
+    const resolved = await resolve(
+      catalog(agent("planner", [], {}, ["calendar"]), agent("plain")),
+      { skills: calendarSkills },
+    );
+    const names = (index: number) =>
+      resolved![index]!.middleware?.map((middleware) => middleware.name).slice(0, 2);
+    expect(names(0)).toEqual(["FilesystemMiddleware", "SkillsMiddleware"]);
+    expect(names(1)).toEqual(["FilesystemMiddleware", "ModelCallLimitMiddleware"]);
+  });
+
+  it("falls back to the description when the agent has no prompt body", async () => {
+    const resolved = await resolve(catalog({ ...agent("terse"), systemPrompt: "" }));
+    expect(resolved![0]!.systemPrompt).toBe("terse description");
   });
 });
 

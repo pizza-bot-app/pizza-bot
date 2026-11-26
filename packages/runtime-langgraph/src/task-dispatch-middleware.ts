@@ -45,7 +45,7 @@ export function taskToolDescription(subagents: readonly RosterEntry[]): string {
 /**
  * Upstream's notes tell the model to put full detail in the dispatch, to state
  * exactly what to get back, and to relay a summary — advice for a generic
- * subagent that fights a skill-scoped subagent, whose own instructions already
+ * subagent that fights a designed subagent, whose own instructions already
  * govern procedure and output. The system prompt loses this argument on
  * locality, since those notes sit in the schema the model is filling out.
  *

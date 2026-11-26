@@ -493,3 +493,144 @@ describe("TriggerService: automations gate and recovery", () => {
     svc.stop();
   });
 });
+
+describe("TriggerService: graph targets", () => {
+  it("delivers a webhook body as graph input and selects the graph", () => {
+    const store = memStore();
+    store.create({ id: "hook", kind: "webhook", name: "Inbound", graphId: "triage", enabled: true, webhookSecret: "k" });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, { log: () => {} });
+
+    const result = svc.invokeWebhook("hook", { prompt: "not a prompt here", user: "ada" });
+
+    expect(result).toBeDefined();
+    expect(m.starts).toHaveLength(1);
+    const { input, opts } = m.starts[0]!;
+    expect(input).toEqual({
+      graphInput: {
+        trigger: expect.objectContaining({ id: "hook", name: "Inbound", reason: "webhook" }),
+        body: { prompt: "not a prompt here", user: "ada" },
+      },
+    });
+    expect(opts?.configurable).toMatchObject({ graph_id: "triage", source: "trigger" });
+  });
+
+  it("continues a crash-orphaned graph occurrence on its own thread", () => {
+    const store = memStore();
+    store.create({ id: "t", kind: "cron", graphId: "digest", enabled: true, cron: "0 * * * *" });
+    const now = Date.parse("2026-07-05T12:10:00.000Z");
+    store.createOccurrence({
+      id: "orphan",
+      triggerId: "t",
+      scheduledAt: new Date(now).toISOString(),
+      reason: "manual",
+      now: new Date(now).toISOString(),
+    });
+    store.beginOccurrence("orphan", new Date(now).toISOString(), 3);
+    store.attachRun("orphan", "thread_prev", "run_prev", "running", new Date(now).toISOString());
+
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, { now: () => now, log: () => {} });
+    svc.start();
+
+    expect(m.starts).toHaveLength(1);
+    expect(m.starts[0]).toMatchObject({
+      threadId: "thread_prev",
+      input: { graphInput: { trigger: { id: "t" } }, continueFromCheckpoint: true },
+    });
+    expect(store.getOccurrence("orphan")).toMatchObject({ threadId: "thread_prev", attempt: 2 });
+    svc.stop();
+  });
+
+  it("keeps a paused occurrence waiting when a resume fails without leaving the pause", async () => {
+    const store = memStore();
+    store.create({ id: "t", kind: "webhook", graphId: "g", enabled: true, webhookSecret: "k" });
+    const m = mockLauncher();
+    let paused = true;
+    const svc = new TriggerService(m.launcher, store, { log: () => {}, awaitsInput: async () => paused });
+    svc.start();
+    const { handle } = svc.invokeWebhook("t", { a: 1 })!;
+    const occurrenceId = store.occurrences("t")[0]!.id;
+
+    m.emitRunEnd(handle, "interrupted");
+    expect(store.getOccurrence(occurrenceId)?.status).toBe("waiting");
+
+    const refused = { ...handle, runId: "run_refused" };
+    m.emitRunEnd(refused, "error");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getOccurrence(occurrenceId)?.status).toBe("waiting");
+
+    paused = false;
+    m.emitRunEnd({ ...handle, runId: "run_resumed" }, "success");
+    expect(store.getOccurrence(occurrenceId)?.status).toBe("succeeded");
+    svc.stop();
+  });
+
+  function waitingOccurrence(store: TriggerStore, trigger: { graphId?: string; prompt?: string }) {
+    store.create({ id: "t", kind: "webhook", enabled: true, webhookSecret: "k", ...trigger });
+    const at = "2026-07-05T12:00:00.000Z";
+    store.createOccurrence({ id: "occ", triggerId: "t", scheduledAt: at, reason: "webhook", now: at });
+    store.beginOccurrence("occ", at, 3);
+    store.attachRun("occ", "thread_paused", "run_first", "running", at);
+    store.completeOccurrenceRun("run_first", "thread_paused", "interrupted", at);
+    expect(store.getOccurrence("occ")?.status).toBe("waiting");
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("continues a graph occurrence whose resumed run a crash interrupted", async () => {
+    const store = memStore();
+    waitingOccurrence(store, { graphId: "g" });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, { log: () => {}, awaitsInput: async () => false });
+    svc.start();
+    await settle();
+
+    expect(m.starts).toHaveLength(1);
+    expect(m.starts[0]).toMatchObject({ threadId: "thread_paused", input: { continueFromCheckpoint: true } });
+    expect(store.getOccurrence("occ")).toMatchObject({ status: "running", attempt: 2 });
+    m.emitRunEnd({ runId: m.starts[0]!.opts!.runId!, threadId: "thread_paused", status: "success", startedAt: 0 });
+    expect(store.getOccurrence("occ")?.status).toBe("succeeded");
+    svc.stop();
+  });
+
+  it("leaves a waiting occurrence to the resume this process is already running", async () => {
+    const store = memStore();
+    waitingOccurrence(store, { graphId: "g" });
+    const m = mockLauncher();
+    const launcher: RunLauncher = { ...m.launcher, isRunning: (threadId) => threadId === "thread_paused" };
+    const svc = new TriggerService(launcher, store, { log: () => {}, awaitsInput: async () => false });
+    svc.start();
+    await settle();
+
+    expect(m.starts).toHaveLength(0);
+    expect(store.getOccurrence("occ")?.status).toBe("waiting");
+    svc.stop();
+  });
+
+  it("leaves an occurrence waiting while its thread still awaits an answer", async () => {
+    const store = memStore();
+    waitingOccurrence(store, { graphId: "g" });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, { log: () => {}, awaitsInput: async () => true });
+    svc.start();
+    await settle();
+
+    expect(m.starts).toHaveLength(0);
+    expect(store.getOccurrence("occ")?.status).toBe("waiting");
+    svc.stop();
+  });
+
+  it("fails a conversation occurrence whose resumed run a crash interrupted instead of re-running its prompt", async () => {
+    const store = memStore();
+    waitingOccurrence(store, { prompt: "triage" });
+    const m = mockLauncher();
+    const svc = new TriggerService(m.launcher, store, { log: () => {}, awaitsInput: async () => false });
+    svc.start();
+    await settle();
+
+    expect(m.starts).toHaveLength(0);
+    expect(store.getOccurrence("occ")).toMatchObject({ status: "failed" });
+    svc.stop();
+  });
+});

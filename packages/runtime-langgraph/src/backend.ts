@@ -1,4 +1,4 @@
-/** Routes durable memories and approved local folders outside checkpoint state. */
+/** Routes skills, durable memories, and approved local folders outside checkpoint state. */
 import { lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -21,7 +21,10 @@ import {
 } from "deepagents";
 import {
   LOCAL_FOLDER_VIRTUAL_ROOT,
+  SKILLS_ROOT,
+  collectSkillFiles,
   type LocalFolder,
+  type SkillCatalog,
 } from "@pizza-bot/core";
 
 export interface BuildBackendOptions {
@@ -31,9 +34,12 @@ export interface BuildBackendOptions {
   memoryEnabled?: () => boolean;
   /** Live grants mounted beneath `/local/<id>/`. */
   localFolders?: () => readonly LocalFolder[];
+  /** Enabled skills, mounted read-only beneath `/skills/`. */
+  skills?: SkillCatalog;
 }
 
 const MEMORY_DISABLED_ERROR = "Durable memory is disabled in Settings.";
+const SKILLS_READ_ONLY_ERROR = "Skills are read-only.";
 const LOCAL_FOLDER_READ_ONLY_ERROR = "Local folders are read-only.";
 const LOCAL_FOLDER_DENIED_ERROR = "Local folder access is not allowed.";
 
@@ -133,6 +139,31 @@ function gatedMemoryBackend(
         memoryEnabled()
           ? Reflect.apply(value, target, args)
           : { error: MEMORY_DISABLED_ERROR };
+    },
+  }) as AnyBackendProtocol;
+}
+
+/**
+ * Serves the catalog's in-memory files through a StateBackend bound to a fixed
+ * state, so skill bytes never enter thread checkpoints and reads match `/` exactly.
+ */
+function readOnlySkillsBackend(skills: SkillCatalog): AnyBackendProtocol {
+  const now = new Date().toISOString();
+  const files: Record<string, unknown> = {};
+  for (const [path, file] of Object.entries(collectSkillFiles([...skills.keys()], skills))) {
+    files[path.slice(SKILLS_ROOT.length)] = { ...file, created_at: now, modified_at: now };
+  }
+  const backend = new StateBackend({ state: { files } } as never);
+  const mutating = new Set(["write", "edit", "delete", "uploadFiles"]);
+  return new Proxy(backend, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof property !== "string" || !mutating.has(property)) return value;
+      if (property === "uploadFiles") {
+        return (uploads: Array<[string, Uint8Array]>) =>
+          uploads.map(([path]) => ({ path, error: "permission_denied" }));
+      }
+      return () => ({ error: SKILLS_READ_ONLY_ERROR });
     },
   }) as AnyBackendProtocol;
 }
@@ -622,6 +653,9 @@ class LocalFoldersBackend implements BackendProtocolV2 {
 export function buildBackend(opts: BuildBackendOptions): AnyBackendProtocol {
   const base = new StateBackend();
   const routes: Record<string, AnyBackendProtocol> = {};
+  if (opts.skills?.size) {
+    routes[`${SKILLS_ROOT}/`] = readOnlySkillsBackend(opts.skills);
+  }
   if (opts.memoriesDir) {
     const durable = new FilesystemBackend({
       rootDir: opts.memoriesDir,

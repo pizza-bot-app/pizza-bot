@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { DelegationInfo } from "@/projection";
 import { ActivityRail } from "./ActivityRail.js";
+import { AgentNamesContext } from "./agent-names.js";
 
 function delegation(overrides: Partial<DelegationInfo> = {}): DelegationInfo {
   return {
@@ -58,5 +59,24 @@ describe("ActivityRail delegation status", () => {
 
     // The batch head reads awaiting; only the failed child keeps its error icon.
     expect(awaiting.indexOf("activity-icon-await")).toBeLessThan(awaiting.indexOf("activity-icon-error"));
+  });
+});
+
+describe("ActivityRail agent names", () => {
+  it("shows an agent's display name and falls back to its id", () => {
+    const html = renderToStaticMarkup(
+      <AgentNamesContext.Provider value={new Map([["mail-assistant", "Mail Assistant"]])}>
+        <ActivityRail
+          delegations={{
+            a: delegation({ delegationId: "a" }),
+            b: delegation({ delegationId: "b", subagent: "unknown-agent" }),
+          }}
+          isRunning={false}
+        />
+      </AgentNamesContext.Provider>,
+    );
+
+    expect(html).toContain(">Mail Assistant<");
+    expect(html).toContain(">unknown-agent<");
   });
 });

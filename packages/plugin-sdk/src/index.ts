@@ -4,6 +4,8 @@ export * from "./loader.js";
 export * from "./plugin-host.js";
 export { splitFrontmatter } from "./frontmatter.js";
 export * from "./skill-catalog.js";
+export * from "./agent-catalog.js";
+export * from "./skill-tool-migration.js";
 export * from "./runtime-resolver.js";
 export * from "./mcp-servers-config.js";
 export * from "./materializer.js";

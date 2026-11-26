@@ -1,18 +1,16 @@
 import type { ReactNode } from "react";
-import type { SkillBundle, SkillCatalogEntryInfo, ToolCatalogInfo } from "@/api-client";
-import { BookOpen, Cable, FileText, Hand, ScrollText, Unlink, Wrench } from "lucide-react";
+import type { SkillBundle, SkillCatalogEntryInfo } from "@/api-client";
+import { Bot, BookOpen, FileText, ScrollText, Unlink } from "lucide-react";
 import { ProvenanceBadge } from "../ProvenanceBadge.js";
 import { CapabilityStatusDot, type CapabilityVisualState } from "../CapabilityControls.js";
 import { EditAction, PluginLink, ResourceSection, ResourceView } from "../ResourceView.js";
 import { SkeletonLines } from "../ResourceDetailSkeleton.js";
 import { L } from "../../lexicon.js";
-import { describeGrantedTool } from "../tools/tool-catalog.js";
-import { ToolChip } from "../tools/ToolList.js";
+import { useAgentName } from "../agent-names.js";
 
 export function SkillView({
   skill,
   bundle,
-  tools,
   visualState,
   statusLabel,
   enablement,
@@ -23,7 +21,6 @@ export function SkillView({
 }: {
   skill: SkillCatalogEntryInfo;
   bundle: SkillBundle | null | undefined;
-  tools: ToolCatalogInfo;
   visualState: CapabilityVisualState;
   statusLabel: string;
   enablement?: ReactNode;
@@ -47,7 +44,7 @@ export function SkillView({
   const linkedNote = skill.linked ? (
     <span>Linked from {skill.linkTarget ?? "another folder"}; edit it at the source</span>
   ) : undefined;
-  const interruptRefs = Object.keys(bundle?.interruptOn ?? {});
+  const agentName = useAgentName();
 
   return (
     <ResourceView
@@ -83,42 +80,19 @@ export function SkillView({
           <pre className="skill-card-body">{bundle?.body.trim() || "(no instructions)"}</pre>
         )}
       </ResourceSection>
-      <ResourceSection title="Tools" icon={<Wrench size={14} />}>
-        {skill.declaredTools.length === 0 ? (
-          <p className="resource-card-empty">This skill uses only the built-in tools.</p>
-        ) : (
+      <ResourceSection title="Used by" icon={<Bot size={14} />}>
+        {skill.usedBy?.length ? (
           <ul className="resource-chip-list">
-            {skill.declaredTools.map((ref) => (
-              <li key={ref}>
-                <ToolChip tool={describeGrantedTool(ref, tools)} />
+            {skill.usedBy.map((id) => (
+              <li key={id}>
+                <span className="resource-tool-chip">{agentName(id)}</span>
               </li>
             ))}
           </ul>
+        ) : (
+          <p className="resource-card-empty">No agent mounts this skill, so Pizza Bot reads it directly.</p>
         )}
       </ResourceSection>
-      {interruptRefs.length > 0 && (
-        <ResourceSection title="Asks before running" icon={<Hand size={14} />}>
-          <ul className="resource-chip-list">
-            {interruptRefs.map((ref) => (
-              <li key={ref}>
-                <ToolChip tool={describeGrantedTool(ref, tools)} />
-              </li>
-            ))}
-          </ul>
-        </ResourceSection>
-      )}
-      {skill.mcpDependencies.length > 0 && (
-        <ResourceSection title="Requires MCP servers" icon={<Cable size={14} />}>
-          <ul className="skill-card-files">
-            {skill.mcpDependencies.map((dependency) => (
-              <li key={dependency.id} className="skill-card-file">
-                <code>{dependency.id}</code>
-                <span>{dependency.status === "missing" ? "not configured" : dependency.status}</span>
-              </li>
-            ))}
-          </ul>
-        </ResourceSection>
-      )}
       {bundle && bundle.files.length > 0 && (
         <ResourceSection title="Files" icon={<FileText size={14} />}>
           <ul className="skill-card-files">
