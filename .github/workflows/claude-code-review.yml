@@ -113,12 +113,14 @@ jobs:
           use_bedrock: "true"
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
+          # --reporter=agent leaves out vitest's GitHub reporter: the sandbox
+          # refuses its step summary write, and the warning reads as a failed run.
           prompt: |
             You are the required reviewer for ${{ github.repository }}/pull/${{ github.event.pull_request.number }}.
             The checkout is installed and built. CI separately runs the full build, typecheck, lint, and test suite, so do not re-run them wholesale.
 
             1. Invoke the `code-review:code-review` skill with args `--comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}`. Skip its eligibility checks: this run gates the merge, so always review the current head, even if Claude has already reviewed or commented on an earlier push.
-            2. For each finding the review would rank important, try to confirm it by executing code: run the relevant tests with `npx vitest run --dir <workspace>`, or write a small failing test or `npx tsx` probe under `.agent-review/` and run it. Live model calls are unavailable; use the scripted-model harness in tests/langgraph-compat when a probe needs the runtime.
+            2. For each finding the review would rank important, try to confirm it by executing code: run the relevant tests with `npx vitest run --dir <workspace> --reporter=agent`, or write a small failing test (run it the same way) or `npx tsx` probe under `.agent-review/`. Live model calls are unavailable; use the scripted-model harness in tests/langgraph-compat when a probe needs the runtime.
             3. Return verdict "block" if any important finding stands, whether it is confirmed by execution or clear from reading the code. Otherwise return "ship".
             4. In `files_reviewed`, list every changed file whose diff you read, by its repository path. Tests, snapshots, lockfiles, and images may be left out. The workflow fails a "ship" verdict that leaves out any other changed file.
 
