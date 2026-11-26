@@ -1,7 +1,7 @@
 /** Tools for an agent's background check-in on a Todo it owns: the only ways it reaches the user. */
 import { tool, type ToolRunnableConfig } from "@langchain/core/tools";
 import { z } from "zod";
-import { TODO_NOTE_MAX, TODO_STEPS_MAX, type AmbientTodoAccess, type InterruptOnPolicy, type Todo } from "@pizza-bot/core";
+import { TODO_NOTE_MAX, TODO_STEPS_MAX, TODO_TITLE_MAX, type AmbientTodoAccess, type InterruptOnPolicy, type Todo } from "@pizza-bot/core";
 
 export const AMBIENT_PROMPT = [
   "You are working unattended on a Todo you own; the message you receive describes it and its history.",
@@ -59,7 +59,13 @@ export function ambientTools(access: AmbientTodoAccess) {
         note: note.describe("What you did or learned since the last check-in."),
         completed: z.boolean().optional(),
         steps: z
-          .array(z.object({ id: z.string().optional(), title: z.string(), completed: z.boolean().optional() }))
+          .array(
+            z.object({
+              id: z.string().optional(),
+              title: z.string().trim().min(1).max(TODO_TITLE_MAX),
+              completed: z.boolean().optional(),
+            }),
+          )
           .max(TODO_STEPS_MAX)
           .optional()
           .describe("Replaces the whole checklist. Repeat a step's id to keep it; omit id for a new step."),

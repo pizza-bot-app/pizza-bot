@@ -125,6 +125,16 @@ describe("ambient check-in tools", () => {
     ]);
   });
 
+  it("holds checklist step titles to the Todo title rule", async () => {
+    const update = (title: string) => [{ name: "update_todo", args: { note: "Planned.", steps: [{ title }] } }];
+    const model = new ScriptedModel([update("   "), update("x".repeat(201)), update("  Compare fares  ")]);
+    const { access, calls } = recordingAccess();
+    const agent = await createAgentRootAgent(owner, { model, checkpointer: new MemorySaver() }, { ambient: access });
+    await drain(agent.streamProtocol(checkIn, { threadId: "bg-steps" }));
+
+    expect(calls).toEqual([["progress", "bg-steps", { note: "Planned.", steps: [{ title: "Compare fares" }] }]]);
+  });
+
   it("pauses ask_user for a typed reply and never runs it", async () => {
     const model = new ScriptedModel([[{ name: "ask_user", args: { question: "Window or aisle?" } }]]);
     const { access, calls } = recordingAccess();
