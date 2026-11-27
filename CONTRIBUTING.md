@@ -177,21 +177,22 @@ Three workflows, split by what GitHub is willing to hand a run:
 
 | Workflow | Fires on | Reaches a fork's pull request |
 | --- | --- | --- |
-| [`claude-code-review.yml`](.github/workflows/claude-code-review.yml) (`agent-review`) | a pull request opening, a push to it, or a draft marked ready | no |
-| [`agent-review-fork.yml`](.github/workflows/agent-review-fork.yml) (`agent-review`) | a maintainer adding the `safe-to-review` label | yes, by design |
+| [`claude-code-review.yml`](.github/workflows/claude-code-review.yml) (`agent-review`) | a pull request opening, a push to it, or a draft marked ready | no, skips it |
+| [`agent-review-fork.yml`](.github/workflows/agent-review-fork.yml) (`agent-review`) | a fork's pull request opening or a push to it (blocks), and a maintainer adding the `safe-to-review` label (reviews) | yes, by design |
 | [`claude.yml`](.github/workflows/claude.yml) | `@claude` in a comment, a review, or an issue | reads it, never runs it |
 
 That split is forced rather than chosen. GitHub withholds secrets and the OIDC
 token from a run triggered by a fork's pull request, so the automatic review
-cannot authenticate to Bedrock there. `agent-review` fails at its
-same-repository step rather than skipping, because a skipped required check
-reports success; see
+cannot authenticate to Bedrock there. `claude-code-review.yml` skips a fork,
+which on its own would report success, so `agent-review-fork.yml` puts a
+blocking `agent-review` on every fork commit until a labeled review passes;
+branch protection fails the check if any `agent-review` on the commit fails. See
 [Pull requests from forks](#pull-requests-from-forks) for how those land. Comment,
 review, and `pull_request_target` events fire in this repository's context and
 keep full access, so `@claude` can still read and comment on an outside
 contributor's branch, and a label can start the full review.
-Dependabot pull requests fail `agent-review` the same way, because Dependabot gets
-its own secret store; `audit.yml` already covers a lockfile bump, so a maintainer
+Dependabot pull requests fail `agent-review`, because Dependabot gets its own
+secret store; `audit.yml` already covers a lockfile bump, so a maintainer
 admin-merges them once the CI checks pass.
 
 Both workflows pin `global.anthropic.claude-opus-5-5`. Pinning the full model ID
@@ -234,20 +235,17 @@ branch with a label:
 
 1. Read the whole diff, `.github/` first. Every outside contributor's workflow
    runs wait for approval, and an approved run uses the fork's own copy of the
-   workflows: a fork that edits them could report a passing `agent-review`
-   itself. Then look hardest at what executes on its own: `package.json`
+   workflows: a fork that edits them could report passing CI checks itself. Then look hardest at what executes on its own: `package.json`
    scripts and lockfiles, new dependencies, and test or build setup.
-2. Approve the pull request's workflow runs and wait for the CI checks. Approve
-   them before labeling: the fork's own `agent-review` run fails, and a run that
-   finishes after the labeled review becomes the result branch protection reads.
+2. Approve the pull request's workflow runs and wait for the CI checks.
+   Meanwhile its `agent-review` reads "Waiting for the safe-to-review label".
 3. Add the `safe-to-review` label. [`agent-review-fork.yml`](.github/workflows/agent-review-fork.yml)
    installs, builds, and reviews the exact commit the label was added to, with
    the action's `restrict_untrusted_prs` turned off so the review can run tests,
-   then
-   reports `agent-review` on it, with the verdict comment and inline findings
-   as on any other pull request. A push to the branch removes the label and
-   cancels a review still running, so each new commit needs a fresh read and
-   label.
+   then sets that same `agent-review` to its verdict, with the verdict comment
+   and inline findings as on any other pull request. A push to the branch,
+   including updating it from `main`, removes the label and cancels a review
+   still running, so each new commit needs a fresh read and label.
 4. Check that the commit will credit the contributor:
    ```bash
    gh api repos/pizza-bot-app/pizza-bot/commits/<sha> --jq .author.login
