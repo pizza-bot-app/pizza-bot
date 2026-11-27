@@ -11,6 +11,7 @@ import { OpperLangChainModelProvider } from "./providers/opper.js";
 import { UberLlmLangChainModelProvider } from "./providers/uberllm.js";
 import { CheaperInferenceLangChainModelProvider } from "./providers/cheaperinference.js";
 import { TrustedRouterLangChainModelProvider } from "./providers/trustedrouter.js";
+import { LlmtrLangChainModelProvider } from "./providers/llmtr.js";
 import { LiteLLMLangChainModelProvider } from "./providers/litellm.js";
 import { OllamaLangChainModelProvider } from "./providers/ollama.js";
 
@@ -31,6 +32,7 @@ export async function registerBuiltinProviders(registry: ModelRegistry, configs?
     new UberLlmLangChainModelProvider(),
     new CheaperInferenceLangChainModelProvider(),
     new TrustedRouterLangChainModelProvider(),
+    new LlmtrLangChainModelProvider(),
     new LiteLLMLangChainModelProvider(),
     new OllamaLangChainModelProvider(),
   ];

@@ -19,7 +19,7 @@ npm run dev
 ## Model providers
 
 Pizza Bot supports Amazon Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter,
-Requesty, Opper, UberLLM, Cheaper Inference, TrustedRouter, LiteLLM, and Ollama.
+Requesty, Opper, UberLLM, Cheaper Inference, TrustedRouter, LLMTR, LiteLLM, and Ollama.
 Configure providers under **Settings > Providers**, then select a model suited to
 the task. Google Gemini auto-detects Google AI Studio or Vertex AI Express.
 Vertex AI Express serves only `us-central1`; for models served only on global or
@@ -29,7 +29,7 @@ location** (default `global`), or `GOOGLE_CLOUD_PROJECT` and
 `GOOGLE_CLOUD_LOCATION` for the backend. Under **Auto-detect**, a saved Vertex
 AI project ID always selects Vertex AI, so leave it blank when using a Google AI
 Studio key. OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper
-Inference, TrustedRouter, and LiteLLM also take an optional **Advanced request
+Inference, TrustedRouter, LLMTR, and LiteLLM also take an optional **Advanced request
 JSON** merged into every request, for provider options without their own
 setting, such as `{"service_tier": "flex"}` or `{"min_privacy": 2}`.
 
