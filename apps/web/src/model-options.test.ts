@@ -121,6 +121,7 @@ describe("model provider presentation", () => {
     expect(providerLabel("uberllm")).toBe("UberLLM");
     expect(providerLabel("cheaperinference")).toBe("Cheaper Inference");
     expect(providerLabel("trustedrouter")).toBe("TrustedRouter");
+    expect(providerLabel("llmtr")).toBe("LLMTR");
     expect(providerLabel("litellm")).toBe("LiteLLM");
     expect(providerLabel("requesty")).toBe("Requesty");
     expect(providerLabel("google-vertex_ai")).toBe("Google Vertex Ai");
