@@ -349,8 +349,7 @@ up first. Automations stored there run as soon as the server starts.
 
 [`docker-compose.yml`](../docker-compose.yml) runs the same image with a named
 data volume and a loopback-only published port, reading provider credentials
-from an optional `.env` beside it. It pulls the published image, which is
-`linux/amd64` only:
+from an optional `.env` beside it. It pulls the published image:
 
 ```bash
 PIZZA_API_TOKEN="$(openssl rand -hex 32)" \
@@ -358,7 +357,7 @@ PIZZA_ALLOWED_ORIGINS=https://pizza.example.com \
 docker compose up --detach
 ```
 
-Add `--build` on an arm64 host, or to run code that has not been released. That
+Add `--build` to run code that has not been released. That
 builds from this checkout and tags the result as the `image:` reference, so no pull
 happens; repeat it after every `git pull`, or Compose reuses the image it built
 before.
@@ -370,16 +369,16 @@ version, `<major>.<minor>`, and `sha-<commit>`. Only a release publishes, so
 `latest` is the newest release rather than the tip of `main`:
 
 ```bash
-docker pull ghcr.io/pizza-bot-app/pizza-bot:1.0.0
+docker pull ghcr.io/pizza-bot-app/pizza-bot:1.4.0
 ```
 
 Pin a version for a deployment. `latest` moves under you on the next release, and
 nothing coordinates that with a restart.
 
-**The image is `linux/amd64` only.** An arm64 host needs
-`--platform linux/amd64`, which runs it emulated and slower, or should build the
-image natively instead — [Docker](#docker) above builds for the host architecture
-and needs no registry.
+Images from 1.3.0 on cover `linux/amd64` and `linux/arm64`, so Docker pulls
+the host's architecture. 1.0.0 through 1.2.0 are `linux/amd64` only; an arm64
+host runs those emulated with `--platform linux/amd64`, or builds natively as in
+[Docker](#docker) above.
 
 Build from a checkout to run code that has not been released, for an architecture
 the registry does not carry, or to keep the image in a registry you control:
