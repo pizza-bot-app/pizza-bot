@@ -30,6 +30,7 @@ jobs:
   # write code or checks: only `report`, which never runs that code, can pass
   # the gate. Keep the review step in step with claude-code-review.yml.
   review:
+    name: Claude review session (gated by agent-review)
     if: >-
       github.event.action == 'labeled' && github.event.label.name == 'safe-to-review' &&
       github.event.pull_request.head.repo.full_name != github.repository

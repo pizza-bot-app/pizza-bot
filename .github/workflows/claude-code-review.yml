@@ -35,6 +35,7 @@ jobs:
   # fork is reviewed by agent-review-fork.yml once a maintainer labels it;
   # Dependabot is admin-merged.
   review:
+    name: Claude review session (gated by agent-review)
     needs: draft-state
     if: |
       !cancelled() && needs.draft-state.outputs.draft != 'true' &&
