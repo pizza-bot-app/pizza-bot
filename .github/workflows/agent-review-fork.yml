@@ -76,14 +76,15 @@ jobs:
             echo "PROMPT_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # The action's guidance keeps a fork's head out of the workspace root.
-      # Building and running it is this job's purpose, and the label is the
-      # gate on that. The head SHA is the one the label was added to.
+      # checkout and claude-code-action both guard against running a fork's
+      # head here. Building and running it is this job's purpose, and the label
+      # is the gate on that. The head SHA is the one the label was added to.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
 
       # No npm cache: this context shares main's cache scope.
       - uses: actions/setup-node@v7
