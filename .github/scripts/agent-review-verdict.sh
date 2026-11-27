@@ -2,7 +2,8 @@
 # Turns the agent review's structured output (RESULT) into the merge gate.
 #   enforce    fails on block, on no verdict, or on a ship that skipped a changed file
 #   post       keeps one verdict comment on the pull request (GATE = enforce's outcome)
-#   check-run  reports agent-review on HEAD_SHA, for runs whose own job is not that check
+#   await-label  sets a fork commit's agent-review to blocked until a maintainer labels it
+#   check-run    reports the labeled review's verdict on that same check run
 set -eo pipefail
 
 : "${GITHUB_REPOSITORY:?}" "${PR:?}" "${RUNNER_TEMP:?}"
@@ -61,17 +62,38 @@ post() {
   fi
 }
 
+# Branch protection fails the check if any agent-review run on the commit
+# failed, so a fork commit gets exactly one, found by its external_id and
+# updated in place.
+upsert_check_run() {
+  local conclusion=$1 title=$2 summary=$3 id
+  id=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?check_name=agent-review&filter=all" \
+    --jq '[.check_runs[] | select(.external_id == "agent-review-fork")][0].id // empty')
+  jq -n --arg sha "$HEAD_SHA" --arg c "$conclusion" --arg t "$title" --arg s "$summary" --arg url "$RUN_URL" \
+    '{name: "agent-review", head_sha: $sha, external_id: "agent-review-fork", status: "completed",
+      conclusion: $c, details_url: $url, output: {title: $t, summary: $s}}' \
+    | if [ -n "$id" ]; then
+        jq 'del(.head_sha)' | gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input - --silent
+      else
+        gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" --input - --silent
+      fi
+}
+
+await_label() {
+  upsert_check_run action_required "Waiting for the safe-to-review label" \
+    "A maintainer reviews a fork's pull request by reading the diff and adding the safe-to-review label, which runs the agent review on this commit."
+}
+
 check_run() {
   local conclusion=failure title="Agent review blocked"
   if [ "$GATE" = success ]; then conclusion=success title="Agent review passed"; fi
-  jq -n --arg sha "$HEAD_SHA" --arg c "$conclusion" --arg t "$title" --arg s "$(body)" --arg url "$RUN_URL" \
-    '{name: "agent-review", head_sha: $sha, status: "completed", conclusion: $c, details_url: $url, output: {title: $t, summary: $s}}' \
-    | gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" --input - --silent
+  upsert_check_run "$conclusion" "$title" "$(body)"
 }
 
 case "${1:-}" in
   enforce) enforce ;;
   post) post ;;
+  await-label) await_label ;;
   check-run) check_run ;;
-  *) echo "usage: $0 enforce|post|check-run" >&2 && exit 2 ;;
+  *) echo "usage: $0 enforce|post|await-label|check-run" >&2 && exit 2 ;;
 esac

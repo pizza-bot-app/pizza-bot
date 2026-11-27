@@ -1,27 +1,53 @@
 name: Agent review (fork)
 
-# A fork's pull_request run gets no secrets, so claude-code-review.yml cannot
-# review it. A maintainer who has read the diff adds the safe-to-review label;
-# pull_request_target then runs this file from main, never the fork's copy,
-# reviews the labeled commit, and reports agent-review on it. A push drops the label.
+# A fork's pull_request run gets no secrets, so claude-code-review.yml skips
+# it. This file runs from main, never the fork's copy, and owns the fork's one
+# agent-review check run: blocking on every new commit until a maintainer who
+# has read the diff adds the safe-to-review label, then the labeled review's
+# verdict. A push drops the label.
 on:
   pull_request_target:
-    types: [labeled, synchronize]
+    types: [opened, reopened, synchronize, labeled]
 
 permissions: {}
 
 jobs:
+  # claude-code-review.yml skips forks, and a skipped check counts as passing,
+  # so this blocking check is what keeps an unreviewed fork commit unmergeable.
+  # It shares no concurrency group, so nothing can cancel it before it posts.
+  await-label:
+    if: >-
+      github.event.action != 'labeled' &&
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      RUN_URL: ${{ github.event.pull_request.html_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - run: bash .github/scripts/agent-review-verdict.sh await-label
+
+  # Shares the review's group so a push cancels a review of the old commit.
   unlabel:
     if: github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
-    # Shares the review's group so a push cancels a review of the old commit.
     concurrency:
-      group: agent-review-fork-${{ github.event.action == 'synchronize' && github.event.pull_request.number || github.run_id }}
+      group: agent-review-fork-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      - env:
+      # A second quick push finds the label already gone.
+      - continue-on-error: true
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
         run: gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/$PR/labels/safe-to-review" --silent
@@ -160,8 +186,6 @@ jobs:
           GATE: ${{ steps.enforce.outcome }}
         run: bash .github/scripts/agent-review-verdict.sh post
 
-      # The fork's own agent-review run fails at its same-repository step; this
-      # later check run with the same name and app is the one branch protection reads.
       - name: Report agent-review on the labeled commit
         env:
           GATE: ${{ steps.enforce.outcome }}
