@@ -4,15 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
-permissions:
-  # Write so UI screenshots can be committed to the ui-screenshots branch,
-  # the only way a comment can show an image.
-  contents: write
-  # Required to post findings and the verdict on the pull request.
-  pull-requests: write
-  issues: read
-  # Lets GitHub mint the OIDC token that AWS exchanges for role credentials.
-  id-token: write
+permissions: {}
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
@@ -24,6 +16,8 @@ jobs:
   # with a stale payload. Read the live state instead.
   draft-state:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
     outputs:
       draft: ${{ steps.pr.outputs.draft }}
     steps:
@@ -34,28 +28,32 @@ jobs:
           draft=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" --jq .draft)
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
 
-  # `agent-review` is a required status check on main, so this job must FAIL,
-  # never skip, when it cannot review: a job skipped by `if:` reports success.
-  # Drafts are the one skip, because a draft cannot merge and marking it ready
-  # re-runs the job. If the draft lookup fails, the review runs anyway.
-  agent-review:
+  # Runs the review session, which can write to its workspace; the verdict is
+  # enforced by agent-review, a separate job the session never touches.
+  # GitHub withholds secrets and the OIDC token from fork pull requests and
+  # gives Dependabot its own secret store, so neither can reach Bedrock. A
+  # fork is reviewed by agent-review-fork.yml once a maintainer labels it;
+  # Dependabot is admin-merged.
+  review:
     needs: draft-state
-    if: ${{ !cancelled() && needs.draft-state.outputs.draft != 'true' }}
+    if: |
+      !cancelled() && needs.draft-state.outputs.draft != 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      # Write so UI screenshots can be committed to the ui-screenshots branch,
+      # the only way a comment can show an image.
+      contents: write
+      # Required to post inline findings on the pull request.
+      pull-requests: write
+      issues: read
+      # Lets GitHub mint the OIDC token that AWS exchanges for role credentials.
+      id-token: write
+    outputs:
+      result: ${{ steps.review.outputs.structured_output }}
     steps:
-      # GitHub withholds secrets and the OIDC token from fork pull requests and
-      # gives Dependabot its own secret store, so neither can reach Bedrock. A
-      # fork is reviewed by agent-review-fork.yml once a maintainer labels it;
-      # Dependabot is admin-merged.
-      - name: Require a same-repository branch
-        if: |
-          github.event.pull_request.head.repo.full_name != github.repository ||
-          github.actor == 'dependabot[bot]'
-        run: |
-          echo "::error::Agent review runs only on branches pushed to this repository. A maintainer reviews a fork's pull request by adding the safe-to-review label."
-          exit 1
-
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -65,8 +63,8 @@ jobs:
           node-version: 24
           cache: npm
 
-      # Trust boundary: only branches in this repository reach the steps below,
-      # and their authors already have write access, enough to push a workflow
+      # Trust boundary: only branches in this repository reach this job, and
+      # their authors already have write access, enough to push a workflow
       # that assumes the Bedrock role. The ordering and the subprocess scrub
       # keep credentials out of incidental output, not away from that code:
       # with id-token: write it can mint its own OIDC token, and the servers
@@ -156,26 +154,46 @@ jobs:
           pr: ${{ github.event.pull_request.number }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Fails closed: a run that ends without structured output (a refusal, the
-      # turn cap) blocks the merge just as a "block" verdict does.
+  # `agent-review` is a required status check on main, so this job must FAIL,
+  # never skip, when it cannot review: a job skipped by `if:` reports success.
+  # Drafts are the one skip, because a draft cannot merge and marking it ready
+  # re-runs the job. If the draft lookup fails, the review runs anyway.
+  agent-review:
+    needs: [draft-state, review]
+    if: ${{ !cancelled() && needs.draft-state.outputs.draft != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      RESULT: ${{ needs.review.outputs.result }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Require a same-repository branch
+        if: needs.review.result == 'skipped'
+        run: |
+          echo "::error::Agent review runs only on branches pushed to this repository. A maintainer reviews a fork's pull request by adding the safe-to-review label."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      # Fails closed: a review that ends without structured output (a refusal,
+      # the turn cap, a failed job) blocks the merge just as a "block" verdict does.
       - name: Enforce verdict
         id: enforce
-        env:
-          RESULT: ${{ steps.review.outputs.structured_output }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
         run: bash .github/scripts/agent-review-verdict.sh enforce
 
       # One comment per pull request, found by its marker and rewritten on each
       # push. Posting is best effort: the check alone gates the merge.
       - name: Post verdict
-        if: ${{ !cancelled() && steps.review.outcome != 'skipped' }}
+        if: ${{ !cancelled() && needs.review.result != 'skipped' }}
         continue-on-error: true
         env:
-          RESULT: ${{ steps.review.outputs.structured_output }}
           GATE: ${{ steps.enforce.outcome }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash .github/scripts/agent-review-verdict.sh post

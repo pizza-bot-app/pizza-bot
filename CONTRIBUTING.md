@@ -232,14 +232,14 @@ commits land on `main` under the contributor's own authorship. Because the
 automatic `agent-review` cannot run on a fork, a maintainer vouches for the
 branch with a label:
 
-1. Approve the pull request's workflow runs if GitHub asks (first-time
-   contributors), and wait for the CI checks. Approve them before labeling: the
-   fork's own `agent-review` run fails, and a run that finishes after the labeled
-   review becomes the result branch protection reads.
-2. Read the whole diff. Before running it with credentials, look hardest at what
-   executes on its own: `package.json` scripts and lockfiles, new dependencies,
-   and test or build setup. The labeled review runs `.github/` from `main`, so a
-   change there is not executed, but is still worth reading before it merges.
+1. Read the whole diff, `.github/` first. Every outside contributor's workflow
+   runs wait for approval, and an approved run uses the fork's own copy of the
+   workflows: a fork that edits them could report a passing `agent-review`
+   itself. Then look hardest at what executes on its own: `package.json`
+   scripts and lockfiles, new dependencies, and test or build setup.
+2. Approve the pull request's workflow runs and wait for the CI checks. Approve
+   them before labeling: the fork's own `agent-review` run fails, and a run that
+   finishes after the labeled review becomes the result branch protection reads.
 3. Add the `safe-to-review` label. [`agent-review-fork.yml`](.github/workflows/agent-review-fork.yml)
    installs, builds, and reviews the exact commit the label was added to, with
    the action's `restrict_untrusted_prs` turned off so the review can run tests,
