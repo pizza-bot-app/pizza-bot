@@ -12,7 +12,7 @@ node -v            # need >= 24 (.nvmrc: `nvm use` / `fnm use`)
 npm install        # installs workspaces; better-sqlite3 uses a shipped prebuild
 npm run build      # required before running an app from a fresh clone
 npm run typecheck  # tsc across the whole project-reference graph
-npm test           # license-generator tests, then capped Turbo tests
+npm test           # scripts/*.test.mjs, then capped Turbo tests
 npm run lint       # eslint flat config
 npm run dev        # downloads Playwright's browser revision if it is not cached
 cp .env.example .env   # then fill in credentials for a model provider (see below)
@@ -28,7 +28,9 @@ it needs network access even when the rest of the workspace is already
 installed. Playwright does not perform this download from an npm install or
 postinstall script; `allowScripts` and `--ignore-scripts` do not affect it.
 
-The `@pizza-bot/*` workspace packages resolve to built `dist/` output. Run
+`@pizza-bot/core`, `@pizza-bot/logging`, and `@pizza-bot/plugin-api` resolve to
+built `dist/` output at runtime; the other workspace packages export their
+TypeScript source. Run
 `npm run build` once after a fresh clone or clean before starting an app directly
 from source. Every workspace build replaces its own `dist/` directory before
 emitting, so files for deleted or renamed sources cannot survive a pull or branch
@@ -235,8 +237,9 @@ branch with a label:
 
 1. Read the whole diff, `.github/` first. Every outside contributor's workflow
    runs wait for approval, and an approved run uses the fork's own copy of the
-   workflows: a fork that edits them could report passing CI checks itself. Then look hardest at what executes on its own: `package.json`
-   scripts and lockfiles, new dependencies, and test or build setup.
+   workflows: a fork that edits them could report passing CI checks itself.
+   Then look hardest at what executes on its own: `package.json` scripts and
+   lockfiles, new dependencies, and test or build setup.
 2. Approve the pull request's workflow runs and wait for the CI checks.
    Meanwhile its `agent-review` reads "Waiting for the safe-to-review label".
 3. Add the `safe-to-review` label. [`agent-review-fork.yml`](.github/workflows/agent-review-fork.yml)
