@@ -391,8 +391,10 @@ The flow (one file stored once, referenced everywhere):
    converts for images/documents on Bedrock, and LangChain's cross-provider lingua
    franca. This runs per-call and never mutates checkpoint state.
 4. **Render** — `GET /attachments/:id` streams the blob for the feed's image
-   thumbnail / document link (`resolveAttachmentSrc` maps `attachment://` → the
-   route). `messagesToUI` surfaces the reference blocks as file parts on hydration.
+   thumbnail / document link. The route needs the bearer token, so
+   `useAttachmentSrc` fetches it through the client and hands the view an object
+   URL for the `attachment://` reference. `messagesToUI` surfaces the reference
+   blocks as file parts on hydration.
 
 The MIME allow-set + size cap + the `attachment://` scheme are the pure, shared
 facts in `core/src/attachment.ts`, so the composer's `accept`, the upload route's
