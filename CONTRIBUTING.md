@@ -12,7 +12,7 @@ node -v            # need >= 24 (.nvmrc: `nvm use` / `fnm use`)
 npm install        # installs workspaces; better-sqlite3 uses a shipped prebuild
 npm run build      # required before running an app from a fresh clone
 npm run typecheck  # tsc across the whole project-reference graph
-npm test           # license-generator tests, then capped Turbo tests
+npm test           # scripts/*.test.mjs, then capped Turbo tests
 npm run lint       # eslint flat config
 npm run dev        # downloads Playwright's browser revision if it is not cached
 cp .env.example .env   # then fill in credentials for a model provider (see below)
@@ -28,7 +28,9 @@ it needs network access even when the rest of the workspace is already
 installed. Playwright does not perform this download from an npm install or
 postinstall script; `allowScripts` and `--ignore-scripts` do not affect it.
 
-The `@pizza-bot/*` workspace packages resolve to built `dist/` output. Run
+`@pizza-bot/core`, `@pizza-bot/logging`, and `@pizza-bot/plugin-api` resolve to
+built `dist/` output at runtime; the other workspace packages export their
+TypeScript source. Run
 `npm run build` once after a fresh clone or clean before starting an app directly
 from source. Every workspace build replaces its own `dist/` directory before
 emitting, so files for deleted or renamed sources cannot survive a pull or branch
