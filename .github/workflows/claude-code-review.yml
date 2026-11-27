@@ -128,7 +128,7 @@ jobs:
           # subagent tool the review skill starts its reviewers with, the read
           # tools, and the inline-comment MCP tool (started only when named here)
           # must all be listed. The npm/npx entries run the pull request's own
-          # code; that is safe only because the first step admits collaborator
+          # code; that is safe only because the job's `if:` admits collaborator
           # branches alone.
           #
           # Pinning the full model ID stops Claude Code from deriving a us.
