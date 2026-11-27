@@ -237,8 +237,9 @@ branch with a label:
 
 1. Read the whole diff, `.github/` first. Every outside contributor's workflow
    runs wait for approval, and an approved run uses the fork's own copy of the
-   workflows: a fork that edits them could report passing CI checks itself. Then look hardest at what executes on its own: `package.json`
-   scripts and lockfiles, new dependencies, and test or build setup.
+   workflows: a fork that edits them could report passing CI checks itself.
+   Then look hardest at what executes on its own: `package.json` scripts and
+   lockfiles, new dependencies, and test or build setup.
 2. Approve the pull request's workflow runs and wait for the CI checks.
    Meanwhile its `agent-review` reads "Waiting for the safe-to-review label".
 3. Add the `safe-to-review` label. [`agent-review-fork.yml`](.github/workflows/agent-review-fork.yml)
