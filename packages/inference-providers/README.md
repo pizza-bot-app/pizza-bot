@@ -7,8 +7,9 @@ covers the seam.
 ## Adding a model provider
 
 An OpenAI-compatible gateway or proxy is an `OpenAiCompatibleSpec` run by the
-shared `OpenAiCompatibleProvider`; see `src/providers/uberllm.ts` for the
-smallest one. Anything else implements `ModelProvider` directly.
+shared `OpenAiCompatibleProvider`; `OpenAiCompatibleSpec` in
+`src/providers/openai-compatible.ts` documents each field. Anything else
+implements `ModelProvider` directly.
 
 A provider pull request touches four files:
 
