@@ -18,7 +18,7 @@ import { ToolGrantsField } from "../tools/ToolGrantsField.js";
 export interface AgentEditorProps {
   agent: AgentDefinition | null;
   tools: ToolCatalogInfo;
-  models: Pick<ModelsInfo, "models">;
+  models: Pick<ModelsInfo, "models" | "providerLabels">;
   skills: SkillCatalogInfo;
   onSave: (definition: AgentDefinition) => Promise<void>;
   onGenerate: (prompt: string) => Promise<AgentDraft>;
@@ -204,6 +204,7 @@ export function AgentEditor({
           </p>
           <ModelCombobox
             models={models.models}
+            providerLabels={models.providerLabels}
             value={model}
             emptyOption={{ label: "Inherit conversation model" }}
             unavailableOption={

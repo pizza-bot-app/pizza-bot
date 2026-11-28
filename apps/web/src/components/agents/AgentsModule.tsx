@@ -26,7 +26,7 @@ import {
 export interface AgentsModuleProps {
   agents: AgentCatalogInfo;
   tools: ToolCatalogInfo;
-  models: Pick<ModelsInfo, "models">;
+  models: Pick<ModelsInfo, "models" | "providerLabels">;
   skills: SkillCatalogInfo;
   onCreate: (definition: AgentDefinition) => Promise<AgentDefinition>;
   onUpdate: (id: string, definition: AgentDefinition) => Promise<AgentDefinition>;
