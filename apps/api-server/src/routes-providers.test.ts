@@ -8,6 +8,7 @@ import type { ProviderModelPreferences } from "@pizza-bot/core";
 
 interface ProviderView {
   id: string;
+  label: string;
   configurable: boolean;
   availableWithoutConfig: boolean;
   authSchema?: Array<{
@@ -63,25 +64,16 @@ describe("provider routes", () => {
       body: JSON.stringify(body),
     });
 
-  it("lists all thirteen built-in providers with their authSchema", async () => {
+  it("lists the built-in providers with their label, availability, and authSchema", async () => {
     const providers = await list();
-    const ids = providers.map((p) => p.id).sort();
-    expect(ids).toEqual(["anthropic", "bedrock", "cheaperinference", "google", "litellm", "llmtr", "ollama", "openai", "openrouter", "opper", "requesty", "trustedrouter", "uberllm"]);
+    expect(providers.map((p) => p.id)).toEqual(expect.arrayContaining(["anthropic", "bedrock", "ollama"]));
     const anthropic = providers.find((p) => p.id === "anthropic")!;
+    expect(anthropic.label).toBe("Anthropic");
     expect(anthropic.configurable).toBe(true);
     expect(anthropic.availableWithoutConfig).toBe(false);
-    expect(providers.find((p) => p.id === "openai")!.availableWithoutConfig).toBe(false);
-    expect(providers.find((p) => p.id === "openrouter")!.availableWithoutConfig).toBe(false);
-    expect(providers.find((p) => p.id === "requesty")!.availableWithoutConfig).toBe(false);
-    expect(providers.find((p) => p.id === "opper")!.availableWithoutConfig).toBe(false);
-    expect(providers.find((p) => p.id === "uberllm")!.availableWithoutConfig).toBe(false);
-    expect(providers.find((p) => p.id === "cheaperinference")!.availableWithoutConfig).toBe(false);
-    expect(providers.find((p) => p.id === "trustedrouter")!.availableWithoutConfig).toBe(false);
-    expect(providers.find((p) => p.id === "llmtr")!.availableWithoutConfig).toBe(false);
-    expect(providers.find((p) => p.id === "google")!.availableWithoutConfig).toBe(false);
     expect(providers.find((p) => p.id === "ollama")!.availableWithoutConfig).toBe(true);
-    expect(providers.find((p) => p.id === "litellm")!.availableWithoutConfig).toBe(false);
     const bedrock = providers.find((p) => p.id === "bedrock")!;
+    expect(bedrock.label).toBe("Amazon Bedrock");
     expect(bedrock.configurable).toBe(true);
     expect(bedrock.availableWithoutConfig).toBe(false);
     expect(bedrock.authSchema?.[0]).toMatchObject({

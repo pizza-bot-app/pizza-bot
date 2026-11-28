@@ -27,6 +27,7 @@ const provider = (
   } = {},
 ): ProviderView => ({
   id,
+  label: id,
   configurable: options.configurable ?? true,
   availableWithoutConfig:
     options.availableWithoutConfig ?? options.configurable === false,
@@ -85,9 +86,9 @@ describe("availableModels", () => {
 
   it("removes models from unavailable providers and replaces their default", () => {
     const result = availableModels(models, [
-      { name: "bedrock", status: "connected", modelCount: 1 },
-      { name: "anthropic", status: "unavailable", modelCount: 0 },
-      { name: "openai", status: "connected", modelCount: 1 },
+      { name: "bedrock", label: "Amazon Bedrock", status: "connected", modelCount: 1 },
+      { name: "anthropic", label: "Anthropic", status: "unavailable", modelCount: 0 },
+      { name: "openai", label: "OpenAI", status: "connected", modelCount: 1 },
     ]);
 
     expect(result.models.map((model) => model.id)).toEqual(["bedrock:sonnet", "openai:gpt"]);
@@ -96,9 +97,9 @@ describe("availableModels", () => {
 
   it("returns no selectable models when every provider is unavailable", () => {
     const result = availableModels(models, [
-      { name: "bedrock", status: "unavailable", modelCount: 0 },
-      { name: "anthropic", status: "unavailable", modelCount: 0 },
-      { name: "openai", status: "unavailable", modelCount: 0 },
+      { name: "bedrock", label: "Amazon Bedrock", status: "unavailable", modelCount: 0 },
+      { name: "anthropic", label: "Anthropic", status: "unavailable", modelCount: 0 },
+      { name: "openai", label: "OpenAI", status: "unavailable", modelCount: 0 },
     ]);
 
     expect(result).toEqual({ models: [], default: "", automatic: "bedrock:sonnet" });
@@ -114,17 +115,10 @@ describe("model provider presentation", () => {
       .toEqual([["bedrock:sonnet", 0]]);
   });
 
-  it("formats provider identifiers for headings", () => {
-    expect(providerLabel("openai")).toBe("Open AI");
-    expect(providerLabel("openrouter")).toBe("OpenRouter");
-    expect(providerLabel("bedrock")).toBe("Amazon Bedrock");
-    expect(providerLabel("uberllm")).toBe("UberLLM");
-    expect(providerLabel("cheaperinference")).toBe("Cheaper Inference");
-    expect(providerLabel("trustedrouter")).toBe("TrustedRouter");
-    expect(providerLabel("llmtr")).toBe("LLMTR");
-    expect(providerLabel("litellm")).toBe("LiteLLM");
+  it("prefers the server's label and title-cases an unlabeled id", () => {
+    expect(providerLabel("bedrock", { bedrock: "Amazon Bedrock" })).toBe("Amazon Bedrock");
+    expect(providerLabel("google-vertex_ai", { bedrock: "Amazon Bedrock" })).toBe("Google Vertex Ai");
     expect(providerLabel("requesty")).toBe("Requesty");
-    expect(providerLabel("google-vertex_ai")).toBe("Google Vertex Ai");
   });
 });
 

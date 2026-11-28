@@ -17,19 +17,9 @@ export function groupModelsByProvider(models: ModelOption[]): ModelGroup[] {
   return Array.from(groups, ([provider, group]) => ({ provider, models: group }));
 }
 
-const PROVIDER_LABELS: Record<string, string> = {
-  bedrock: "Amazon Bedrock",
-  openai: "Open AI",
-  openrouter: "OpenRouter",
-  uberllm: "UberLLM",
-  cheaperinference: "Cheaper Inference",
-  trustedrouter: "TrustedRouter",
-  llmtr: "LLMTR",
-  litellm: "LiteLLM",
-};
-
-export function providerLabel(provider: string): string {
-  const known = PROVIDER_LABELS[provider.toLowerCase()];
+/** Falls back to the title-cased id for a provider the server sent no label for. */
+export function providerLabel(provider: string, labels?: Readonly<Record<string, string>>): string {
+  const known = labels?.[provider];
   if (known) return known;
   return provider
     .split(/[-_]/)

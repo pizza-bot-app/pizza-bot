@@ -10,7 +10,6 @@ import {
   X,
 } from "lucide-react";
 import type { StatusInfo } from "@/api-client";
-import { providerLabel } from "@/model-options";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { contextUsageDisplay } from "./context-usage.js";
 
@@ -144,7 +143,7 @@ function StatusIcon({
           <div className="statusbar-tip-servers">
             {providers.map((provider) => (
               <span key={provider.name} className="statusbar-tip-server">
-                ✓ {providerLabel(provider.name)}
+                ✓ {provider.label}
                 {` — ${provider.modelCount} model${provider.modelCount === 1 ? "" : "s"}`}
               </span>
             ))}

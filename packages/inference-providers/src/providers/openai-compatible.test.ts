@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HumanMessage } from "@langchain/core/messages";
+import { ModelRegistry } from "@pizza-bot/core";
 import { ModelsDevCatalogLoader } from "../models-dev.js";
 import { catalogHttpError } from "../catalog-error.js";
 import { OpenAiCompatibleProvider, type OpenAiCompatibleSpec } from "./openai-compatible.js";
@@ -43,6 +44,15 @@ afterEach(() => {
 });
 
 describe("OpenAiCompatibleProvider", () => {
+  it("registers under the spec's id and label and needs settings before it is available", () => {
+    const registry = new ModelRegistry();
+    registry.register(new OpenAiCompatibleProvider(SPEC));
+
+    expect(registry.listProviders()).toEqual([
+      expect.objectContaining({ id: "gateway", label: "Gateway", configurable: true, availableWithoutConfig: false }),
+    ]);
+  });
+
   it("reads common listing fields with the default reader", async () => {
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({
       data: [

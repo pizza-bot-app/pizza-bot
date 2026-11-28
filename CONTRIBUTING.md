@@ -42,10 +42,10 @@ without removing installed dependencies or the root Turbo cache. Use
 discarded; run `npm install` afterward.
 
 A running api-server needs access to at least one model provider; the CLI and a
-desktop app connected to a remote backend do not. Amazon Bedrock, Anthropic,
-Google Gemini, OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference,
-TrustedRouter, LLMTR, LiteLLM, and Ollama are supported as peer adapters.
-See [`.env.example`](.env.example). Without credentials for a selected provider,
+desktop app connected to a remote backend do not. The supported providers are
+listed under [Model providers](README.md#model-providers), and
+[`packages/inference-providers`](packages/inference-providers/README.md) covers
+adding one. See [`.env.example`](.env.example). Without credentials for a selected provider,
 the code builds and tests pass, but live runs fail at the first model call.
 
 ## How code ships

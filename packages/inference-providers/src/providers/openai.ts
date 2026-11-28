@@ -135,6 +135,7 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
 
 export class OpenAiLangChainModelProvider implements ModelProvider {
   readonly id = "openai";
+  readonly label = "OpenAI";
   readonly authSchema = AUTH_SCHEMA;
   private readonly models: ModelDescriptor[] | undefined;
   private readonly fetchFn: typeof fetch;

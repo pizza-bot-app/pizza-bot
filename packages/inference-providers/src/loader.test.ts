@@ -7,6 +7,16 @@ afterEach(() => {
 });
 
 describe("registerBuiltinProviders", () => {
+  it("registers each provider once, under a display label", async () => {
+    const registry = new ModelRegistry();
+
+    await registerBuiltinProviders(registry);
+
+    const providers = registry.listProviders();
+    expect(new Set(providers.map((p) => p.id)).size).toBe(providers.length);
+    for (const provider of providers) expect(provider.label.trim()).not.toBe("");
+  });
+
   it("registers a provider whose saved settings no longer validate", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const configs = {

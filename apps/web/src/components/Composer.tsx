@@ -353,6 +353,7 @@ export function Composer({
 
             <ModelCombobox
               models={models.models}
+              providerLabels={models.providerLabels}
               value={model}
               onChange={setModel}
               formatModelLabel={(option) => shortModelName(option.displayName)}
