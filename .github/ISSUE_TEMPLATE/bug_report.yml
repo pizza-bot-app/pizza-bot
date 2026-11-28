@@ -40,32 +40,11 @@ body:
     validations:
       required: true
 
-  - type: dropdown
-    id: provider
-    attributes:
-      label: Model provider
-      options:
-        - Amazon Bedrock
-        - Anthropic
-        - Google Gemini
-        - OpenAI
-        - OpenRouter
-        - Requesty
-        - Opper
-        - UberLLM
-        - Cheaper Inference
-        - TrustedRouter
-        - LLMTR
-        - LiteLLM
-        - Ollama
-        - Not reached / not applicable
-    validations:
-      required: true
-
   - type: input
     id: model
     attributes:
       label: Model ID
+      description: Include the provider prefix before the colon. Leave blank if the run never reached a model.
       placeholder: e.g. anthropic:claude-sonnet-5
 
   - type: input

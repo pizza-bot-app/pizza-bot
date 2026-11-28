@@ -133,6 +133,7 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
 
 export class GoogleLangChainModelProvider implements ModelProvider {
   readonly id = "google";
+  readonly label = "Google";
   private readonly aiApiBase: string;
   private readonly fetchFn: typeof fetch;
   private readonly modelsDev: ModelsDevCatalogLoader;

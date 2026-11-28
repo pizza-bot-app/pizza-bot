@@ -72,6 +72,7 @@ export interface OllamaProviderOptions {
 
 export class OllamaLangChainModelProvider implements ModelProvider {
   readonly id = "ollama";
+  readonly label = "Ollama";
   readonly authSchema = AUTH_SCHEMA;
   readonly availableWithoutConfig = true;
   private host: string;

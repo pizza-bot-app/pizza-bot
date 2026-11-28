@@ -16,6 +16,7 @@ import {
 function provider(overrides: Partial<ProviderView>): ProviderView {
   return {
     id: "example",
+    label: "Example",
     configurable: true,
     availableWithoutConfig: false,
     modelPreferences: { mode: "all", selected: [] },
@@ -128,7 +129,7 @@ describe("getProviderStatus", () => {
       getProviderStatus(
         provider({ id: "ollama", availableWithoutConfig: true }),
         undefined,
-        { name: "ollama", status: "unavailable", modelCount: 0 },
+        { name: "ollama", label: "Ollama", status: "unavailable", modelCount: 0 },
       ),
     ).toEqual({ label: "Unavailable", tone: "unavailable" });
   });

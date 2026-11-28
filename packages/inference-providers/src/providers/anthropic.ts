@@ -120,6 +120,7 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
 
 export class AnthropicLangChainModelProvider implements ModelProvider {
   readonly id = "anthropic";
+  readonly label = "Anthropic";
   readonly authSchema = AUTH_SCHEMA;
   private readonly models: ModelDescriptor[] | undefined;
   private readonly maxTokens: number;

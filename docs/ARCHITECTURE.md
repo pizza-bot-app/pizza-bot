@@ -672,18 +672,17 @@ rather than failing (§8).
 ### Model provider adapters
 
 The model seam (`core/model-provider.ts`) is provider-agnostic: `ModelProvider`
-(`listModels` + `buildModel(modelId) → BaseChatModel`), and a `ModelRegistry` keyed by
+(`id`, `label`, `listModels` + `buildModel(modelId) → BaseChatModel`), and a `ModelRegistry` keyed by
 the `provider:model` prefix. The composition root registers
 providers (`agent-host.ts` registers them through `registerBuiltinProviders`) and
-each turn carries its model as `configurable.model`. Amazon Bedrock, Anthropic,
-Google Gemini, OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference,
-TrustedRouter, LLMTR, LiteLLM, and Ollama are peer `ModelProvider` adapters;
-another provider can follow the same pattern without changing the runtime,
-transport, or frontend. Each adapter is a peer submodule under
+each turn carries its model as `configurable.model`. Every provider is a peer
+`ModelProvider` adapter, and `loader.ts` is the one list that registers them.
+Adding one changes no runtime, transport, or frontend code; the frontend renders
+the `label` each provider reports. Each adapter is a peer submodule under
 `packages/inference-providers/src/providers/<id>` (Bedrock keeps its own
 subdirectory for the shim's multiple files). Hosted OpenAI-compatible gateways
-(Requesty, Opper, UberLLM, Cheaper Inference, TrustedRouter, LLMTR) and self-hosted proxies
-(LiteLLM) are not adapters of their own: each is an `OpenAiCompatibleSpec`
+(such as Requesty) and self-hosted proxies (such as LiteLLM) are not adapters of
+their own: each is an `OpenAiCompatibleSpec`
 (base URL, env prefix, optional featured listing, a reader for its `/models`
 entries or its own discovery hook, and whether the key is optional) run by the
 shared `OpenAiCompatibleProvider`,

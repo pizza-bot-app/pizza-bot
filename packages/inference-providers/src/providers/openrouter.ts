@@ -98,6 +98,7 @@ const AUTH_SCHEMA: readonly ProviderAuthMethod[] = [
 
 export class OpenRouterLangChainModelProvider implements ModelProvider {
   readonly id = "openrouter";
+  readonly label = "OpenRouter";
   readonly authSchema = AUTH_SCHEMA;
   private readonly baseUrl: string;
   private readonly models: ModelDescriptor[] | undefined;
