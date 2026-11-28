@@ -4,15 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
-permissions:
-  # Write so UI screenshots can be committed to the ui-screenshots branch,
-  # the only way a comment can show an image.
-  contents: write
-  # Required to post findings and the verdict on the pull request.
-  pull-requests: write
-  issues: read
-  # Lets GitHub mint the OIDC token that AWS exchanges for role credentials.
-  id-token: write
+permissions: {}
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
@@ -24,6 +16,8 @@ jobs:
   # with a stale payload. Read the live state instead.
   draft-state:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
     outputs:
       draft: ${{ steps.pr.outputs.draft }}
     steps:
@@ -34,28 +28,33 @@ jobs:
           draft=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" --jq .draft)
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
 
-  # `agent-review` is a required status check on main, so this job must FAIL,
-  # never skip, when it cannot review: a job skipped by `if:` reports success.
-  # Drafts are the one skip, because a draft cannot merge and marking it ready
-  # re-runs the job. If the draft lookup fails, the review runs anyway.
-  agent-review:
+  # Runs the review session, which can write to its workspace; the verdict is
+  # enforced by agent-review, a separate job the session never touches.
+  # GitHub withholds secrets and the OIDC token from fork pull requests and
+  # gives Dependabot its own secret store, so neither can reach Bedrock. A
+  # fork is reviewed by agent-review-fork.yml once a maintainer labels it;
+  # Dependabot is admin-merged.
+  review:
+    name: Claude review session (gated by agent-review)
     needs: draft-state
-    if: ${{ !cancelled() && needs.draft-state.outputs.draft != 'true' }}
+    if: |
+      !cancelled() && needs.draft-state.outputs.draft != 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      # Write so UI screenshots can be committed to the ui-screenshots branch,
+      # the only way a comment can show an image.
+      contents: write
+      # Required to post inline findings on the pull request.
+      pull-requests: write
+      issues: read
+      # Lets GitHub mint the OIDC token that AWS exchanges for role credentials.
+      id-token: write
+    outputs:
+      result: ${{ steps.review.outputs.structured_output }}
     steps:
-      # GitHub withholds secrets and the OIDC token from fork pull requests and
-      # gives Dependabot its own secret store, so neither can reach Bedrock. A
-      # maintainer lands those by pushing the branch to this repository or by
-      # admin merge.
-      - name: Require a same-repository branch
-        if: |
-          github.event.pull_request.head.repo.full_name != github.repository ||
-          github.actor == 'dependabot[bot]'
-        run: |
-          echo "::error::Agent review runs only on branches pushed to this repository by a collaborator."
-          exit 1
-
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -65,8 +64,8 @@ jobs:
           node-version: 24
           cache: npm
 
-      # Trust boundary: only branches in this repository reach the steps below,
-      # and their authors already have write access, enough to push a workflow
+      # Trust boundary: only branches in this repository reach this job, and
+      # their authors already have write access, enough to push a workflow
       # that assumes the Bedrock role. The ordering and the subprocess scrub
       # keep credentials out of incidental output, not away from that code:
       # with id-token: write it can mint its own OIDC token, and the servers
@@ -100,6 +99,18 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: us-west-2
 
+      # The prompt's `--reporter=agent` leaves out vitest's GitHub reporter: the
+      # sandbox refuses its step summary write, and the warning reads as a failed run.
+      - id: prompt
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "text<<PROMPT_EOF"
+            sed "s|{{PR}}|$GITHUB_REPOSITORY/pull/$PR|g" .github/prompts/agent-review.md
+            echo "PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - id: review
         uses: anthropics/claude-code-action@v1
         env:
@@ -113,23 +124,12 @@ jobs:
           use_bedrock: "true"
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
-          # --reporter=agent leaves out vitest's GitHub reporter: the sandbox
-          # refuses its step summary write, and the warning reads as a failed run.
-          prompt: |
-            You are the required reviewer for ${{ github.repository }}/pull/${{ github.event.pull_request.number }}.
-            The checkout is installed and built. CI separately runs the full build, typecheck, lint, and test suite, so do not re-run them wholesale.
-
-            1. Invoke the `code-review:code-review` skill with args `--comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}`. Skip its eligibility checks: this run gates the merge, so always review the current head, even if Claude has already reviewed or commented on an earlier push. Post findings as inline comments, but no summary comment, not even the skill's "no issues found" one: the workflow posts your verdict and `summary`.
-            2. For each finding the review would rank important, try to confirm it by executing code: run the relevant tests with `npx vitest run --dir <workspace> --reporter=agent`, or write a small failing test (run it the same way) or `npx tsx` probe under `.agent-review/`. Live model calls are unavailable; use the scripted-model harness in tests/langgraph-compat when a probe needs the runtime.
-            3. Return verdict "block" if any important finding stands, whether it is confirmed by execution or clear from reading the code. Otherwise return "ship". Write `summary` for the pull request's readers: what was checked, what was run, and what was found.
-            4. In `files_reviewed`, list every changed file whose diff you read, by its repository path. Tests, snapshots, lockfiles, and images may be left out. The workflow fails a "ship" verdict that leaves out any other changed file.
-
-            Run every agent and task the review starts in the foreground, never with `run_in_background`, and wait for each to return before you continue: your verdict ends the session, so anything still running is lost. If the review did not finish (an agent failed, or you ran out of turns or time), return "block" and say which part went unreviewed; "ship" means the whole diff was reviewed.
+          prompt: ${{ steps.prompt.outputs.text }}
           # --allowedTools REPLACES the action's default tool set, so the
           # subagent tool the review skill starts its reviewers with, the read
           # tools, and the inline-comment MCP tool (started only when named here)
           # must all be listed. The npm/npx entries run the pull request's own
-          # code; that is safe only because the first step admits collaborator
+          # code; that is safe only because the job's `if:` admits collaborator
           # branches alone.
           #
           # Pinning the full model ID stops Claude Code from deriving a us.
@@ -155,70 +155,50 @@ jobs:
           pr: ${{ github.event.pull_request.number }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Fails closed: a run that ends without structured output (a refusal, the
-      # turn cap) blocks the merge just as a "block" verdict does.
+  # `agent-review` is a required status check on main, so this job must FAIL,
+  # never skip, when it cannot review: a job skipped by `if:` reports success.
+  # Two skips are safe. A draft cannot merge, and marking it ready re-runs the
+  # job. A fork's commit always carries agent-review-fork.yml's own blocking
+  # check, and branch protection fails if any agent-review on the commit does.
+  # If the draft lookup fails, the review runs anyway.
+  agent-review:
+    needs: [draft-state, review]
+    if: |
+      !cancelled() && needs.draft-state.outputs.draft != 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      RESULT: ${{ needs.review.outputs.result }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Refuse Dependabot
+        if: needs.review.result == 'skipped'
+        run: |
+          echo "::error::Dependabot's secret store cannot reach Bedrock, so a maintainer admin-merges its pull requests once CI passes."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      # Fails closed: a review that ends without structured output (a refusal,
+      # the turn cap, a failed job) blocks the merge just as a "block" verdict does.
       - name: Enforce verdict
         id: enforce
-        env:
-          RESULT: ${{ steps.review.outputs.structured_output }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_FILES_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
-        run: |
-          verdict=$(jq -r '.verdict // empty' <<<"$RESULT" 2>/dev/null || true)
-          summary=$(jq -r '.summary // empty' <<<"$RESULT" 2>/dev/null || true)
-          echo "### Agent review: ${verdict:-no verdict}" >> "$GITHUB_STEP_SUMMARY"
-          echo "$summary" >> "$GITHUB_STEP_SUMMARY"
-          case "$verdict" in
-            ship) ;;
-            block) echo "::error::Agent review blocked: $summary" && exit 1 ;;
-            *) echo "::error::Agent review returned no verdict" && exit 1 ;;
-          esac
-          # "The whole diff was reviewed" is the model's claim; hold it to the
-          # pull request's actual file list.
-          changed=$(gh api --paginate "$PR_FILES_URL" --jq '.[] | select(.status != "removed") | .filename' \
-            | { grep -vE '(\.test\.tsx?|\.snap|(^|/)package-lock\.json|\.(png|jpe?g|gif|webp|ico))$' || true; } | sort -u)
-          reviewed=$(jq -r '.files_reviewed[]?' <<<"$RESULT" | sort -u)
-          missing=$(comm -23 <(printf '%s\n' "$changed") <(printf '%s\n' "$reviewed") | sed '/^$/d')
-          if [ -n "$missing" ]; then
-            { echo; echo "Not reviewed:"; sed 's/^/- /' <<<"$missing"; } \
-              | tee "$RUNNER_TEMP/not-reviewed.md" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Agent review returned ship without reviewing: $(paste -sd, - <<<"$missing")"
-            exit 1
-          fi
-          echo "Agent review: ship"
+        run: bash .github/scripts/agent-review-verdict.sh enforce
 
       # One comment per pull request, found by its marker and rewritten on each
       # push. Posting is best effort: the check alone gates the merge.
       - name: Post verdict
-        if: ${{ !cancelled() && steps.review.outcome != 'skipped' }}
+        if: ${{ !cancelled() && needs.review.result != 'skipped' }}
         continue-on-error: true
         env:
-          RESULT: ${{ steps.review.outputs.structured_output }}
           GATE: ${{ steps.enforce.outcome }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          marker='<!-- agent-review -->'
-          status=blocked
-          if [ "$GATE" = success ]; then status=passed; fi
-          summary=$(jq -r '.summary // empty' <<<"$RESULT" 2>/dev/null || true)
-          {
-            echo "$marker"
-            echo "## Agent review: $status"
-            echo
-            printf '%s\n' "${summary:-The review ended without a verdict.}"
-            if [ -f "$RUNNER_TEMP/not-reviewed.md" ]; then cat "$RUNNER_TEMP/not-reviewed.md"; fi
-            echo
-            echo "Commit $HEAD_SHA, [workflow run]($RUN_URL)"
-          } > "$RUNNER_TEMP/verdict.md"
-          comments="repos/$GITHUB_REPOSITORY/issues"
-          id=$(gh api --paginate "$comments/$PR/comments" \
-            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" \
-            | head -n 1)
-          if [ -n "$id" ]; then
-            gh api --method PATCH "$comments/comments/$id" -F body=@"$RUNNER_TEMP/verdict.md" --silent
-          else
-            gh api --method POST "$comments/$PR/comments" -F body=@"$RUNNER_TEMP/verdict.md" --silent
-          fi
+        run: bash .github/scripts/agent-review-verdict.sh post

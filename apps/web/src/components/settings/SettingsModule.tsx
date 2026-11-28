@@ -14,7 +14,6 @@ import type { ProviderView, ModelsInfo, StatusInfo } from "@/api-client";
 import { ModuleHeader } from "../ModuleHeader.js";
 import { getProviderStatus, ProvidersSettings, type LoadFieldOptions } from "./ProvidersSettings.js";
 import { L } from "../../lexicon.js";
-import { providerLabel } from "../../model-options.js";
 import type { ThemePreference } from "../../theme-storage.js";
 import type { DesktopConnection } from "../../use-desktop-connection.js";
 import type { ToolCallLimitKey } from "../../use-settings.js";
@@ -247,14 +246,14 @@ export function SettingsModule({
                     }`}
                     aria-current={selectedProviderId === provider.id ? "page" : undefined}
                     onClick={() => setProviderId(provider.id)}
-                    title={`${providerLabel(provider.id)}: ${status.label}`}
-                    aria-label={`${providerLabel(provider.id)}: ${status.label}`}
+                    title={`${provider.label}: ${status.label}`}
+                    aria-label={`${provider.label}: ${status.label}`}
                   >
                     <span
                       className={`settings-provider-status-dot ${status.tone}`}
                       aria-hidden="true"
                     />
-                    <span>{providerLabel(provider.id)}</span>
+                    <span>{provider.label}</span>
                   </button>
                 );
               })}

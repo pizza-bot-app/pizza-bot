@@ -8,9 +8,8 @@ npm install
 npm run build
 ```
 
-A running backend needs access to at least one model provider. Configure Amazon
-Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter, Requesty, Opper, UberLLM,
-Cheaper Inference, TrustedRouter, LiteLLM, or Ollama under **Settings > Providers**.
+A running backend needs access to at least one model provider. Configure one of
+the [supported providers](../README.md#model-providers) under **Settings > Providers**.
 Desktop-managed secrets are protected with Electron
 `safeStorage`; a standalone server stores environment-variable references
 rather than secret values.

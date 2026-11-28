@@ -12,6 +12,7 @@ interface McpServerStatus {
 
 interface InferenceProviderStatus {
   name: string;
+  label: string;
   status: "connected" | "unavailable";
   modelCount: number;
 }
@@ -50,6 +51,7 @@ export function statusRoutes(host: AgentHost): Hono {
         host.providerConfigs.getConfig(provider.id) !== undefined;
       return {
         name: provider.id,
+        label: provider.label,
         status: configured && modelCount > 0 ? "connected" : "unavailable",
         modelCount,
       };
@@ -84,10 +86,14 @@ export function statusRoutes(host: AgentHost): Hono {
   app.get("/models", async (c) => {
     const includeDisabled = c.req.query("include_disabled") === "true";
     const refresh = c.req.query("refresh") === "true";
-    const catalog = await host.listModelCatalog(includeDisabled, refresh);
+    const [catalog, providerRows] = await Promise.all([
+      host.listModelCatalog(includeDisabled, refresh),
+      host.listProviders(),
+    ]);
     return c.json({
       models: catalog.models,
       providers: catalog.providers,
+      providerLabels: Object.fromEntries(providerRows.map((provider) => [provider.id, provider.label])),
       default: host.modelId,
       automatic: host.providerConfigs.getAutomaticModel() ?? null,
     });

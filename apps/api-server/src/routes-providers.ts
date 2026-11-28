@@ -16,6 +16,7 @@ type RedactedValue = { hasValue: boolean; available?: boolean } | string;
 
 interface ProviderView {
   id: string;
+  label: string;
   configurable: boolean;
   availableWithoutConfig: boolean;
   authSchema?: readonly ProviderAuthMethod[];
@@ -52,6 +53,7 @@ export function providerRoutes(host: AgentHost): Hono {
       const dynamic = dynamicOptionKeys(p.authSchema);
       return {
         id: p.id,
+        label: p.label,
         configurable: p.configurable,
         availableWithoutConfig: p.availableWithoutConfig,
         ...(p.authSchema ? { authSchema: p.authSchema } : {}),

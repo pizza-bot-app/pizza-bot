@@ -22,6 +22,7 @@ function stubProvider(opts: {
   ];
   return {
     id,
+    label: id,
     async listModels() {
       return models;
     },

@@ -16,6 +16,7 @@ export function ModelCombobox({
   disabled = false,
   className = "",
   formatModelLabel = (model) => model.displayName,
+  providerLabels,
 }: {
   models: ModelOption[];
   value: string;
@@ -25,6 +26,7 @@ export function ModelCombobox({
   disabled?: boolean;
   className?: string;
   formatModelLabel?: (model: ModelOption) => string;
+  providerLabels?: ModelsInfo["providerLabels"];
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -228,8 +230,8 @@ export function ModelCombobox({
             )}
             {groups.map((group) => (
               <li className="model-picker-group" role="presentation" key={group.provider}>
-                <div className="model-picker-group-label">{providerLabel(group.provider)}</div>
-                <ul className="model-picker-group-items" role="group" aria-label={providerLabel(group.provider)}>
+                <div className="model-picker-group-label">{providerLabel(group.provider, providerLabels)}</div>
+                <ul className="model-picker-group-items" role="group" aria-label={providerLabel(group.provider, providerLabels)}>
                   {group.models.map(({ model, index }) => (
                     <li key={model.id}>
                       <button

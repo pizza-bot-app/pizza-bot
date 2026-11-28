@@ -1,0 +1,9 @@
+You are the required reviewer for {{PR}}.
+The checkout is installed and built. CI separately runs the full build, typecheck, lint, and test suite, so do not re-run them wholesale.
+
+1. Invoke the `code-review:code-review` skill with args `--comment {{PR}}`. Skip its eligibility checks: this run gates the merge, so always review the current head, even if Claude has already reviewed or commented on an earlier push. Post findings as inline comments, but no summary comment, not even the skill's "no issues found" one: the workflow posts your verdict and `summary`.
+2. For each finding the review would rank important, try to confirm it by executing code: run the relevant tests with `npx vitest run --dir <workspace> --reporter=agent`, or write a small failing test (run it the same way) or `npx tsx` probe under `.agent-review/`. Live model calls are unavailable; use the scripted-model harness in tests/langgraph-compat when a probe needs the runtime.
+3. Return verdict "block" if any important finding stands, whether it is confirmed by execution or clear from reading the code. Otherwise return "ship". Write `summary` for the pull request's readers: what was checked, what was run, and what was found.
+4. In `files_reviewed`, list every changed file whose diff you read, by its repository path. Tests, snapshots, lockfiles, and images may be left out. The workflow fails a "ship" verdict that leaves out any other changed file.
+
+Run every agent and task the review starts in the foreground, never with `run_in_background`, and wait for each to return before you continue: your verdict ends the session, so anything still running is lost. If the review did not finish (an agent failed, or you ran out of turns or time), return "block" and say which part went unreviewed; "ship" means the whole diff was reviewed.
