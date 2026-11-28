@@ -227,6 +227,7 @@ describe("useStatus polling", () => {
 describe("useProvidersAdmin save", () => {
   const configuredProvider: ProviderView = {
     id: "anthropic",
+    label: "Anthropic",
     configurable: true,
     availableWithoutConfig: false,
     modelPreferences: { mode: "selected", selected: ["claude-sonnet"] },

@@ -417,8 +417,10 @@ The flow (one file stored once, referenced everywhere):
    converts for images/documents on Bedrock, and LangChain's cross-provider lingua
    franca. This runs per-call and never mutates checkpoint state.
 4. **Render** — `GET /attachments/:id` streams the blob for the feed's image
-   thumbnail / document link (`resolveAttachmentSrc` maps `attachment://` → the
-   route). `messagesToUI` surfaces the reference blocks as file parts on hydration.
+   thumbnail / document link. The route needs the bearer token, so
+   `useAttachmentSrc` fetches it through the client and hands the view an object
+   URL for the `attachment://` reference. `messagesToUI` surfaces the reference
+   blocks as file parts on hydration.
 
 The MIME allow-set + size cap + the `attachment://` scheme are the pure, shared
 facts in `core/src/attachment.ts`, so the composer's `accept`, the upload route's
@@ -842,18 +844,16 @@ rather than failing (§8).
 ### Model provider adapters
 
 The model seam (`core/model-provider.ts`) is provider-agnostic: `ModelProvider`
-(`listModels` + `buildModel(modelId) → BaseChatModel`), and a `ModelRegistry` keyed by
+(`id`, `label`, `listModels` + `buildModel(modelId) → BaseChatModel`), and a `ModelRegistry` keyed by
 the `provider:model` prefix. The composition root registers
 providers (`agent-host.ts` registers them through `registerBuiltinProviders`) and
-each turn carries its model as `configurable.model`. Amazon Bedrock, Anthropic,
-Google Gemini, OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference,
-TrustedRouter, LiteLLM, and Ollama are peer `ModelProvider` adapters;
-another provider can follow the same pattern without changing the runtime,
-transport, or frontend. Each adapter is a peer submodule under
+each turn carries its model as `configurable.model`. Every provider is a peer
+`ModelProvider` adapter, and `loader.ts` is the one list that registers them.
+Adding one changes no runtime, transport, or frontend code; the frontend renders
+the `label` each provider reports. Each adapter is a peer submodule under
 `packages/inference-providers/src/providers/<id>` (Bedrock keeps its own
 subdirectory for the shim's multiple files). Hosted OpenAI-compatible gateways
-(Requesty, Opper, UberLLM, Cheaper Inference, TrustedRouter) and self-hosted proxies
-(LiteLLM) are not adapters of their own: each is an `OpenAiCompatibleSpec`
+and self-hosted proxies are not adapters of their own: each is an `OpenAiCompatibleSpec`
 (base URL, env prefix, optional featured listing, a reader for its `/models`
 entries or its own discovery hook, and whether the key is optional) run by the
 shared `OpenAiCompatibleProvider`,

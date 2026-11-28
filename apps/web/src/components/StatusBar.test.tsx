@@ -51,7 +51,7 @@ function statusWithMcp(
   servers: StatusInfo["mcp"]["servers"],
 ): StatusInfo {
   const status = statusWithProviders([
-    { name: "bedrock", status: "connected", modelCount: 1 },
+    { name: "bedrock", label: "Amazon Bedrock", status: "connected", modelCount: 1 },
   ]);
   const loaded = servers.filter((server) => server.status === "loaded").length;
   const disabled = servers.filter((server) => server.status === "disabled").length;
@@ -101,9 +101,9 @@ describe("StatusBar", () => {
       false,
       true,
       statusWithProviders([
-        { name: "bedrock", status: "connected", modelCount: 3 },
-        { name: "anthropic", status: "unavailable", modelCount: 0 },
-        { name: "ollama", status: "connected", modelCount: 2 },
+        { name: "bedrock", label: "Amazon Bedrock", status: "connected", modelCount: 3 },
+        { name: "anthropic", label: "Anthropic", status: "unavailable", modelCount: 0 },
+        { name: "ollama", label: "Ollama", status: "connected", modelCount: 2 },
       ]),
     );
 
@@ -117,8 +117,8 @@ describe("StatusBar", () => {
       false,
       true,
       statusWithProviders([
-        { name: "bedrock", status: "unavailable", modelCount: 0 },
-        { name: "ollama", status: "unavailable", modelCount: 0 },
+        { name: "bedrock", label: "Amazon Bedrock", status: "unavailable", modelCount: 0 },
+        { name: "ollama", label: "Ollama", status: "unavailable", modelCount: 0 },
       ]),
     );
 

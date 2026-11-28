@@ -93,10 +93,10 @@ frontend consumes them through the `@langchain/langgraph-sdk`
 
 ## Testing
 
-- **`npm test` is the supported entrypoint** — it runs the license-generator
-  tests, then `turbo run test --concurrency=2`; the cap is deliberate (uncapped,
-  the parallel vitest+esbuild workers can exhaust file descriptors / memory and
-  fail en masse). CI runs the same command.
+- **`npm test` is the supported entrypoint** — it runs the release-tooling
+  tests in `scripts/*.test.mjs`, then `turbo run test --concurrency=2`; the cap
+  is deliberate (uncapped, the parallel vitest+esbuild workers can exhaust file
+  descriptors / memory and fail en masse). CI runs the same command.
 - For a tight iteration loop, run one workspace directly:
   `npx vitest run --dir packages/<pkg>` (or `--dir apps/web`).
 - Typecheck a package with `npx tsc --noEmit -p <path>/tsconfig.json`, or the
@@ -210,10 +210,11 @@ For example:
 A fresh worktree needs its own `npm install` before building or testing;
 otherwise workspace imports can resolve against stale output from another
 checkout. Run `npm run build` before starting any application entrypoint:
-`@pizza-bot/*` imports resolve to their built `dist/` output, while `typecheck`
-and `test` build only their task dependencies. Keep the affected tests and
-typecheck green, and run the full CI checks before opening a PR. Do not merge to
-`main` or push a branch unless the repository owner asks.
+`@pizza-bot/core`, `logging`, and `plugin-api` resolve to their built `dist/`
+output, while `typecheck` and `test` build only their task dependencies. Keep
+the affected tests and typecheck green, and run the full CI checks before
+opening a PR. Do not merge to `main` or push a branch unless the repository
+owner asks.
 
 On macOS, `gh` credentials may be stored in Keychain and unavailable to
 sandboxed commands. If `gh auth status` or another `gh` command reports an

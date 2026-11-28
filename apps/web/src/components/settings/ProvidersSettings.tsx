@@ -17,7 +17,6 @@ import type {
 } from "@pizza-bot/core";
 import { isEnvReference } from "@pizza-bot/core";
 import { L } from "../../lexicon.js";
-import { providerLabel } from "../../model-options.js";
 import { ModelCombobox } from "../ModelCombobox.js";
 import { useAppToast } from "../AppToast.js";
 
@@ -156,7 +155,7 @@ function ProviderSummary({
     <button type="button" className="settings-provider-summary" onClick={onSelect}>
       <span className="settings-provider-summary-main">
         <span className="settings-provider-summary-heading">
-          <span className="settings-provider-name">{providerLabel(provider.id)}</span>
+          <span className="settings-provider-name">{provider.label}</span>
           <span className={`provenance-badge ${status.tone}`}>{status.label}</span>
         </span>
         <span className="settings-row-hint">{modelSummary}</span>
@@ -204,6 +203,7 @@ function DefaultModelRow({
       <ModelCombobox
         className="settings-provider-default"
         models={models.models}
+        providerLabels={models.providerLabels}
         value={defaultModel ?? ""}
         emptyOption={{
           label: `${L.defaultModelServerFallback}${automaticModel ? ` - ${automaticModel.displayName}` : ""}`,
@@ -322,7 +322,7 @@ function ProviderRow({
     return (
       <div className="settings-provider">
         <div className="settings-provider-head">
-          <span className="settings-provider-name">{providerLabel(provider.id)}</span>
+          <span className="settings-provider-name">{provider.label}</span>
           <span className="provenance-badge">{L.providerEnvBadge}</span>
         </div>
         <p className="settings-row-hint">{L.providerEnvNote}</p>
@@ -367,11 +367,11 @@ function ProviderRow({
         { method: method.id, values: out },
         modelPreferences,
       );
-      notify({ title: `${providerLabel(provider.id)} saved`, tone: "success" });
+      notify({ title: `${provider.label} saved`, tone: "success" });
     } catch (e) {
       setError(errorMessage(e) ?? "Save failed");
       notify({
-        title: `Could not save ${providerLabel(provider.id)}`,
+        title: `Could not save ${provider.label}`,
         description: errorMessage(e),
         tone: "error",
       });
@@ -387,11 +387,11 @@ function ProviderRow({
       await onRemove(provider.id);
       setValues(seedValues(method, undefined));
       setModelPreferences({ mode: "all", selected: [] });
-      notify({ title: `${providerLabel(provider.id)} removed`, tone: "success" });
+      notify({ title: `${provider.label} removed`, tone: "success" });
     } catch (e) {
       setError(errorMessage(e) ?? "Remove failed");
       notify({
-        title: `Could not remove ${providerLabel(provider.id)}`,
+        title: `Could not remove ${provider.label}`,
         description: errorMessage(e),
         tone: "error",
       });
@@ -403,7 +403,7 @@ function ProviderRow({
   return (
     <div className="settings-provider">
       <div className="settings-provider-head">
-        <span className="settings-provider-name">{providerLabel(provider.id)}</span>
+        <span className="settings-provider-name">{provider.label}</span>
         {(configured || status.tone === "error") && (
           <span className={`provenance-badge ${status.tone}`}>{status.label}</span>
         )}

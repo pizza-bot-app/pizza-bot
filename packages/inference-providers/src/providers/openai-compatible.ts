@@ -84,6 +84,7 @@ class OpenAiCompatibleBuildError extends Error {
 
 export class OpenAiCompatibleProvider implements ModelProvider {
   readonly id: string;
+  readonly label: string;
   readonly authSchema: readonly ProviderAuthMethod[];
   private readonly models: ModelDescriptor[] | undefined;
   private readonly fetchFn: typeof fetch;
@@ -98,6 +99,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
 
   constructor(private readonly spec: OpenAiCompatibleSpec, opts: OpenAiCompatibleProviderOptions = {}) {
     this.id = spec.id;
+    this.label = spec.label;
     const apiKeyField: ProviderAuthField = {
       key: "apiKey",
       label: `${spec.label} API key`,

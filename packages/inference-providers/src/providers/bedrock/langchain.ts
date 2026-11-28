@@ -76,6 +76,7 @@ class BedrockBuildError extends Error {
 
 export class BedrockLangChainModelProvider implements ModelProvider {
   readonly id = "bedrock";
+  readonly label = "Amazon Bedrock";
   readonly authSchema: readonly ProviderAuthMethod[];
   private readonly defaultRegion: string;
   private readonly models: ModelDescriptor[] | undefined;

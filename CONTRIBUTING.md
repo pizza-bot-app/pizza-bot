@@ -12,7 +12,7 @@ node -v            # need >= 24 (.nvmrc: `nvm use` / `fnm use`)
 npm install        # installs workspaces; better-sqlite3 uses a shipped prebuild
 npm run build      # required before running an app from a fresh clone
 npm run typecheck  # tsc across the whole project-reference graph
-npm test           # license-generator tests, then capped Turbo tests
+npm test           # scripts/*.test.mjs, then capped Turbo tests
 npm run lint       # eslint flat config
 npm run dev        # downloads Playwright's browser revision if it is not cached
 cp .env.example .env   # then fill in credentials for a model provider (see below)
@@ -28,7 +28,9 @@ it needs network access even when the rest of the workspace is already
 installed. Playwright does not perform this download from an npm install or
 postinstall script; `allowScripts` and `--ignore-scripts` do not affect it.
 
-The `@pizza-bot/*` workspace packages resolve to built `dist/` output. Run
+`@pizza-bot/core`, `@pizza-bot/logging`, and `@pizza-bot/plugin-api` resolve to
+built `dist/` output at runtime; the other workspace packages export their
+TypeScript source. Run
 `npm run build` once after a fresh clone or clean before starting an app directly
 from source. Every workspace build replaces its own `dist/` directory before
 emitting, so files for deleted or renamed sources cannot survive a pull or branch
@@ -40,15 +42,15 @@ without removing installed dependencies or the root Turbo cache. Use
 discarded; run `npm install` afterward.
 
 A running api-server needs access to at least one model provider; the CLI and a
-desktop app connected to a remote backend do not. Amazon Bedrock, Anthropic,
-Google Gemini, OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference,
-TrustedRouter, LiteLLM, and Ollama are supported as peer adapters.
-See [`.env.example`](.env.example). Without credentials for a selected provider,
+desktop app connected to a remote backend do not. The supported providers are
+listed under [Model providers](README.md#model-providers), and
+[`packages/inference-providers`](packages/inference-providers/README.md) covers
+adding one. See [`.env.example`](.env.example). Without credentials for a selected provider,
 the code builds and tests pass, but live runs fail at the first model call.
 
 ## How code ships
 
-Four workflows ship code, and only one of them publishes anything. Two more
+Four workflows ship code, and only one of them publishes anything. Three more
 review it and publish nothing — see [Claude review](#claude-review).
 
 ```
@@ -63,11 +65,15 @@ PULL REQUEST ──────────────────────�
 
   claude-code-review.yml
        agent-review     Claude reviews, runs the code, screenshots UI   required
-                        same-repo branches only; forks: see below
+                        same-repo branches only
+
+  agent-review-fork.yml
+       agent-review     the same review of a fork, once a maintainer
+                        adds the safe-to-review label; no screenshots
 
 @claude MENTION ─────────────────────────────────────────────────────────────
   claude.yml            in a comment, a review, or a new issue. Answers in a
-                        comment; the only path that reaches a fork's pull request
+                        comment
 
 MERGE TO main ───────────────────────────────────────────────────────────────
   ci.yml, again. Nothing is published: no installers, no image, no release.
@@ -169,23 +175,26 @@ check on `block` or when the review could not finish. Findings arrive as inline
 comments; the verdict and the reviewer's summary go in a single comment that each
 push rewrites.
 
-Two workflows, split by what GitHub is willing to hand a run:
+Three workflows, split by what GitHub is willing to hand a run:
 
 | Workflow | Fires on | Reaches a fork's pull request |
 | --- | --- | --- |
-| [`claude-code-review.yml`](.github/workflows/claude-code-review.yml) (`agent-review`) | a pull request opening, a push to it, or a draft marked ready | no |
-| [`claude.yml`](.github/workflows/claude.yml) | `@claude` in a comment, a review, or an issue | yes |
+| [`claude-code-review.yml`](.github/workflows/claude-code-review.yml) (`agent-review`) | a pull request opening, a push to it, or a draft marked ready | no, skips it |
+| [`agent-review-fork.yml`](.github/workflows/agent-review-fork.yml) (`agent-review`) | a fork's pull request opening or a push to it (blocks), and a maintainer adding the `safe-to-review` label (reviews) | yes, by design |
+| [`claude.yml`](.github/workflows/claude.yml) | `@claude` in a comment, a review, or an issue | reads it, never runs it |
 
 That split is forced rather than chosen. GitHub withholds secrets and the OIDC
 token from a run triggered by a fork's pull request, so the automatic review
-cannot authenticate to Bedrock there. `agent-review` fails at its
-same-repository step rather than skipping, because a skipped required check
-reports success; see
-[Pull requests from forks](#pull-requests-from-forks) for how those land. Comment
-and review events fire in this repository's context and keep full access, so
-`@claude` can still read and comment on an outside contributor's branch.
-Dependabot pull requests fail `agent-review` the same way, because Dependabot gets
-its own secret store; `audit.yml` already covers a lockfile bump, so a maintainer
+cannot authenticate to Bedrock there. `claude-code-review.yml` skips a fork,
+which on its own would report success, so `agent-review-fork.yml` puts a
+blocking `agent-review` on every fork commit until a labeled review passes;
+branch protection fails the check if any `agent-review` on the commit fails. See
+[Pull requests from forks](#pull-requests-from-forks) for how those land. Comment,
+review, and `pull_request_target` events fire in this repository's context and
+keep full access, so `@claude` can still read and comment on an outside
+contributor's branch, and a label can start the full review.
+Dependabot pull requests fail `agent-review`, because Dependabot gets its own
+secret store; `audit.yml` already covers a lockfile bump, so a maintainer
 admin-merges them once the CI checks pass.
 
 Both workflows pin `global.anthropic.claude-opus-5-5`. Pinning the full model ID
@@ -222,31 +231,43 @@ decision a collaborator makes.
 ### Pull requests from forks
 
 An outside contributor's pull request is merged as-is: it shows as merged, and its
-commits land on `main` under the contributor's own authorship. Because
-`agent-review` cannot run on a fork, a maintainer vouches for the branch first:
+commits land on `main` under the contributor's own authorship. Because the
+automatic `agent-review` cannot run on a fork, a maintainer vouches for the
+branch with a label:
 
-1. Approve the pull request's workflow runs if GitHub asks (first-time
-   contributors), and wait for the CI checks.
-2. Read the whole diff. Before running it with credentials, look hardest at what
-   executes on its own: anything under `.github/`, `package.json` scripts and
-   lockfiles, new dependencies, and test or build setup. The mirrored run uses the
-   branch's own copy of the workflows, and code-owner review gates only the merge,
-   not the run.
-3. Mirror the exact head commit to this repository and open a pull request from
-   it, which runs `agent-review` with full access:
+1. Read the whole diff, `.github/` first. Every outside contributor's workflow
+   runs wait for approval, and an approved run uses the fork's own copy of the
+   workflows: a fork that edits them could report passing CI checks itself.
+   Then look hardest at what executes on its own: `package.json` scripts and
+   lockfiles, new dependencies, and test or build setup.
+2. Approve the pull request's workflow runs and wait for the CI checks.
+   Meanwhile its `agent-review` reads "Waiting for the safe-to-review label".
+3. Add the `safe-to-review` label. [`agent-review-fork.yml`](.github/workflows/agent-review-fork.yml)
+   installs, builds, and reviews the exact commit the label was added to, with
+   the action's `restrict_untrusted_prs` turned off so the review can run tests,
+   then sets that same `agent-review` to its verdict, with the verdict comment
+   and inline findings as on any other pull request. A push to the branch,
+   including updating it from `main`, removes the label and cancels a review
+   still running, so each new commit needs a fresh read and label.
+4. Check that the commit will credit the contributor:
    ```bash
-   git fetch origin pull/<n>/head:review/pr-<n>
-   git push origin review/pr-<n>
-   gh pr create --head review/pr-<n> --title "Review mirror of #<n>" --body "Runs agent-review for #<n>. Do not merge."
+   gh api repos/pizza-bot-app/pizza-bot/commits/<sha> --jq .author.login
    ```
-4. Merge the contributor's pull request with a merge commit once its checks pass,
-   then close the mirror and delete `review/pr-<n>`. The contributor's own
-   `agent-review` run fails at the same-repository step; if the mirror's passing
-   result does not replace it there, merge as an administrator once the mirror's
-   review passes.
+   An empty result means the author email is not a verified address on any
+   GitHub account. The commit then lands under their name but without a link to
+   their profile, and they don't appear in the contributor list. Ask them to add
+   that address to their GitHub account, which links past commits too, or to
+   recommit with an address it already has.
+5. Merge with a merge commit once the checks pass.
+
+Only someone with write access can start a review: triage access can add a
+label, and the workflow refuses it. The fork's code runs with the Bedrock role,
+the same exposure as any collaborator's branch. The job that runs it holds no
+token that can write code or checks; a separate job that never runs it reports
+the verdict.
 
 If a maintainer adds commits, push them to the contributor's branch first (with
-"Allow edits by maintainers" on), then mirror that head; rebasing keeps the
+"Allow edits by maintainers" on), then label that head; rebasing keeps the
 contributor as the author of their commits.
 
 ### Bedrock trust setup
@@ -273,7 +294,7 @@ scoped to model invocation and its CloudTrail history is only GitHub Actions.
    ID appears only in the trust policy and inside that secret, keeping it out of
    this public repository.
 
-The subject wildcard is load-bearing: an automatic review presents
+The subject wildcard is load-bearing: an automatic or labeled review presents
 `repo:pizza-bot-app/pizza-bot:pull_request` while a comment-triggered run presents
 `repo:pizza-bot-app/pizza-bot:ref:refs/heads/main`. Narrowing it to either one
 alone breaks the other workflow.
@@ -535,6 +556,8 @@ See AGENTS.md → "Layering discipline" and ARCHITECTURE §2/§11 for the ration
 
 - Work on a branch off `main`; keep each commit a coherent, self-contained step
   with a clear message.
+- Commit with an email address verified on your GitHub account (or its
+  `noreply` address), so the merged commits are credited to your profile.
 - Keep the tree green — run the CI checks (or at least the affected workspaces'
   `vitest` + `tsc`) before pushing.
 - For changes at a seam (the runtime↔event mapping, the protocol types, the UI

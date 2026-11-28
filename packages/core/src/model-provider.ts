@@ -241,6 +241,7 @@ export interface ResolvedProviderConfig {
 
 export interface ModelProvider {
   readonly id: string;
+  readonly label: string;
   listModels(): Promise<ModelDescriptor[]>;
   buildModel(modelId: string): Promise<BaseChatModel>;
   readonly authSchema?: readonly ProviderAuthMethod[];
@@ -524,6 +525,7 @@ export class ModelRegistry {
       const configurable = (p.authSchema?.length ?? 0) > 0;
       return {
         id: p.id,
+        label: p.label,
         configurable,
         availableWithoutConfig: !configurable || p.availableWithoutConfig === true,
         ...(p.authSchema ? { authSchema: p.authSchema } : {}),
@@ -544,6 +546,7 @@ function catalogError(cause: unknown): ModelCatalogError {
 
 export interface ProviderInfo {
   id: string;
+  label: string;
   configurable: boolean;
   availableWithoutConfig: boolean;
   authSchema?: readonly ProviderAuthMethod[];

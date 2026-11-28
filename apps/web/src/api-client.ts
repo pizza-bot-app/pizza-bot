@@ -888,6 +888,7 @@ export interface StatusInfo {
     total: number;
     providers: Array<{
       name: string;
+      label: string;
       status: "connected" | "unavailable";
       modelCount: number;
     }>;
@@ -1157,6 +1158,8 @@ export interface ModelsInfo {
     contextWindow?: number;
   }>;
   providers?: ModelCatalogStatus[];
+  /** Display names keyed by provider id. */
+  providerLabels?: Record<string, string>;
   default: string;
   /** The model Automatic resolves to, independent of any saved default. */
   automatic: string | null;
@@ -1175,6 +1178,7 @@ export interface ProviderConfigView {
 
 export interface ProviderView {
   id: string;
+  label: string;
   configurable: boolean;
   availableWithoutConfig: boolean;
   authSchema?: readonly ProviderAuthMethod[];

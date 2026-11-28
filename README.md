@@ -51,8 +51,8 @@ Pizza Bot was developed at Amazon and is released under the Apache 2.0 license.
 - **Delegate to specialists.** Agents you design, each with its own model, tools,
   and skills, run as subagents whose progress appears in the Activity panel.
 - **Bring your model provider.** Amazon Bedrock, Anthropic, Google Gemini,
-  OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper Inference,
-  TrustedRouter, LiteLLM, and Ollama are supported.
+  OpenAI, Ollama, and OpenAI-compatible gateways are supported; see
+  [Model providers](#model-providers).
 - **Keep control of consequential actions.** Human-in-the-loop approvals,
   long-term memory, file attachments, and desktop notifications are built into
   the workflow.
@@ -102,9 +102,11 @@ CLI development, desktop packages, and remote backends.
 | Terminal CLI | Scripts, terminals, and remote backends | [CLI](docs/RUNNING.md#cli) |
 | Standalone backend | Remote Electron, browsers, containers, or Linux services | [Backend guide](docs/STANDALONE_BACKEND.md) |
 
+### Model providers
+
 A running api-server needs access to at least one model provider; HTTP clients
 do not. Configure Amazon Bedrock, Anthropic, Google Gemini, OpenAI, OpenRouter,
-Requesty, Opper, UberLLM, Cheaper Inference, TrustedRouter, LiteLLM, or Ollama
+Requesty, Opper, UberLLM, Cheaper Inference, TrustedRouter, LLMTR, LiteLLM, or Ollama
 in **Settings > Providers**. Bedrock accepts an AWS profile, AWS access keys, or a
 Bedrock API key, with an optional region
 override; otherwise `AWS_REGION` or `us-west-2` is used. Bedrock combines its
@@ -123,11 +125,13 @@ supports `x-api-key` or bearer authentication. Requesty accepts a base URL
 override such as `https://router.eu.requesty.ai/v1` for its EU region. Cheaper
 Inference uses bare model ids such as `gpt-5.4-mini`. TrustedRouter exposes
 privacy presets such as `trustedrouter/zdr` alongside `vendor/model` ids and
-accepts `{"min_privacy": 2}` in **Advanced request JSON**. LiteLLM connects to a
+accepts `{"min_privacy": 2}` in **Advanced request JSON**. LLMTR is a prepaid
+OpenAI-compatible gateway at `https://llmtr.com/v1`; model ids are `vendor/model`
+values such as `qwen/qwen3.8-flash`. LiteLLM connects to a
 proxy URL (default `http://localhost:4000/v1`) and needs a key only when the
-proxy has a master key. OpenAI, OpenRouter, Requesty, Opper, UberLLM, Cheaper
-Inference, TrustedRouter, and LiteLLM take an optional **Advanced request JSON**
-that is merged into every request, for options such as `{"service_tier": "flex"}`. Select a
+proxy has a master key. OpenAI, OpenRouter, and the OpenAI-compatible gateways and proxies
+take an optional **Advanced request JSON** that is merged into every request,
+for options such as `{"service_tier": "flex"}`. Select a
 model with `PIZZA_MODEL=<provider>:<id>`. The desktop protects entered secrets
 with Electron `safeStorage`; server configuration persists only
 environment-variable references.
